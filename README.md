@@ -8,7 +8,7 @@
 - **[Introduction](#what-is-a-vastdbapi)**
 - **[Getting Started](#setting-up-getting-started)**
    - **[Requirements](#requirements)**
-   - **[Build and Install](#build-and-install-the-vastdbapi)**
+   - **[Install](#install-the-vastdbapi)**
 - **[Creating a Vastdb session](#creating-the-initial-session-with-vastdbapi)**
 - **[Supported Methods on VastdbApi](#supported-methods-on-vastdbapi)**
    - **[Schema Management](#schema-management)**
