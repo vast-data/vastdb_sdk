@@ -21,7 +21,7 @@
    - **[VastdbApi help function](#vastdbapi-help-function)**
 - **[Advanced Examples](#advanced-examples)**
    - **[Import a parquet file from S3 bucket](#import-a-parquet-file-from-s3-bucket)**
-   - **[List columns and data from a table](#list-columns-and-data-from-a-table)**
+   - **[List columns and data from a table](#list-columns-from-a-table)**
    - **[Query data with filters](#query-data-with-filters)**
    - **[Table population flow](#combined-example-with-a-few-functions)**
 - **[Interacting with Vast Catalog](#interracting-with-vast-catalog-using-vastdbapi)**
