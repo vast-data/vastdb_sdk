@@ -6,7 +6,7 @@
 ## VastdbApi - Content Overview 
 
 - **[Introduction](#what-is-a-vastdbapi)**
-- **[Getting Started](#setting-up-getting-started)**
+- **[Getting Started](#getting-started)**
    - **[Requirements](#requirements)**
    - **[Install](#install-the-vastdbapi)**
 - **[Creating a Vastdb session](#creating-the-initial-session-with-vastdbapi)**
@@ -36,13 +36,14 @@
       
   
 
+
 ## What is a VastdbApi
 
 **`VastdbApi`** is a Python based API designed for interacting with VastDB, enabling operations such as schema and table management, data querying, and transaction handling.  
 Key libraries used in this API include requests for HTTP requests, pyarrow for handling Apache Arrow data formats, and flatbuffers for efficient serialization of data structures.
 
 
-## Setting up & Getting started
+## Getting started
 
 ### Requirements
 
