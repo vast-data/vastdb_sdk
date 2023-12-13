@@ -3,7 +3,7 @@
 **NOTE**
 - Please note that this API & the documentation is currently in a pre-release stage. Until version 1.x is officially released, the API should be considered unstable.
 
-## VastdbApi - Content Overview. 
+## VastdbApi - Content Overview 
 
 - **[Introduction](#what-is-a-vastdbapi)**
 - **[Getting Started](#setting-up-getting-started)**
