@@ -58,13 +58,24 @@ Key libraries used in this API include requests for HTTP requests, pyarrow for h
   - [Creating Identity Policies](https://support.vastdata.com/hc/en-us/articles/9859958983708#UUID-c381c613-81bd-3c09-69c4-ba4dcd8e8d6d)
 
 
-### Build and Install the VastdbApi
+### Install the VastdbApi
 
 ##### `NOTE:` Currently this API is in a pre-release stage, It can be installed with test.pypi until it will be published to the official PYPI index. 
 
+#### Prepare your python env: 
+- Make sure you have python 3.7 or above
+- Recommended to have the latest pip and setuptools:
+  - `pip install --upgrade pip setuptools`
+- You will be required to install the next python packages:
+```
+pip install xmltodict aws-requests-auth flatbuffers pandas
+```
+
+#### Install vastdb package: 
 ```
 pip install -i https://test.pypi.org/simple/ vastdb
 ```
+
 
 ## Creating the initial session with VastdbApi:
 
