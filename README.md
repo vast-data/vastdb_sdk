@@ -377,6 +377,45 @@ vastdb_session = create_vastdb_session(access_key, secret_key)
 ```
   **[See more advanced examples on how to query data](#advanced-examples)**
 
+
+#### query_iterator
+- **Usage**: Iteratively execute a data query, across multiple splits and subsplits.
+   - This function is designed for efficient data retrieval from large datasets.
+   - Allowing for parallel processing and handling large volumes of data that might not fit into memory if loaded all at once.
+- **Parameters**:
+  - `bucket` (str): Name of the bucket where the table is stored.
+  - `schema` (str): Name of the schema within the bucket.
+  - `table` (str): Name of the table to perform the query on.
+  - `split` (tuple, optional): A tuple of 3 integers specifying the split configuration. It consists of (split_id, total_splits, row_groups_per_subsplit).
+     - This parameter is used to divide the query across different segments for parallel processing (default: (0, 1, 8)).
+  - num_sub_splits (int, optional): The number of subsplits within each split. (default: 1)
+  - response_row_id (bool, optional): If set to True, the query response will include a column with the internal row IDs of the table (default: False).
+  - txid (int, optional): Transaction ID for the query. If a transaction is not specified, the query will not be part of any transaction (default: 0).
+  - `filters` (dict, optional): A dictionary whose keys are column names, and values are lists of string expressions that represent filter conditions on the column.
+  - `filed_names` (list, optional): A list of column names to be returned in the output table
+
+- **Returns**:
+A generator that yields PyArrow RecordBatch objects for each subsplit in each split.
+   - Each RecordBatch contains a portion of the query result, allowing the user to process large datasets in smaller, manageable chunks.
+
+- **Example**:
+```python
+filters = {'column_name': ['eq value1', 'lt value2']}
+total_splits = 4
+num_sub_splits = 2
+
+for split_id in range(total_splits):
+    split = (split_id, total_splits, 8)  # Configure the split
+    for record_batch in vastdb_session.query_iterator(
+        'my_bucket', 'my_schema', 'my_table', split=split,
+        num_sub_splits=num_sub_splits, filters=filters
+    ):
+        # Process each record batch as needed
+        df = record_batch.to_pandas()
+        # Perform operations on DataFrame
+```
+
+
 #### `import_data`
 - **Usage**: Import data into a table.
 - **Parameters**:
