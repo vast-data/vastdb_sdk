@@ -29,14 +29,13 @@
    - **[Vast Catalog Schema Structure](#vast-catalog-schema-structure)**
    - **[Vast Catalog - Query examples with VastdbAPI](#vast-catalog-query-examples-with-vastdbapi)**
       - **[Basic counts of things](#basic-counts-of-things)**
-           - **[Parallel Pagination execution example](#simplified-example-of coun-of-elements-returned-from-parallel-execution)**
+         - **[Parallel Pagination execution example](#simplified-example-of-count-of-elements-returned-from-parallel-execution)**
       - **[Simple Filtering](#simple-filtering)**
       - **[Timestamp Filtering](#timestamp-filtering)**
       - **[Reporting](#reporting)**
       - **[Catalog Snapshots Comparisons](#catalog-snapshots-comparisons)**
       
   
-Simplified example of count of elements returned from parallel execution
 
 ## What is a VastdbApi
 
