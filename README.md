@@ -388,9 +388,9 @@ vastdb_session = create_vastdb_session(access_key, secret_key)
   - `table` (str): Name of the table to perform the query on.
   - `split` (tuple, optional): A tuple of 3 integers specifying the split configuration. It consists of (split_id, total_splits, row_groups_per_subsplit).
      - This parameter is used to divide the query across different segments for parallel processing (default: (0, 1, 8)).
-  - num_sub_splits (int, optional): The number of subsplits within each split. (default: 1)
-  - response_row_id (bool, optional): If set to True, the query response will include a column with the internal row IDs of the table (default: False).
-  - txid (int, optional): Transaction ID for the query. If a transaction is not specified, the query will not be part of any transaction (default: 0).
+  - `num_sub_splits` (int, optional): The number of subsplits within each split. (default: 1)
+  - `response_row_id` (bool, optional): If set to True, the query response will include a column with the internal row IDs of the table (default: False).
+  - `txid` (int, optional): Transaction ID for the query.
   - `filters` (dict, optional): A dictionary whose keys are column names, and values are lists of string expressions that represent filter conditions on the column.
   - `filed_names` (list, optional): A list of column names to be returned in the output table
 
