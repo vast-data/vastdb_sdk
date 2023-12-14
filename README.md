@@ -39,7 +39,7 @@
 
 ## What is a VastdbApi
 
-**`VastdbApi`** is a Python based API designed for interacting with VastDB, enabling operations such as schema and table management, data querying, and transaction handling.  
+**`VastdbApi`** is a Python based API designed for interacting with VastDB & Vast Catalog, enabling operations such as schema and table management, data querying, and transaction handling.  
 Key libraries used in this API include requests for HTTP requests, pyarrow for handling Apache Arrow data formats, and flatbuffers for efficient serialization of data structures.
 
 
@@ -61,20 +61,15 @@ Key libraries used in this API include requests for HTTP requests, pyarrow for h
 
 ### Install the VastdbApi
 
-##### `NOTE:` Currently this API is in a pre-release stage, It can be installed with test.pypi until it will be published to the official PYPI index. 
 
 #### Prepare your python env: 
 - Make sure you have python 3.7 or above
 - Recommended to have the latest pip and setuptools:
   - `pip install --upgrade pip setuptools`
-- You will be required to install the next python packages:
-```
-pip install xmltodict aws-requests-auth flatbuffers pandas
-```
 
 #### Install vastdb package: 
 ```
-pip install -i https://test.pypi.org/simple/ vastdb
+pip install vastdb
 ```
 
 
@@ -1195,4 +1190,3 @@ if difference:
 else:
     print("[INFO] No differences found")
 ```
-
