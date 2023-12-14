@@ -29,13 +29,14 @@
    - **[Vast Catalog Schema Structure](#vast-catalog-schema-structure)**
    - **[Vast Catalog - Query examples with VastdbAPI](#vast-catalog-query-examples-with-vastdbapi)**
       - **[Basic counts of things](#basic-counts-of-things)**
+           - **[Parallel Pagination execution example](#simplified-example-of coun-of-elements-returned-from-parallel-execution)**
       - **[Simple Filtering](#simple-filtering)**
       - **[Timestamp Filtering](#timestamp-filtering)**
       - **[Reporting](#reporting)**
       - **[Catalog Snapshots Comparisons](#catalog-snapshots-comparisons)**
       
   
-
+Simplified example of count of elements returned from parallel execution
 
 ## What is a VastdbApi
 
@@ -935,6 +936,36 @@ print(f"Number of database tables: {table_count}")
 distinct_elements = df['element_type'].unique()
 print("Distinct element types on the system:")
 print(distinct_elements)
+```
+
+### Simplified example of count of elements returned from parallel execution
+
+   - The `query_iterator` iteratively executes a query on a database table, returning results in chunks as PyArrow RecordBatches, enabling efficient handling of large datasets by processing data in smaller, manageable segments.
+   - Simplified example of count of elements returned from parallel execution.
+
+```python
+def query_with_splits_and_sub_splits(session, bucket, schema, table, field_names, total_splits, num_sub_splits):
+    elements_count = 0
+
+    for split_id in range(total_splits):
+        split = (split_id, total_splits, 8)
+
+        for record_batch in session.query_iterator(bucket, schema, table, split=split, num_sub_splits=num_sub_splits, field_names=field_names):
+            elements_count += len(record_batch)
+    
+    return elements_count
+
+# Query Parameters
+field_names = ['element_type']  # Only need the element_type field for counting
+total_splits = 8
+num_sub_splits = 8
+
+# Perform the query
+total_elements = query_with_splits_and_sub_splits(
+    vastdb_session, 'vast-big-catalog-bucket', 'vast_big_catalog_schema', 'vast_big_catalog_table', field_names, total_splits, num_sub_splits
+)
+
+print(f"Total elements in the catalog: {total_elements}")
 ```
 
 
