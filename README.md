@@ -100,6 +100,7 @@ vastdb_session = create_vastdb_session(access_key, secret_key)
 ### Schema Management
 
 #### `create_schema`
+
 - **Usage**: Create a new schema in a bucket.
 - **Parameters**:
   - `bucket` (str): Name of the bucket.
@@ -113,6 +114,7 @@ vastdb_session = create_vastdb_session(access_key, secret_key)
 ```
 
 #### `list_schema`
+
 - **Usage**: List all schemas in a bucket.
 - **Parameters**:
   - `bucket` (str): Name of the bucket.
@@ -130,6 +132,7 @@ vastdb_session = create_vastdb_session(access_key, secret_key)
 ```
 
 #### `alter_schema`
+
 - **Usage**: Modify an existing schemain a bucket.
 - **Parameters**:
   - `bucket` (str): Name of the bucket.
@@ -144,6 +147,7 @@ vastdb_session = create_vastdb_session(access_key, secret_key)
 ```
 
 #### `drop_schema`
+
 - **Usage**: Delete a schema in a bucket.
 - **Parameters**:
   - `bucket` (str): Name of the bucket.
@@ -161,6 +165,7 @@ vastdb_session = create_vastdb_session(access_key, secret_key)
 
 
 #### `create_table`
+
 - **Usage**: Create a new table in a specified schema.
 - **Parameters**:
   - `bucket` (str): Name of the bucket.
@@ -175,6 +180,7 @@ vastdb_session = create_vastdb_session(access_key, secret_key)
 ```
 
 #### `list_tables`
+
 - **Usage**: List all tables in a schema.
 - **Parameters**:
   - `bucket` (str): Name of the bucket.
@@ -192,6 +198,7 @@ vastdb_session = create_vastdb_session(access_key, secret_key)
 ```
 
 #### `alter_table`
+
 - **Usage**: Modify an existing table.
 - **Parameters**:
   - `bucket` (str): Name of the bucket.
@@ -207,6 +214,7 @@ vastdb_session = create_vastdb_session(access_key, secret_key)
 ```
 
 #### `drop_table`
+
 - **Usage**: Delete a table from a schema.
 - **Parameters**:
   - `bucket` (str): Name of the bucket.
@@ -220,6 +228,7 @@ vastdb_session = create_vastdb_session(access_key, secret_key)
 ```
 
 #### `get_table_stats`
+
 - **Usage**: Obtain statistics about a specific table.
 - **Parameters**:
   - `bucket` (str): Name of the bucket.
@@ -236,6 +245,7 @@ vastdb_session = create_vastdb_session(access_key, secret_key)
 ### Column Management
 
 #### `add_columns`
+
 - **Usage**: Add new columns to an existing table.
 - **Parameters**:
   - `bucket` (str): Name of the bucket.
@@ -251,6 +261,7 @@ vastdb_session = create_vastdb_session(access_key, secret_key)
 ```
 
 #### `list_columns`
+
 - **Usage**: List all columns of a table.
 - **Parameters**:
   - `bucket` (str): The bucket containing the table.
@@ -267,6 +278,7 @@ vastdb_session = create_vastdb_session(access_key, secret_key)
 ```
 
 #### `alter_column`
+
 - **Usage**: Modify properties of a column in a table.
 - **Parameters**:
   - `bucket` (str): The bucket to retrieve data from.
@@ -285,6 +297,7 @@ vastdb_session = create_vastdb_session(access_key, secret_key)
 ```
 
 #### `drop_columns`
+
 - **Usage**: Remove columns from a table.
 - **Parameters**:
   - `bucket` (str): Name of the bucket.
@@ -302,6 +315,7 @@ vastdb_session = create_vastdb_session(access_key, secret_key)
 ### Transaction Management
 
 #### `begin_transaction`
+
 - **Usage**: Initiate a new transaction.
 - **Parameters**:
   - `tenant_id` (int, optional): Tenant ID (default is `0`).
@@ -311,6 +325,7 @@ vastdb_session = create_vastdb_session(access_key, secret_key)
 ```
 
 #### `commit_transaction`
+
 - **Usage**: Commit an ongoing transaction.
 - **Parameters**:
   - `txid` (int): Transaction ID.
@@ -322,6 +337,7 @@ vastdb_session = create_vastdb_session(access_key, secret_key)
 ```
 
 #### `rollback_transaction`
+
 - **Usage**: Rollback a transaction.
 - **Parameters**:
   - `txid` (int): Transaction ID.
@@ -335,6 +351,7 @@ vastdb_session = create_vastdb_session(access_key, secret_key)
 ### Data Querying and Manipulation
 
 #### `query`
+
 - **Usage**: Execute a data query on a specified table within a bucket and schema. This function allows for complex queries, including filters and projections, on the table data.
 - **Parameters**:
   - `bucket` (str): Name of the bucket.
@@ -378,7 +395,8 @@ vastdb_session = create_vastdb_session(access_key, secret_key)
   **[See more advanced examples on how to query data](#advanced-examples)**
 
 
-#### query_iterator
+#### `query_iterator`
+
 - **Usage**: Iteratively execute a data query, across multiple splits and subsplits.
    - This function is designed for efficient data retrieval from large datasets.
    - Allowing for parallel processing and handling large volumes of data that might not fit into memory if loaded all at once.
@@ -417,6 +435,7 @@ for split_id in range(total_splits):
 
 
 #### `import_data`
+
 - **Usage**: Import data into a table.
 - **Parameters**:
   - `bucket` (str): Name of the bucket.
@@ -438,6 +457,7 @@ for split_id in range(total_splits):
 
 
 #### `insert`
+
 - **Usage**: Insert rows into a table.
 - **Parameters**:
   - `bucket` (str): Name of the bucket.
@@ -452,6 +472,7 @@ for split_id in range(total_splits):
 ```
 
 #### `update_rows`
+
 - **Usage**: Update existing rows in a table.
 - **Parameters**:
   - `bucket` (str): Name of the bucket.
@@ -467,6 +488,7 @@ for split_id in range(total_splits):
 ```
 
 #### `delete_rows`
+
 - **Usage**: Delete specific rows from a table.
 - **Parameters**:
   - `bucket` (str): Name of the bucket.
@@ -484,6 +506,7 @@ for split_id in range(total_splits):
 ### Semi-Sorted Projections Management
 
 #### `create_projection`
+
 - **Usage**: Create a projection
 - **Parameters**:
   - `bucket` (str): Name of the bucket.
@@ -500,6 +523,7 @@ for split_id in range(total_splits):
 ```
 
 #### `alter_projection`
+
 - **Usage**: Alter an existing projection
 - **Parameters**:
   - `bucket` (str): The bucket containing the table.
@@ -517,6 +541,7 @@ for split_id in range(total_splits):
 
 
 #### `drop_projection`
+
 - **Usage**: Drop a projection
 - **Parameters**:
   - `bucket` (str): Name of the bucket.
@@ -531,6 +556,7 @@ for split_id in range(total_splits):
 ```
 
 #### `list_projections`
+
 - **Usage**: list existing projections on a specific table
 - **Parameters**:
   - `bucket` (str): The bucket to retrieve data from.
@@ -550,6 +576,7 @@ for split_id in range(total_splits):
 ```
 
 #### `list_projection_columns`
+
 - **Usage**: list columns of a specific projection on a specific table
 - **Parameters**:
   - `bucket` (str): The bucket to retrieve data from.
@@ -572,6 +599,7 @@ for split_id in range(total_splits):
 ### Snapshots Management
 
 #### `list_snapshots`
+
 - **Usage**: List all snapshots in a bucket.
 - **Parameters**:
   - `bucket` (str): Name of the bucket.
@@ -583,6 +611,7 @@ for split_id in range(total_splits):
 ```
 
 ## VastdbApi help function
+
 - **Usage**: List all classes and functions in the vastdb_api
 - **Example**:
 ```python
