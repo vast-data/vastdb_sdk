@@ -48,7 +48,7 @@ Key libraries used in this API include requests for HTTP requests, pyarrow for h
 ### Requirements
 
 - Linux / Windows / MacOS client server connected on data access with VAST cluster
-- Virtual IP pool configured with DNS service
+- Virtual IP pool configured with DNS service / List of all availble VIP's
   - [Network Access through Virtual IPs](https://support.vastdata.com/hc/en-us/articles/5140602978844-Configuring-Network-Access)
 - VIP DNS name - for reaching all availble Cnodes in the API requests
   - [Configuring the VAST Cluster DNS Service](https://support.vastdata.com/hc/en-us/articles/9859957831452-Configuring-the-VAST-Cluster-DNS-Service)
@@ -62,12 +62,12 @@ Key libraries used in this API include requests for HTTP requests, pyarrow for h
 ### Install the VastdbApi
 
 
-#### Prepare your python env: 
+#### Prepare your python env
 - Make sure you have python 3.7 or above
 - Recommended to have the latest pip and setuptools:
   - `pip install --upgrade pip setuptools`
 
-#### Install vastdb package: 
+#### Install vastdb package 
 ```
 pip install vastdb
 ```
@@ -75,13 +75,33 @@ pip install vastdb
 
 ## Creating the initial session with VastdbApi:
 
+
+### Understending Multithreaded API functions:
+
+- Multithreading in the VastDB API is by default, if a range of VIP's was provided.
+
+##### **Session Creation with Multiple VIPs:**
+
+- When initializing the VastDB session (VastdbApi class), use the `host` parameter to specify a range of VIP addresses or a list.
+  - Range of VIP's between 172.25.54.1 to 172.25.54.16: `172.25.54.1:172.25.54.16`
+  - A list of VIP's: `172.25.54.1,172.25.54.2`
+
+- This format automatically expands to include each VIP in the specified range, which may be disributed on different Cnodes in your cluster.
+- Automatic Load Balancing: Each VIP address(or DNS name) corresponds to a separate thread, VastDB API automatically distributes the workload across these threads.
+- Group of threads operates on different Cnodes, allowing parallel processing and faster execution.
+- Multithreaded setup enhances the performance of **[query](#query)**, **[query_iterator](#query_iterator)**, and **[insert](#insert)** functions.
+
+
+### Initializing a session with VastdbApi:
+
+
 ```python
 from vastdb import vastdb_api
 import pyarrow as pa
 from vastdb.vastdb_api import VastdbApi
 
 def create_vastdb_session(access_key, secret_key):
-    return VastdbApi(host='VAST_VIP_POOL_DNS_NAME', access_key=access_key, secret_key=secret_key)
+    return VastdbApi(host='172.25.54.1:172.16.54.16', access_key=access_key, secret_key=secret_key)
 
 
 access_key='D8UDFDF...'
@@ -352,12 +372,10 @@ vastdb_session = create_vastdb_session(access_key, secret_key)
   - `bucket` (str): Name of the bucket.
   - `schema` (str): Name of the schema.
   - `table` (str): Name of the table to query.
-  - `split` (tuple, optional): The tuple consists of 3 integers: split-id, total-splits, row-groups-per-subsplit (default: (0,1,8))
   - `num_sub_splits` (int, optional): Number of sub-splits for the query (default: `1`).
   - `response_row_id` (bool, optional): Whether to include row IDs in the response (default: `False`).
   - `txid` (int, optional): Transaction ID (default is `0`).
   - `limit` (int, optional): Limit on the number of rows to return (default: `0`).
-  - `limit_per_subsplit` (int, optional): Limit the number of rows per subsplit (default: 131072)
   - `filters` (dict, optional): A dictionary whose keys are column names, and values are lists of string expressions that represent filter conditions on the column.
   - `filed_names` (list, optional): A list of column names to be returned in the output table
 
@@ -384,7 +402,7 @@ vastdb_session = create_vastdb_session(access_key, secret_key)
   field_names = ['Citizen_Age', 'Citizen_Name', 'Is_married']
   filters = {'Citizen_Age': ['gt 38']}
 
-  table = vastdb_session.query(bucket_name, schema_name, table_name, filters=filters, field_names=field_names, limit=5)
+  table = vastdb_session.query(bucket_name, schema_name, table_name, filters=filters, field_names=field_names, limit=5, num_sub_splits=10)
   print(table)
 ```
   **[See more advanced examples on how to query data](#advanced-examples)**
@@ -399,33 +417,26 @@ vastdb_session = create_vastdb_session(access_key, secret_key)
   - `bucket` (str): Name of the bucket where the table is stored.
   - `schema` (str): Name of the schema within the bucket.
   - `table` (str): Name of the table to perform the query on.
-  - `split` (tuple, optional): A tuple of 3 integers specifying the split configuration. It consists of (split_id, total_splits, row_groups_per_subsplit).
-     - This parameter is used to divide the query across different segments for parallel processing (default: (0, 1, 8)).
   - `num_sub_splits` (int, optional): The number of subsplits within each split. (default: 1)
   - `response_row_id` (bool, optional): If set to True, the query response will include a column with the internal row IDs of the table (default: False).
   - `txid` (int, optional): Transaction ID for the query.
   - `filters` (dict, optional): A dictionary whose keys are column names, and values are lists of string expressions that represent filter conditions on the column.
   - `filed_names` (list, optional): A list of column names to be returned in the output table
+  - `record_batch` - PyArrow chunk objects for each subsplit
 
 - **Returns**:
-A generator that yields PyArrow RecordBatch objects for each subsplit in each split.
-   - Each RecordBatch contains a portion of the query result, allowing the user to process large datasets in smaller, manageable chunks.
+A generator that yields PyArrow `record_batch` objects for each subsplit.
+   - Each `record_batch` contains a portion of the query result, allowing the user to process large datasets in smaller, manageable chunks.
 
 - **Example**:
 ```python
 filters = {'column_name': ['eq value1', 'lt value2']}
-total_splits = 4
-num_sub_splits = 2
 
-for split_id in range(total_splits):
-    split = (split_id, total_splits, 8)  # Configure the split
-    for record_batch in vastdb_session.query_iterator(
-        'my_bucket', 'my_schema', 'my_table', split=split,
-        num_sub_splits=num_sub_splits, filters=filters
-    ):
+for record_batch in vastdb_session.query_iterator('my_bucket', 'my_schema', 'my_table', num_sub_splits=8, filters=filters):
         # Process each record batch as needed
         df = record_batch.to_pandas()
         # Perform operations on DataFrame
+        print(df)
 ```
 
 
@@ -459,6 +470,8 @@ for split_id in range(total_splits):
   - `schema` (str): Name of the schema.
   - `table` (str): Name of the table.
   - `rows` (dict): Array of cell values to insert. Dict-key are columns & Dict-values are values, i.e `{'column': ['value', 'value']}`
+  - `rows_per_insert`: (int, optional) Split the operation so that each insert command will be limited to this value. default: None (will be selected
+  automatically)
   - `txid` (int, optional): Transaction ID.
   - `tenant_id` (int, optional): Tenant ID (default is `0`).  
 - **Example**:
@@ -892,7 +905,7 @@ print(df)
 
 ```python
 field_names = ['element_type'] # Only need the element_type field for counting
-table = vastdb_session.query('vast-big-catalog-bucket', 'vast_big_catalog_schema', 'vast_big_catalog_table', field_names=field_names)
+table = vastdb_session.query('vast-big-catalog-bucket', 'vast_big_catalog_schema', 'vast_big_catalog_table', field_names=field_names, num_sub_splits=8)
 df = table.to_pandas()
 ```
 
@@ -938,27 +951,21 @@ print(distinct_elements)
    - Simplified example of count of elements returned from parallel execution.
 
 ```python
-def query_with_splits_and_sub_splits(session, bucket, schema, table, field_names, total_splits, num_sub_splits):
+def query_and_count_elements(session, bucket, schema, table, field_names):
     elements_count = 0
 
-    for split_id in range(total_splits):
-        split = (split_id, total_splits, 8)
+    for record_batch in session.query_iterator(bucket, schema, table, field_names=field_names, num_sub_splits=8):
+        elements_count += len(record_batch)
 
-        for record_batch in session.query_iterator(bucket, schema, table, split=split, num_sub_splits=num_sub_splits, field_names=field_names):
-            elements_count += len(record_batch)
-    
     return elements_count
 
 # Query Parameters
 field_names = ['element_type']  # Only need the element_type field for counting
-total_splits = 8
-num_sub_splits = 8
 
 # Perform the query
-total_elements = query_with_splits_and_sub_splits(
-    vastdb_session, 'vast-big-catalog-bucket', 'vast_big_catalog_schema', 'vast_big_catalog_table', field_names, total_splits, num_sub_splits
+total_elements = query_and_count_elements(
+    vastdb_session, 'vast-big-catalog-bucket', 'vast_big_catalog_schema', 'vast_big_catalog_table', field_names
 )
-
 print(f"Total elements in the catalog: {total_elements}")
 ```
 
@@ -984,7 +991,8 @@ filters = {
 
 field_names = ['creation_time', 'uid', 'owner_name', 'size']
 
-table = vastdb_session.query('vast-big-catalog-bucket', 'vast_big_catalog_schema', 'vast_big_catalog_table', filters=filters, field_names=field_names)
+table = vastdb_session.query('vast-big-catalog-bucket', 'vast_big_catalog_schema', 'vast_big_catalog_table', filters=filters, field_names=field_names, num_sub_splits=8)
+
 df = table.to_pandas()
 print(df)
 ```
@@ -997,7 +1005,7 @@ filters = {
     'element_type': ['eq FILE', 'eq TABLE', 'eq DIR'],
     'uid': ['eq 500', 'eq 1000']
 }
-table = vastdb_session.query('vast-big-catalog-bucket', 'vast_big_catalog_schema', 'vast_big_catalog_table', filters=filters, field_names=field_names)
+table = vastdb_session.query('vast-big-catalog-bucket', 'vast_big_catalog_schema', 'vast_big_catalog_table', filters=filters, field_names=field_names, num_sub_splits=8)
 df = table.to_pandas()
 print(df)
 ```
@@ -1010,7 +1018,7 @@ filters = {
     'uid': ['eq 1000', 'eq 555'],
     'extension': ['eq log', 'eq ldb']  # looking for log and ldb files
 }
-table = vastdb_session.query('vast-big-catalog-bucket', 'vast_big_catalog_schema', 'vast_big_catalog_table', filters=filters, field_names=field_names)
+table = vastdb_session.query('vast-big-catalog-bucket', 'vast_big_catalog_schema', 'vast_big_catalog_table', filters=filters, field_names=field_names, num_sub_splits=8)
 df = table.to_pandas()
 print(df)
 ```
@@ -1023,7 +1031,7 @@ filters = {
     'element_type': ['eq FILE'],
     'size': ['gt 50000', 'lt 1000000']  # size between 50 KB and 1 MB
 }
-table = vastdb_session.query('vast-big-catalog-bucket', 'vast_big_catalog_schema', 'vast_big_catalog_table', filters=filters, field_names=field_names)
+table = vastdb_session.query('vast-big-catalog-bucket', 'vast_big_catalog_schema', 'vast_big_catalog_table', filters=filters, field_names=field_names, num_sub_splits=8)
 df = table.to_pandas()
 print(df)
 ```
@@ -1037,7 +1045,7 @@ filters = {
     'element_type': ['eq TABLE'],
     'size': ['gt 10000000']  # greater than 10 MB
 }
-table = vastdb_session.query('vast-big-catalog-bucket', 'vast_big_catalog_schema', 'vast_big_catalog_table', filters=filters, field_names=field_names)
+table = vastdb_session.query('vast-big-catalog-bucket', 'vast_big_catalog_schema', 'vast_big_catalog_table', filters=filters, field_names=field_names, num_sub_splits=8)
 df = table.to_pandas()
 print(df)
 ```
@@ -1059,7 +1067,7 @@ timestamp_birthdate_int = int(timestamp_birthdate.timestamp())
 # Query the database
 field_names = ['creation_time', 'parent_path', 'name']
 filters = {'creation_time': [f'gt {timestamp_birthdate_int}']}
-table = vastdb_session.query('vast-big-catalog-bucket', 'vast_big_catalog_schema', 'vast_big_catalog_table', filters=filters, field_names=field_names)
+table = vastdb_session.query('vast-big-catalog-bucket', 'vast_big_catalog_schema', 'vast_big_catalog_table', filters=filters, field_names=field_names, num_sub_splits=8)
 df = table.to_pandas()
 
 # Filter and concatenate paths
@@ -1090,7 +1098,7 @@ filters = {
     'uid': ['eq 555'],
     'element_type': ['eq FILE']
 }
-table = vastdb_session.query('vast-big-catalog-bucket', 'vast_big_catalog_schema', 'vast_big_catalog_table', filters=filters, field_names=field_names)
+table = vastdb_session.query('vast-big-catalog-bucket', 'vast_big_catalog_schema', 'vast_big_catalog_table', filters=filters, field_names=field_names, num_sub_splits=8)
 df = table.to_pandas()
 
 # Check if DataFrame is empty
@@ -1132,7 +1140,7 @@ filters = {
 }
 field_names = ['owner_name', 'used', 'size', 'creation_time', 'atime']
 
-table = vastdb_session.query('vast-big-catalog-bucket', 'vast_big_catalog_schema', 'vast_big_catalog_table', filters=filters, field_names=field_names)
+table = vastdb_session.query('vast-big-catalog-bucket', 'vast_big_catalog_schema', 'vast_big_catalog_table', filters=filters, field_names=field_names, num_sub_splits=8)
 df = table.to_pandas()
 pd.options.display.max_columns = None
 
@@ -1164,7 +1172,7 @@ display(aggregated_data)
 
 ```python
 def query_table(schema):
-    table = vastdb_session.query('vast-big-catalog-bucket', schema, 'vast_big_catalog_table', filters=filters)
+    table = vastdb_session.query('vast-big-catalog-bucket', schema, 'vast_big_catalog_table', filters=filters, num_sub_splits=8)
     df = table.to_pandas()
     df['full_path'] = df['parent_path'] + df['name']
     return set(df['full_path'])

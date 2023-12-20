@@ -6,7 +6,11 @@ from datetime import datetime
 from enum import Enum
 from typing import List, Union, Optional, Iterator
 import xmltodict
-import copy
+import concurrent
+import threading
+import queue
+import math
+import socket
 
 import flatbuffers
 import pyarrow as pa
@@ -632,9 +636,52 @@ def serialize_record_batch(batch):
         writer.write(batch)
     return sink.getvalue()
 
+def generate_ip_range(ip_range_str):
+    start, end = ip_range_str.split(':')
+    start_parts = start.split('.')
+    start_last_part = int(start_parts[-1])
+    end_parts = end.split('.')
+    end_last_part = int(end_parts[-1])
+    if start_last_part>=end_last_part or True in [start_parts[i] != end_parts[i] for i in range(3)]:
+        raise ValueError(f'illegal ip range {ip_range_str}')
+    num_ips = 1 + end_last_part - start_last_part
+    ips = ['.'.join(start_parts[:-1] + [str(start_last_part + i)]) for i in range(num_ips)]
+    return ips
+
+def parse_executor_hosts(host):
+        executor_hosts_parsed = host.split(',')
+        executor_hosts_parsed = [host.strip() for host in executor_hosts_parsed]
+        executor_hosts = []
+        for executor_host in executor_hosts_parsed:
+            is_ip_range=False
+            if ':' in executor_host:
+                try:
+                    socket.inet_aton(executor_host.split(':')[0])
+                    socket.inet_aton(executor_host.split(':')[1])
+                    is_ip_range = True
+                except:
+                    pass
+            if is_ip_range:
+                executor_hosts.extend(generate_ip_range(executor_host))
+            else:
+                executor_hosts.append(executor_host)
+        return executor_hosts
+
 class VastdbApi:
     def __init__(self, host, access_key, secret_key, username=None, password=None, port=None,
                  secure=False, auth_type=AuthType.SIGV4):
+        executor_hosts = parse_executor_hosts(host)
+        host = executor_hosts[0]
+        self.host = host
+        self.access_key = access_key
+        self.secret_key = secret_key
+        self.username = username
+        self.password = password
+        self.port = port
+        self.secure = secure
+        self.auth_type = auth_type
+        self.executor_hosts = executor_hosts
+
         username = username or ''
         password = password or ''
         if not port:
@@ -1198,7 +1245,6 @@ class VastdbApi:
                                data=params, headers=headers, stream=True)
         return self._check_res(res, "query_data", expected_retvals)
 
-
     def _list_table_columns(self, bucket, schema, table, filters=None, field_names=None):
         # build a list of the queried column names
         queried_columns = []
@@ -1229,7 +1275,6 @@ class VastdbApi:
                 queried_columns.append(column)
 
         # check that all queried column names are in the table
-        _logger.info(f"_list_table_columns: all_column_names={all_column_names} filters={filters} field_names={field_names}")
         if filters:
             for filter_column_name in filters.keys():
                 if filter_column_name not in all_column_names:
@@ -1238,7 +1283,7 @@ class VastdbApi:
             for field_name in field_names:
                 if field_name not in all_column_names:
                     raise ValueError((f'field name: {field_name} does not appear in the table'))
-        return queried_columns
+        return list(queried_columns)
 
     def _begin_tx_if_necessary(self, txid):
         if not txid:
@@ -1250,12 +1295,19 @@ class VastdbApi:
 
         return txid, created_txid
 
-    def _prepare_query(self, bucket, schema, table, num_sub_splits, filters, field_names):
-            queried_columns = self._list_table_columns(bucket, schema, table, filters, field_names)
+    def _prepare_query(self, bucket, schema, table, num_sub_splits, filters=None, field_names=None, queried_columns=None):
+            if not queried_columns:
+                queried_columns = self._list_table_columns(bucket, schema, table, filters, field_names)
             arrow_schema = pa.schema([(column[0], column[1]) for column in queried_columns])
             query_data_request = build_query_data_request(schema=arrow_schema, filters=filters, field_names=field_names)
-            start_row_ids = {i:0 for i in range(num_sub_splits)}
-            return queried_columns, arrow_schema, query_data_request, start_row_ids
+            if self.executor_hosts:
+                executor_hosts = self.executor_hosts
+            else:
+                executor_hosts = [self.host]
+            executor_sessions = [VastdbApi(executor_hosts[i], self.access_key, self.secret_key, self.username,
+                                           self.password, self.port, self.secure, self.auth_type) for i in range(len(executor_hosts))]
+
+            return queried_columns, arrow_schema, query_data_request, executor_sessions
 
     def _more_pages_exist(self, start_row_ids):
         for row_id in start_row_ids.values():
@@ -1269,9 +1321,9 @@ class VastdbApi:
                               num_sub_splits=num_sub_splits, response_row_id=response_row_id, txid=txid,
                               limit_rows=limit_rows, sub_split_start_row_ids=sub_split_start_row_ids)
         start_row_ids = {}
-        subsplit_tables = parse_query_data_response(res.raw, query_data_request.response_schema,
+        sub_split_tables = parse_query_data_response(res.raw, query_data_request.response_schema,
                                                     start_row_ids=start_row_ids)
-        table_page = pa.concat_tables(subsplit_tables)
+        table_page = pa.concat_tables(sub_split_tables)
         _logger.info("query_page: table_page num_rows=%s start_row_ids len=%s",
                      len(table_page), len(start_row_ids))
 
@@ -1282,14 +1334,14 @@ class VastdbApi:
         res = self.query_data(bucket=bucket, schema=schema, table=table, params=query_data_request.serialized, split=split,
                               num_sub_splits=num_sub_splits, response_row_id=response_row_id, txid=txid,
                               limit_rows=limit_rows, sub_split_start_row_ids=start_row_ids.items())
-        for subsplit_table in parse_query_data_response(res.raw, query_data_request.response_schema,
+        for sub_split_table in parse_query_data_response(res.raw, query_data_request.response_schema,
                                                         start_row_ids=start_row_ids):
-            for record_batch in subsplit_table.to_batches():
+            for record_batch in sub_split_table.to_batches():
                 yield record_batch
         _logger.info(f"query_page_iterator: start_row_ids={start_row_ids}")
 
-    def query_iterator(self, bucket, schema, table, split=(0, 1, 8), num_sub_splits=1, response_row_id=False,
-                       txid=0, limit_per_subsplit=128*1024, filters=None, field_names=None):
+    def query_iterator(self, bucket, schema, table, num_sub_splits=1, num_row_groups_per_sub_split=8,
+                       response_row_id=False, txid=0, limit_per_sub_split=128*1024, filters=None, field_names=None):
         """
         query rows into a table.
 
@@ -1301,29 +1353,29 @@ class VastdbApi:
             The schema of the table.
         table : string
             The table name.
-        split : tuple
-            The tuple consists of 3 integers: (split id, total splits, row groups per subsplit).
-            Splits allow parallelization of query on multiple sessions, for example a session per
-            cnode
-            default: (0,1,8)
         num_sub_splits : integer
-            The number of subsplits to use per split. Sub-splits define the level of parallelism per
-            single execution of a split inside a cnode.
+            The number of sub_splits per split - determines the parallelism inside a VastDB compute node
             default: 1
+        num_row_groups_per_sub_split : integer
+            The number of consecutive row groups per sub_split. Each row group consists of 64K row ids.
+            default: 8
         response_row_id : boolean
             Return a column with the internal row ids of the table
             default: False
         txid : integer
             A transaction id. The transaction may be initiated before the query, and if not, the query will initiate it
-        limit_per_subsplit : integer
-            Limit the number of rows per subsplit
+            default: 0 (will be created by the api)
+        limit_per_sub_split : integer
+            Limit the number of rows from a single sub_split for a single rpc
             default:131072
         filters : dict
             A dictionary whose keys are column names, and values are lists of string expressions that represent
             filter conditions on the column. AND is applied on the conditions. The condition formats are:
             'column_name eq some_value'
+            default: None
         filters : dict
             A list of column names to be returned in the output table
+            default: None
 
         Returns
         -------
@@ -1345,31 +1397,121 @@ class VastdbApi:
 
         #create a transaction if necessary
         txid, created_txid = self._begin_tx_if_necessary(txid)
+        executor_sessions = []
 
         try:
             # prepare query
-            queried_columns, arrow_schema, query_data_request, start_row_ids = \
+            queried_columns, arrow_schema, query_data_request, executor_sessions = \
                 self._prepare_query(bucket, schema, table, num_sub_splits, filters, field_names)
 
-            while self._more_pages_exist(start_row_ids):
-                for record_batch in self._query_page_iterator(bucket=bucket, schema=schema, table=table, query_data_request=query_data_request,
-                                                             split=split, num_sub_splits=num_sub_splits, response_row_id=response_row_id,
-                                                             txid=txid, limit_rows=limit_per_subsplit,
-                                                             start_row_ids=start_row_ids):
-                    yield record_batch
+            # define the per split threaded query func
+            def query_iterator_split_id(self, split_id):
+                _logger.info(f"query_iterator_split_id: split_id={split_id}")
+                try:
+                    start_row_ids = {i:0 for i in range(num_sub_splits)}
+                    session = executor_sessions[split_id]
+                    while not next_sems[split_id].acquire(timeout=1):
+                        # check if killed externally
+                        if killall:
+                            raise RuntimeError(f'query_iterator_split_id: split_id {split_id} received killall')
+
+                    while self._more_pages_exist(start_row_ids):
+                        for record_batch in session._query_page_iterator(bucket=bucket, schema=schema, table=table, query_data_request=query_data_request,
+                                                                         split=(split_id, num_splits, num_row_groups_per_sub_split),
+                                                                         num_sub_splits=num_sub_splits, response_row_id=response_row_id,
+                                                                         txid=txid, limit_rows=limit_per_sub_split,
+                                                                         start_row_ids=start_row_ids):
+                            output_queue.put((split_id, record_batch))
+                            while not next_sems[split_id].acquire(timeout=1): # wait for the main thread to request the next record batch
+                                if killall:
+                                    raise RuntimeError(f'split_id {split_id} received killall')
+                    # end of split
+                    output_queue.put((split_id,None))
+
+                except Exception as e:
+                    _logger.exception('query_iterator_split_id: exception occurred')
+                    try:
+                        self.rollback_transaction(txid)
+                    except:
+                        _logger.exception(f'failed to rollback txid {txid}')
+                    error_queue.put(None)
+                    raise e
+
+            # kickoff executors
+            num_splits = len(executor_sessions)
+            output_queue = queue.Queue()
+            error_queue = queue.Queue()
+            next_sems = [threading.Semaphore(value=1) for i in range(num_splits)]
+            killall = False
+            with concurrent.futures.ThreadPoolExecutor(max_workers=num_splits) as executor:
+                # start executors
+                futures = []
+                for i in range(num_splits):
+                    futures.append(executor.submit(query_iterator_split_id, self, i))
+
+                # receive outputs and yield them
+                done_count = 0
+                while done_count < num_splits:
+                    # check for errors
+                    try:
+                        error_queue.get(block=False)
+                        _logger.error('received error from a thread')
+                        killall = True
+                        # wait for all executors to complete
+                        for future in concurrent.futures.as_completed(futures):
+                            try:
+                                future.result() # trigger an exception if occurred in any thread
+                            except Exception:
+                                _logger.exception('exception occurred')
+                        raise RuntimeError('received error from a thread')
+                    except queue.Empty:
+                        pass
+
+                    # try to get a value from the output queue
+                    try:
+                        (split_id, record_batch) = output_queue.get(timeout=1)
+                    except queue.Empty:
+                        continue
+
+                    if record_batch:
+                        # signal to the thread to read the next record batch and yield the current
+                        next_sems[split_id].release()
+                        yield record_batch
+                    else:
+                        done_count+=1
+
+                # wait for all executors to complete
+                for future in concurrent.futures.as_completed(futures):
+                    try:
+                        future.result() # trigger an exception if occurred in any thread
+                    except Exception:
+                        _logger.exception('exception occurred')
 
             # commit if needed
             if created_txid:
                 self.commit_transaction(txid)
 
         except Exception as e:
-            # rollback if needed
-            if created_txid:
+            _logger.exception('exception occurred')
+            try:
                 self.rollback_transaction(txid)
+            except:
+                _logger.exception(f'failed to rollback txid {txid}')
             raise e
 
-    def query(self, bucket, schema, table, split=(0, 1, 8), num_sub_splits=1, response_row_id=False,
-              txid=0, limit=0, limit_per_subsplit=131072, filters=None, field_names=None, paginated_response=False):
+        finally:
+            killall = True
+            for session in executor_sessions:
+                try:
+                    session.session.close()
+                except Exception:
+                    _logger.exception(f'failed to close session {session}')
+
+
+
+    def query(self, bucket, schema, table, num_sub_splits=1, num_row_groups_per_sub_split=8,
+              response_row_id=False, txid=0, limit=0, limit_per_sub_split=131072, filters=None, field_names=None,
+              queried_columns=None):
         """
         query rows into a table.
 
@@ -1381,33 +1523,36 @@ class VastdbApi:
             The schema of the table.
         table : string
             The table name.
-        split : tuple
-            The tuple consists of 3 integers: (split id, total splits, row groups per subsplit).
-            Splits allow parallelization of query on multiple sessions, for example a session per
-            cnode
-            default: (0,1,8)
         num_sub_splits : integer
-            The number of subsplits to use per split. Sub-splits define the level of parallelism per
-            single execution of a split inside a cnode.
+            The number of sub_splits per split - determines the parallelism inside a VastDB compute node
             default: 1
+        num_row_groups_per_sub_split : integer
+            The number of consecutive row groups per sub_split. Each row group consists of 64K row ids.
+            default: 8
         response_row_id : boolean
             Return a column with the internal row ids of the table
             default: False
         txid : integer
             A transaction id. The transaction may be initiated before the query, and be used to provide
             multiple ACID operations
+            default: 0 (will be created by the api)
         limit : integer
             Limit the number of rows in the response
             default: 0 (no limit)
-        limit_per_subsplit : integer
-            Limit the number of rows per subsplit
+        limit_per_sub_split : integer
+            Limit the number of rows from a single sub_split for a single rpc
             default:131072
         filters : dict
             A dictionary whose keys are column names, and values are lists of string expressions that represent
             filter conditions on the column. AND is applied on the conditions. The condition formats are:
             'column_name eq some_value'
+            default: None
         filters : dict
             A list of column names to be returned in the output table
+            default: None
+        queried_columns: list of pyArrow.column
+            A list of the columns to be queried
+            default: None
 
         Returns
         -------
@@ -1425,25 +1570,60 @@ class VastdbApi:
 
         #create a transaction
         txid, created_txid = self._begin_tx_if_necessary(txid)
-
+        executor_sessions = []
         try:
             # prepare query
-            queried_columns, arrow_schema, query_data_request, start_row_ids = \
+            queried_columns, arrow_schema, query_data_request, executor_sessions = \
                 self._prepare_query(bucket, schema, table, num_sub_splits, filters, field_names)
 
+            # define the per split threaded query func
+            def query_split_id(self, split_id):
+                try:
+                    start_row_ids = {i:0 for i in range(num_sub_splits)}
+                    session = executor_sessions[split_id]
+                    row_count = 0
+                    while (self._more_pages_exist(start_row_ids) and
+                           (not limit or row_count < limit)):
+                        # check if killed externally
+                        if killall:
+                            raise RuntimeError(f'query_split_id: split_id {split_id} received killall')
+
+                        # determine the limit rows
+                        if limit:
+                            limit_rows = min(limit_per_sub_split, limit-row_count)
+                        else:
+                            limit_rows = limit_per_sub_split
+
+                        # query one page
+                        table_page, start_row_ids = session._query_page(bucket=bucket, schema=schema, table=table, query_data_request=query_data_request,
+                                                                        split=(split_id, num_splits, num_row_groups_per_sub_split),
+                                                                        num_sub_splits=num_sub_splits, response_row_id=response_row_id,
+                                                                        txid=txid, limit_rows=limit_rows,
+                                                                        sub_split_start_row_ids=start_row_ids.items())
+                        with lock:
+                            table_pages.append(table_page)
+                            row_counts[split_id] += len(table_page)
+                            row_count = sum(row_counts)
+                        _logger.info(f"query_split_id: table_pages split_id={split_id} row_count={row_count}")
+                except Exception as e:
+                    _logger.exception('query_split_id: exception occurred')
+                    try:
+                        self.rollback_transaction(txid)
+                    except:
+                        _logger.exception(f'failed to rollback txid {txid}')
+                    raise e
+
             table_pages = []
-            row_count = 0
-            while (self._more_pages_exist(start_row_ids) and
-                   (not limit or row_count < limit)):
-                limit_rows = min(limit_per_subsplit, limit-row_count)
-                table_page, start_row_ids = self._query_page(bucket=bucket, schema=schema, table=table, query_data_request=query_data_request,
-                                                             split=split, num_sub_splits=num_sub_splits, response_row_id=response_row_id,
-                                                             txid=txid, limit_rows=limit_rows,
-                                                             sub_split_start_row_ids=start_row_ids.items())
-                table_pages.append(table_page)
-                row_count += len(table_page)
-                _logger.info("query: table_pages len=%s row_count=%s",
-                             len(table_pages), row_count)
+            num_splits = len(executor_sessions)
+            killall = False
+            with concurrent.futures.ThreadPoolExecutor(max_workers=num_splits) as executor:
+                futures = []
+                row_counts = [0] * num_splits
+                lock = threading.Lock()
+                for i in range(num_splits):
+                    futures.append(executor.submit(query_split_id, self, i))
+                for future in concurrent.futures.as_completed(futures):
+                    future.result() # trigger an exception if occurred in any thread
 
             # commit if needed
             if created_txid:
@@ -1456,11 +1636,22 @@ class VastdbApi:
                           len(out_table), len(out_table))
 
             return out_table
+
         except Exception as e:
-            # rollback if needed
-            if created_txid:
+            _logger.exception('exception occurred')
+            try:
                 self.rollback_transaction(txid)
+            except:
+                _logger.exception(f'failed to rollback txid {txid}')
             raise e
+
+        finally:
+            killall = True
+            for session in executor_sessions:
+                try:
+                    session.session.close()
+                except Exception:
+                    _logger.exception(f'failed to close session {session}')
 
 
     """
@@ -1545,9 +1736,50 @@ class VastdbApi:
         """
         pass
 
-    def insert(self, bucket, schema, table, rows):
+    def _record_batch_slices(self, batch, rows_per_slice=None):
+        max_slice_size_in_bytes = int(0.9*5*1024*1024) # 0.9 * 5MB
+        batch_len = len(batch)
+        serialized_batch = serialize_record_batch(batch)
+        batch_size_in_bytes = len(serialized_batch)
+        _logger.info(f'max_slice_size_in_bytes={max_slice_size_in_bytes} batch_len={batch_len} batch_size_in_bytes={batch_size_in_bytes}')
+
+        if not rows_per_slice:
+            if batch_size_in_bytes < max_slice_size_in_bytes:
+                rows_per_slice = batch_len
+            else:
+                rows_per_slice = int(0.9 * batch_len * max_slice_size_in_bytes / batch_size_in_bytes)
+
+        done_slicing = False
+        while not done_slicing:
+            # Attempt slicing according to the current rows_per_slice
+            offset = 0
+            serialized_slices = []
+            for i in range(math.ceil(batch_len/rows_per_slice)):
+                offset = rows_per_slice * i
+                if offset >= batch_len:
+                    done_slicing=True
+                    break
+                slice_batch = batch.slice(offset, rows_per_slice)
+                serialized_slice_batch = serialize_record_batch(slice_batch)
+                sizeof_serialized_slice_batch = len(serialized_slice_batch)
+
+                if sizeof_serialized_slice_batch <= max_slice_size_in_bytes or rows_per_slice < 10000:
+                    serialized_slices.append(serialized_slice_batch)
+                else:
+                    _logger.info(f'Using rows_per_slice {rows_per_slice} slice {i} size {sizeof_serialized_slice_batch} exceeds {max_slice_size_in_bytes} bytes, trying smaller rows_per_slice')
+                    # We have a slice that is too large
+                    rows_per_slice = int(rows_per_slice/2)
+                    if rows_per_slice < 1:
+                        raise ValueError('cannot decrease batch size below 1 row')
+                    break
+            else:
+                done_slicing = True
+
+        return serialized_slices
+
+    def insert(self, bucket, schema, table, rows, rows_per_insert=None, txid=0):
         """
-        insert rows into a table.
+        Insert rows into a table. The operation may be split into multiple commands, such that by default no more than 512KB will be inserted per command.
 
         Parameters
         ----------
@@ -1557,11 +1789,17 @@ class VastdbApi:
             The schema of the table.
         table : string
             The table name.
-
         rows : dict
             The rows to insert.
             dictionary key: column name
             dictionary value: array of cell values to insert
+        rows_per_insert : integer
+            Split the operation so that each insert command will be limited to this value
+            default: None (will be selected automatically)
+        txid : integer
+            A transaction id. The transaction may be initiated before the insert, and be used to provide
+            multiple ACID operations
+            default: 0 (will be created by the api)
 
         Returns
         -------
@@ -1583,9 +1821,70 @@ class VastdbApi:
             arrow_schema = arrow_schema.append(field)
             arrays.append(pa.array(column_values, column_type))
         batch = pa.record_batch(arrays, arrow_schema)
-        insert_rows_req = serialize_record_batch(batch)
-        self.insert_rows(bucket=bucket, schema=schema,
-                         table=table, record_batch=insert_rows_req)
+
+        # split the record batch into multiple slices
+        serialized_slices = self._record_batch_slices(batch, rows_per_insert)
+        _logger.info(f'inserting record batch using {len(serialized_slices)} slices')
+
+        insert_queue = queue.Queue()
+
+        [insert_queue.put(insert_rows_req) for insert_rows_req in serialized_slices]
+
+        #create a transaction
+        txid, created_txid = self._begin_tx_if_necessary(txid)
+        try:
+            executor_sessions = [VastdbApi(self.executor_hosts[i], self.access_key, self.secret_key, self.username,
+                                           self.password, self.port, self.secure, self.auth_type) for i in range(len(self.executor_hosts))]
+            def insert_executor(self, split_id):
+
+                try:
+                    _logger.info(f'insert_executor split_id={split_id} starting')
+                    session = executor_sessions[split_id]
+                    num_inserts = 0
+                    while not killall:
+                        try:
+                            insert_rows_req = insert_queue.get(block=False)
+                        except queue.Empty:
+                            break
+                        session.insert_rows(bucket=bucket, schema=schema,
+                                            table=table, record_batch=insert_rows_req)
+                        num_inserts += 1
+                    _logger.info(f'insert_executor split_id={split_id} num_inserts={num_inserts}')
+                    if killall:
+                        _logger.info('insert_executor killall=True')
+
+                except Exception as e:
+                    _logger.exception('insert_executor hit exception')
+                    raise e
+
+            num_splits = len(executor_sessions)
+            killall = False
+            with concurrent.futures.ThreadPoolExecutor(max_workers=num_splits) as executor:
+                futures = []
+                for i in range(num_splits):
+                    futures.append(executor.submit(insert_executor, self, i))
+                for future in concurrent.futures.as_completed(futures):
+                    future.result() # trigger an exception if occurred in any thread
+
+            # commit if needed
+            if created_txid:
+                self.commit_transaction(txid)
+
+        except Exception as e:
+            _logger.exception('exception occurred')
+            try:
+                self.rollback_transaction(txid)
+            except:
+                _logger.exception(f'failed to rollback txid {txid}')
+            raise e
+
+        finally:
+            killall = True
+            for session in executor_sessions:
+                try:
+                    session.session.close()
+                except Exception:
+                    _logger.exception(f'failed to close session {session}')
 
     def insert_rows(self, bucket, schema, table, record_batch, txid=0, client_tags=[], expected_retvals=[]):
         """
