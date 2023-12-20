@@ -33,7 +33,7 @@ vastdb_session = create_vastdb_session(access_key, secret_key)
 setup(
     name='vastdb',
     description='VAST Data SDK',
-    version='0.0.1',
+    version='0.0.2',
     url='https://github.com/vast-data/vastdb_sdk',
     author='VAST DATA',
     author_email='hello@vastdata.com',
