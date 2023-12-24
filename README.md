@@ -67,7 +67,7 @@ Key libraries used in this API include requests for HTTP requests, pyarrow for h
 - Recommended to have the latest pip and setuptools:
   - `pip install --upgrade pip setuptools`
 
-#### Install vastdb package 
+#### Install the 'vastdb' package 
 ```
 pip install vastdb
 ```
