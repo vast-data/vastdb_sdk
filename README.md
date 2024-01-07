@@ -218,14 +218,14 @@ vastdb_session = create_vastdb_session(access_key, secret_key)
 - **Parameters**:
   - `bucket` (str): Name of the bucket.
   - `schema` (str): Name of the schema.
-  - `table` (str): Name of the table to alter.
-  - `new_table_name` (str): New name for the table.
+  - `name` (str): Name of the table to alter.
+  - `new_name` (str): New name for the table.
   - `table_properties` (str, optional)): Optional table metadata - buffer of up to 4k
   - `txid` (int, optional)): Transaction ID (default is `0`).  
   - `tenant_id` (int, optional)): Tenant ID (default is `0`). 
 - **Example**:
 ```python
-  vastdb_session.alter_table(bucket_name, schema_name, table='my_table', new_table_name='renamed_table')
+  vastdb_session.alter_table(bucket_name, schema_name, name='my_table', new_name='renamed_table')
 ```
 
 #### `drop_table`
@@ -299,16 +299,16 @@ vastdb_session = create_vastdb_session(access_key, secret_key)
   - `bucket` (str): The bucket to retrieve data from.
   - `schema` (str): The schema to use.
   - `table` (str): The name of the table.
-  - `column_name` (str): The name of the column.
+  - `name` (str): The name of the column.
   - `txid` (int, optional): Transaction ID (default is `0`).
   - `column_properties` (str, optional): Properties/metadata of the column (default is an empty string `""`).
-  - `new_column_name` (str, optional): New column name (default is an empty string `""`).
+  - `new_name` (str, optional): New column name (default is an empty string `""`).
   - `column_sep` (str, optional): Separator for columns (default is `"."`).
   - `column_stats` (str, optional): Statistics for the column (default is an empty string `""`).
   - `tenant_id` (int, optional): Tenant ID (default is `0`).
 - **Example**:
 ```python
-  vastdb_session.alter_column(bucket_name, schema_name, table_name, column_name='existing_column', new_column_name='renamed_column')
+  vastdb_session.alter_column(bucket_name, schema_name, table_name, name='existing_column', new_name='renamed_column')
 ```
 
 #### `drop_columns`
