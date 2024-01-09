@@ -507,8 +507,13 @@ for record_batch in vastdb_session.query_iterator('my_bucket', 'my_schema', 'my_
   - `tenant_id` (int, optional): Tenant ID (default is `0`).  
 - **Example**:
 ```python
-  rows_to_delete = pa.RecordBatch.from_pandas(df_to_delete)
-  vastdb_session.delete_rows(bucket_name, schema_name, table_name, record_batch=rows_to_delete)
+  from vastdb.vastdb_api import build_record_batch
+
+  column_to_delete = [(pa.uint64(), '$row_id')]  
+  delete_rows = [9963, 9964] # row's id's to delete
+  delete_rows_req = build_record_batch(column_to_delete, {pa.uint64(): delete_rows})
+
+  vastdb_session.delete_rows(bucket_name, schema_name, table_name, record_batch=delete_rows_req)
 ```
 
 ### Semi-Sorted Projections Management
