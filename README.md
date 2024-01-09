@@ -152,13 +152,13 @@ vastdb_session = create_vastdb_session(access_key, secret_key)
 - **Parameters**:
   - `bucket` (str): Name of the bucket.
   - `schema` (str): Name of the schema to alter.
-  - `new_schema_name` (str): New name for the schema.
+  - `new_name` (str): New name for the schema.
   - `schema_properties` (str, optional): Optional schema metadata - buffer of up to 4k
   - `tenant_id` (int, optional): Tenant ID (default is `0`). 
   - `txid` (int, optional): Transaction ID (default is `0`).
 - **Example**:
 ```python
-  vastdb_session.alter_schema(bucket_name, schema_name, new_schema_name='renamed_schema')
+  vastdb_session.alter_schema(bucket_name, schema_name, new_name='renamed_schema')
 ```
 
 #### `drop_schema`
