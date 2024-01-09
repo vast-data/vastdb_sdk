@@ -711,7 +711,7 @@ df = table.to_pandas()
 print(df)
 ```
 
-##### (Citizen_experience => 25) AND (Citizen_Age between 55 to 75)
+##### (Citizen_experience =< 25) AND (Citizen_Age between 55 to 75)
 
 ```python
 field_names = ['Citizen_Age', 'Citizen_Name', 'Citizen_experience', 'Citizen_id']
