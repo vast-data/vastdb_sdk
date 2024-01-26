@@ -336,7 +336,10 @@ vastdb_session = create_vastdb_session(access_key, secret_key)
   - `tenant_id` (int, optional): Tenant ID (default is `0`).
 - **Example**:
 ```python
-  vastdb_session.begin_transaction()
+  txid=0
+  res = vastdb_session.begin_transaction()
+  txid = res.headers.get('tabular-txid')
+  print(res)
 ```
 
 #### `commit_transaction`
