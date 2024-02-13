@@ -1,3 +1,4 @@
+import array
 import logging
 import struct
 import urllib.parse
@@ -11,15 +12,19 @@ import threading
 import queue
 import math
 import socket
-
+from functools import cmp_to_key
+import pyarrow.parquet as pq
 import flatbuffers
 import pyarrow as pa
 import requests
 import datetime
 import hashlib
 import hmac
+import json
 import itertools
+import concurrent.futures
 from aws_requests_auth.aws_auth import AWSRequestsAuth
+from io import BytesIO
 
 import vast_flatbuf.org.apache.arrow.computeir.flatbuf.BinaryLiteral as fb_binary_lit
 import vast_flatbuf.org.apache.arrow.computeir.flatbuf.BooleanLiteral as fb_bool_lit
@@ -51,6 +56,10 @@ import vast_flatbuf.org.apache.arrow.flatbuf.FloatingPoint as fb_floating_point
 import vast_flatbuf.org.apache.arrow.flatbuf.Int as fb_int
 import vast_flatbuf.org.apache.arrow.flatbuf.Schema as fb_schema
 import vast_flatbuf.org.apache.arrow.flatbuf.Time as fb_time
+import vast_flatbuf.org.apache.arrow.flatbuf.Struct_ as fb_struct
+import vast_flatbuf.org.apache.arrow.flatbuf.List as fb_list
+import vast_flatbuf.org.apache.arrow.flatbuf.Map as fb_map
+import vast_flatbuf.org.apache.arrow.flatbuf.FixedSizeBinary as fb_fixed_size_binary
 import vast_flatbuf.org.apache.arrow.flatbuf.Timestamp as fb_timestamp
 import vast_flatbuf.org.apache.arrow.flatbuf.Utf8 as fb_utf8
 import vast_flatbuf.tabular.AlterColumnRequest as tabular_alter_column
@@ -63,6 +72,9 @@ import vast_flatbuf.tabular.S3File as tabular_s3_file
 import vast_flatbuf.tabular.CreateProjectionRequest as tabular_create_projection
 import vast_flatbuf.tabular.Column as tabular_projecion_column
 import vast_flatbuf.tabular.ColumnType as tabular_proj_column_type
+#import vast_protobuf.tabular.rpc_pb2 as rpc_pb
+#import vast_protobuf.substrait.type_pb2 as type_pb
+
 from vast_flatbuf.org.apache.arrow.computeir.flatbuf.Deref import Deref
 from vast_flatbuf.org.apache.arrow.computeir.flatbuf.ExpressionImpl import ExpressionImpl
 from vast_flatbuf.org.apache.arrow.computeir.flatbuf.LiteralImpl import LiteralImpl
@@ -113,6 +125,14 @@ class AuthType(Enum):
     SIGV2 = "s3"
     BASIC = "basic"
 
+def get_unit_to_flatbuff_time_unit(type):
+    unit_to_flatbuff_time_unit = {
+        'ns': TimeUnit.NANOSECOND,
+        'us': TimeUnit.MICROSECOND,
+        'ms': TimeUnit.MILLISECOND,
+        's': TimeUnit.SECOND
+    }
+    return unit_to_flatbuff_time_unit[type]
 
 class Predicate:
     unit_to_epoch = {
@@ -120,12 +140,6 @@ class Predicate:
         'us': 1_000,
         'ms': 1,
         's': 0.001
-    }
-    unit_to_flatbuff_time_unit = {
-        'ns': TimeUnit.NANOSECOND,
-        'us': TimeUnit.MICROSECOND,
-        'ms': TimeUnit.MILLISECOND,
-        's': TimeUnit.SECOND
     }
 
     def __init__(self, schema: 'pa.Schema', filters: dict):
@@ -156,6 +170,7 @@ class Predicate:
             for field in self.schema:
                 self.get_field_indexes(field, _field_name_per_index)
             self._field_name_per_index = {field: index for index, field in enumerate(_field_name_per_index)}
+            _logger.debug(f'field_name_per_index: {self._field_name_per_index}')
         return self._field_name_per_index
 
     def get_projections(self, builder: 'flatbuffers.builder.Builder', field_names: list = None):
@@ -358,7 +373,7 @@ class Predicate:
 
             field_type_type = Type.Timestamp
             fb_timestamp.Start(self.builder)
-            fb_timestamp.AddUnit(self.builder, self.unit_to_flatbuff_time_unit[field.type.unit])
+            fb_timestamp.AddUnit(self.builder, get_unit_to_flatbuff_time_unit(field.type.unit))
             field_type = fb_timestamp.End(self.builder)
 
             value = int(int(value) * self.unit_to_epoch[field.type.unit])
@@ -375,7 +390,7 @@ class Predicate:
             field_type_type = Type.Time
             fb_time.Start(self.builder)
             fb_time.AddBitWidth(self.builder, field.type.bit_width)
-            fb_time.AddUnit(self.builder, self.unit_to_flatbuff_time_unit[unit])
+            fb_time.AddUnit(self.builder, get_unit_to_flatbuff_time_unit(unit))
             field_type = fb_time.End(self.builder)
 
             value = int(value) * self.unit_to_epoch[unit]
@@ -489,11 +504,19 @@ class FieldNode:
         # will be set during by the parser (see below)
         self.buffers = None # a list of Arrow buffers (https://arrow.apache.org/docs/format/Columnar.html#buffer-listing-for-each-layout)
         self.length = None # each array must have it's length specified (https://arrow.apache.org/docs/python/generated/pyarrow.Array.html#pyarrow.Array.from_buffers)
+        self.is_projected = False
+        self.projected_field = self.field
 
     def _iter_to_root(self) -> Iterator['FieldNode']:
         yield self
         if self.parent is not None:
             yield from self.parent._iter_to_root()
+
+    def _iter_nodes(self) -> Iterator['FieldNode']:
+        """Generate all nodes."""
+        yield self
+        for child in self.children:
+            yield from child._iter_nodes()
 
     def _iter_leaves(self) -> Iterator['FieldNode']:
         """Generate only leaf nodes (i.e. columns having scalar types)."""
@@ -502,6 +525,16 @@ class FieldNode:
         else:
             for child in self.children:
                 yield from child._iter_leaves()
+
+    def _iter_projected_leaves(self) -> Iterator['FieldNode']:
+        """Generate only leaf nodes (i.e. columns having scalar types)."""
+        if not self.children:
+            if self.is_projected:
+                yield self
+        else:
+            for child in self.children:
+                if child.is_projected:
+                    yield from child._iter_projected_leaves()
 
     def debug_log(self, level=0):
         """Recursively dump this node state to log."""
@@ -538,17 +571,28 @@ class FieldNode:
 
     def build(self) -> pa.Array:
         """Construct an Arrow array from the collected buffers (recursively)."""
-        children = self.children and [node.build() for node in self.children]
-        result = pa.Array.from_buffers(self.type, self.length, buffers=self.buffers, children=children)
+        children = self.children and [node.build() for node in self.children if node.is_projected]
+        _logger.debug(f'build: self.field.name={self.field.name}, '
+                      f'self.projected_field.type={self.projected_field.type}, self.length={self.length} '
+                      f'self.buffers={self.buffers} children={children}')
+        result = pa.Array.from_buffers(self.projected_field.type, self.length, buffers=self.buffers, children=children)
         if self.debug:
             _logger.debug('%s result=%s', self.field, result)
         return result
 
+    def build_projected_field(self):
+        if isinstance(self.type, pa.StructType):
+            [child.build_projected_field() for child in self.children if child.is_projected]
+            self.projected_field = pa.field(self.field.name,
+                                            pa.struct([child.projected_field for child in self.children if child.is_projected]),
+                                            self.field.nullable,
+                                            self.field.metadata)
 
 class QueryDataParser:
     """Used to parse VAST QueryData RPC response."""
-    def __init__(self, arrow_schema: pa.Schema, *, debug=False):
+    def __init__(self, arrow_schema: pa.Schema, *, debug=False, projection_positions=None):
         self.arrow_schema = arrow_schema
+        self.projection_positions = projection_positions
         index = itertools.count() # used to generate leaf column positions for VAST QueryData RPC
         self.nodes = [FieldNode(field, index, debug=debug) for field in arrow_schema]
         self.debug = debug
@@ -556,14 +600,27 @@ class QueryDataParser:
             for node in self.nodes:
                 node.debug_log()
         self.leaves = [leaf for node in self.nodes for leaf in node._iter_leaves()]
+        _logger.debug(f'QueryDataParser: self.leaves = {[(leaf.field.name, leaf.index) for leaf in self.leaves]}')
+        self.mark_projected_nodes()
+        [node.build_projected_field() for node in self.nodes]
+        self.projected_leaves = [leaf for node in self.nodes for leaf in node._iter_projected_leaves()]
+        _logger.debug(f'QueryDataParser: self.projected_leaves = {[(leaf.field.name, leaf.index) for leaf in self.projected_leaves]}')
+
         self.leaf_offset = 0
+
+    def mark_projected_nodes(self):
+        for leaf in self.leaves:
+            if self.projection_positions is None or leaf.index in self.projection_positions:
+                for node in leaf._iter_to_root():
+                    node.is_projected = True
+                    _logger.debug(f'mark_projected_nodes node.field.name={node.field.name}')
 
     def parse(self, column: pa.Array):
         """Parse a single column response from VAST (see FieldNode.set for details)"""
-        if not self.leaf_offset < len(self.leaves):
+        if not self.leaf_offset < len(self.projected_leaves):
             raise ValueError(f'self.leaf_offset: {self.leaf_offset} are not < '
                              f'than len(self.leaves): {len(self.leaves)}')
-        leaf = self.leaves[self.leaf_offset]
+        leaf = self.projected_leaves[self.leaf_offset]
 
         # A column response may be sent in multiple chunks, therefore we need to combine
         # it into a single chunk to allow reconstruction using `Array.from_buffers()`.
@@ -573,7 +630,6 @@ class QueryDataParser:
             _logger.debug("parse: index=%d buffers=%s", leaf.index, [b and b.hex() for b in column.buffers()])
         node_list = list(leaf._iter_to_root())  # a FieldNode list (from leaf to root)
         node_list.reverse()  # (from root to leaf)
-
         # Collect all nesting levels, e.g. `List<Struct<A>` will be split into [`List`, `Struct`, `A`].
         # This way we can extract the buffers from each level and assign them to the appropriate node in loop below.
         array_list = list(_iter_nested_arrays(column))
@@ -585,21 +641,33 @@ class QueryDataParser:
 
         self.leaf_offset += 1
 
-    def build(self) -> Optional[pa.Table]:
+    def build(self, output_field_names=None) -> Optional[pa.Table]:
         """Try to build the resulting Table object (if all columns were parsed)"""
-        if self.leaf_offset < len(self.leaves):
-            return None
+        if self.projection_positions is not None:
+            if self.leaf_offset < len(self.projection_positions):
+                return None
+        else:
+            if self.leaf_offset < len(self.leaves):
+                return None
 
         if self.debug:
             for node in self.nodes:
                 node.debug_log()
 
-        result = pa.Table.from_arrays(
-            arrays=[node.build() for node in self.nodes],
-            schema=self.arrow_schema)
-        result.validate(full=self.debug) # does expensive validation checks only if debug is enabled
-        return result
+        # sort resulting table according to the output field names
+        projected_nodes = [node for node in self.nodes if node.is_projected]
+        if output_field_names is not None:
+            def key_func(projected_node):
+                return output_field_names.index(projected_node.field.name)
+            sorted_projected_nodes = sorted(projected_nodes, key=key_func)
+        else:
+            sorted_projected_nodes = projected_nodes
 
+        result = pa.Table.from_arrays(
+            arrays=[node.build() for node in sorted_projected_nodes],
+            schema = pa.schema([node.projected_field for node in sorted_projected_nodes]))
+        result.validate(full=True) # does expensive validation checks only if debug is enabled
+        return result
 
 def _iter_nested_arrays(column: pa.Array) -> Iterator[pa.Array]:
     """Iterate over a single column response, and recursively generate all of its children."""
@@ -903,7 +971,7 @@ class VastdbApi:
             return snapshots, is_truncated, marker
 
 
-    def create_table(self, bucket, schema, name, arrow_schema, txid=0, client_tags=[], expected_retvals=[]):
+    def create_table(self, bucket, schema, name, arrow_schema, txid=0, client_tags=[], expected_retvals=[], topic_partitions=0):
         """
         Create a table, use the following request
         POST /bucket/schema/table?table HTTP/1.1
@@ -923,10 +991,37 @@ class VastdbApi:
 
         serialized_schema = arrow_schema.serialize()
         headers['Content-Length'] = str(len(serialized_schema))
+        url_params = {'topic_partitions': str(topic_partitions)} if topic_partitions else {}
 
-        res = self.session.post(self._api_prefix(bucket=bucket, schema=schema, table=name, command="table"),
+        res = self.session.post(self._api_prefix(bucket=bucket, schema=schema, table=name, command="table", url_params=url_params),
                                 data=serialized_schema, headers=headers)
         return self._check_res(res, "create_table", expected_retvals)
+
+    def create_table_from_parquet_schema(self, bucket, schema, name, parquet_path=None,
+                                         parquet_bucket_name=None, parquet_object_name=None,
+                                         txid=0, client_tags=[]):
+
+        # Use pyarrow.parquet.ParquetDataset to open the Parquet file
+        if parquet_path:
+            parquet_ds = pq.ParquetDataset(parquet_path)
+        elif parquet_bucket_name and parquet_object_name:
+            s3fs  = pa.fs.S3FileSystem(access_key=self.access_key, secret_key=self.secret_key, endpoint_override=self.url)
+            parquet_ds = pq.ParquetDataset('/'.join([parquet_bucket_name,parquet_object_name]), filesystem=s3fs)
+        else:
+            raise RuntimeError(f'invalid params parquet_path={parquet_path} parquet_bucket_name={parquet_bucket_name} parquet_object_name={parquet_object_name}')
+
+        # Get the schema of the Parquet file
+        _logger.info(f'type(parquet_ds.schema) = {type(parquet_ds.schema)}')
+        if isinstance(parquet_ds.schema, pq.ParquetSchema):
+            arrow_schema = parquet_ds.schema.to_arrow_schema()
+        elif isinstance(parquet_ds.schema, pa.Schema):
+            arrow_schema = parquet_ds.schema
+        else:
+            raise RuntimeError(f'invalid type(parquet_ds.schema) = {type(parquet_ds.schema)}')
+
+        # create the table
+        return self.create_table(bucket, schema, name, arrow_schema, txid, client_tags)
+
 
     def get_table_stats(self, bucket, schema, name, txid=0, client_tags=[], expected_retvals=[]):
         """
@@ -944,9 +1039,9 @@ class VastdbApi:
             stats = get_table_stats.GetRootAs(flatbuf)
             num_rows = stats.NumRows()
             size_in_bytes = stats.SizeInBytes()
-            return num_rows, size_in_bytes
+            is_external_rowid_alloc = stats.IsExternalRowidAlloc()
+            return num_rows, size_in_bytes, is_external_rowid_alloc
         return self._check_res(res, "get_table_stats", expected_retvals)
-
 
     def alter_table(self, bucket, schema, name, txid=0, client_tags=[], table_properties="",
                     new_name="", expected_retvals=[]):
@@ -1147,7 +1242,7 @@ class VastdbApi:
                     f = schema_out.field(i)
                     add_column = not name_prefix or (exact_match and f.name == name_prefix) or (not exact_match and f.name.startswith(name_prefix))
                     if add_column:
-                        columns.append([f.name, f.type, f.metadata])
+                        columns.append([f.name, f.type, f.metadata, f])
 
             return columns, next_key, is_truncated, count
 
@@ -1193,9 +1288,58 @@ class VastdbApi:
         res = self.session.get(self._api_prefix(command="transaction"), headers=headers)
         return self._check_res(res, "get_transaction", expected_retvals)
 
+    def select_row_ids(self, bucket, schema, table, params, txid=0, client_tags=[], expected_retvals=[],
+                       retry_count=0, enable_sorted_projections=False):
+        """
+        POST /mybucket/myschema/mytable?query-data=SelectRowIds HTTP/1.1
+        """
+
+        # add query option select-only and read-only
+        headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
+        headers['Content-Length'] = str(len(params))
+        headers['tabular-enable-sorted-projections'] = str(enable_sorted_projections)
+        if retry_count > 0:
+            headers['tabular-retry-count'] = str(retry_count)
+
+        res = self.session.post(self._api_prefix(bucket=bucket, schema=schema, table=table, command="query-data=SelectRowIds",),
+                                data=params, headers=headers, stream=True)
+        return self._check_res(res, "query_data", expected_retvals)
+
+    def read_columns_data(self, bucket, schema, table, params, txid=0, client_tags=[], expected_retvals=[], tenant_guid=None,
+                          retry_count=0, enable_sorted_projections=False):
+        """
+        POST /mybucket/myschema/mytable?query-data=ReadColumns HTTP/1.1
+        """
+
+        headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
+        headers['Content-Length'] = str(len(params))
+        headers['tabular-enable-sorted-projections'] = str(enable_sorted_projections)
+        if retry_count > 0:
+            headers['tabular-retry-count'] = str(retry_count)
+
+        res = self.session.post(self._api_prefix(bucket=bucket, schema=schema, table=table, command="query-data=ReadColumns",),
+                               data=params, headers=headers, stream=True)
+        return self._check_res(res, "query_data", expected_retvals)
+
+    def count_rows(self, bucket, schema, table, params, txid=0, client_tags=[], expected_retvals=[], tenant_guid=None,
+                   retry_count=0, enable_sorted_projections=False):
+        """
+        POST /mybucket/myschema/mytable?query-data=CountRows HTTP/1.1
+        """
+        headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
+        headers['Content-Length'] = str(len(params))
+        headers['tabular-enable-sorted-projections'] = str(enable_sorted_projections)
+        if retry_count > 0:
+            headers['tabular-retry-count'] = str(retry_count)
+
+        res = self.session.post(self._api_prefix(bucket=bucket, schema=schema, table=table, command="query-data=CountRows",),
+                               data=params, headers=headers, stream=True)
+        return self._check_res(res, "query_data", expected_retvals)
+
     def query_data(self, bucket, schema, table, params, split=(0, 1, 8), num_sub_splits=1, response_row_id=False,
                    txid=0, client_tags=[], expected_retvals=[], limit_rows=0, schedule_id=None, retry_count=0,
-                   search_path=None, sub_split_start_row_ids=[], tenant_guid=None, projection='', enable_sorted_projections=True):
+                   search_path=None, sub_split_start_row_ids=[], tenant_guid=None, projection='', enable_sorted_projections=True,
+                   request_format='string', response_format='string'):
         """
         GET /mybucket/myschema/mytable?data HTTP/1.1
         Content-Length: ContentLength
@@ -1205,7 +1349,6 @@ class VastdbApi:
         tabular-num-of-subsplits: "total"
         tabular-request-format: "string"
         tabular-response-format: "string" #arrow/trino
-        tabular-response-row-id: "true" # default false
         tabular-schedule-id: "schedule-id"
 
         Request Body (flatbuf)
@@ -1213,15 +1356,14 @@ class VastdbApi:
         predicate_chunk "formatted_data", (required)
 
         """
+        # add query option select-only and read-only
         headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
         headers['Content-Length'] = str(len(params))
         headers['tabular-split'] = ','.join(map(str, split))
         headers['tabular-num-of-subsplits'] = str(num_sub_splits)
-        headers['tabular-request-format'] = "string"
-        headers['tabular-response-format'] = "string"
+        headers['tabular-request-format'] = request_format
+        headers['tabular-response-format'] = response_format
         headers['tabular-enable-sorted-projections'] = str(enable_sorted_projections)
-        if response_row_id:
-            headers['tabular-response-row-id'] = "true"
         if limit_rows > 0:
             headers['tabular-limit-rows'] = str(limit_rows)
         if schedule_id is not None:
@@ -1239,7 +1381,7 @@ class VastdbApi:
         for sub_split_id, start_row_id in sub_split_start_row_ids:
             headers[f'tabular-start-row-id-{sub_split_id}'] = f"{sub_split_id},{start_row_id}"
 
-        url_params = {'name': projection} if len(projection) else {}
+        url_params = {'name': projection} if projection else {}
 
         res = self.session.get(self._api_prefix(bucket=bucket, schema=schema, table=table, command="data", url_params=url_params),
                                data=params, headers=headers, stream=True)
@@ -1249,39 +1391,50 @@ class VastdbApi:
         # build a list of the queried column names
         queried_columns = []
         # get all columns from the table
-        all_columns = []
+        all_listed_columns = []
         next_key = 0
         while True:
             cur_columns, next_key, is_truncated, count = self.list_columns(bucket=bucket, schema=schema,
                                                                            table=table,
                                                                            next_key=next_key)
             if not cur_columns:
-                break;
-            all_columns.extend(cur_columns)
+                break
+            all_listed_columns.extend(cur_columns)
             if not is_truncated:
-                break;
+                break
 
         # build a list of the queried columns
         queried_column_names = set()
         if filters:
-            queried_column_names.update(filters.keys())
+            filtered_column_names = ([column_name.split('.')[0] for column_name in filters.keys()]) # use top level of the filter column names
+            queried_column_names.update(filtered_column_names)
+            _logger.debug(f"_list_table_columns: filtered_column_names={filtered_column_names}")
+
         if field_names:
-            queried_column_names.update(field_names)
-        all_column_names = set()
-        for column in all_columns:
-            column_name = column[0]
-            all_column_names.add(column_name)
-            if column_name in queried_column_names or not field_names:
+            field_column_names = ([column_name.split('.')[0] for column_name in field_names]) # use top level of the field column names
+        else:
+            field_column_names = [column[0] for column in all_listed_columns]
+        _logger.debug(f"_list_table_columns: field_column_names={field_column_names}")
+        queried_column_names.update(field_column_names)
+
+        all_listed_column_and_leaves_names = set()
+        for column in all_listed_columns:
+            # Collect the column and leaves names for verification below that all the filters and field names are in the table
+            column_and_leaves_names = [column[0]] + [f.name for f in column[3].flatten()]
+            all_listed_column_and_leaves_names.update(column_and_leaves_names)
+
+            # check if this column is needed for the query
+            if column[0] in queried_column_names:
                 queried_columns.append(column)
 
-        # check that all queried column names are in the table
+        # verify that all the filters and field names are in the table
         if filters:
             for filter_column_name in filters.keys():
-                if filter_column_name not in all_column_names:
+                if filter_column_name not in all_listed_column_and_leaves_names:
                     raise KeyError((f'filter column name: {filter_column_name} does not appear in the table'))
         if field_names:
             for field_name in field_names:
-                if field_name not in all_column_names:
+                if field_name not in all_listed_column_and_leaves_names:
                     raise ValueError((f'field name: {field_name} does not appear in the table'))
         return list(queried_columns)
 
@@ -1299,6 +1452,7 @@ class VastdbApi:
             if not queried_columns:
                 queried_columns = self._list_table_columns(bucket, schema, table, filters, field_names)
             arrow_schema = pa.schema([(column[0], column[1]) for column in queried_columns])
+            _logger.debug(f'_prepare_query: arrow_schema = {arrow_schema}')
             query_data_request = build_query_data_request(schema=arrow_schema, filters=filters, field_names=field_names)
             if self.executor_hosts:
                 executor_hosts = self.executor_hosts
@@ -1373,7 +1527,7 @@ class VastdbApi:
             filter conditions on the column. AND is applied on the conditions. The condition formats are:
             'column_name eq some_value'
             default: None
-        filters : dict
+        field_names : list
             A list of column names to be returned in the output table
             default: None
 
@@ -1394,8 +1548,7 @@ class VastdbApi:
 
         """
 
-
-        #create a transaction if necessary
+        # create a transaction if necessary
         txid, created_txid = self._begin_tx_if_necessary(txid)
         executor_sessions = []
 
@@ -1478,7 +1631,7 @@ class VastdbApi:
                         next_sems[split_id].release()
                         yield record_batch
                     else:
-                        done_count+=1
+                        done_count += 1
 
                 # wait for all executors to complete
                 for future in concurrent.futures.as_completed(futures):
@@ -1506,8 +1659,6 @@ class VastdbApi:
                     session.session.close()
                 except Exception:
                     _logger.exception(f'failed to close session {session}')
-
-
 
     def query(self, bucket, schema, table, num_sub_splits=1, num_row_groups_per_sub_split=8,
               response_row_id=False, txid=0, limit=0, limit_per_sub_split=131072, filters=None, field_names=None,
@@ -1547,8 +1698,8 @@ class VastdbApi:
             filter conditions on the column. AND is applied on the conditions. The condition formats are:
             'column_name eq some_value'
             default: None
-        filters : dict
-            A list of column names to be returned in the output table
+        field_names : list
+            A list of column names to be returned to the output table
             default: None
         queried_columns: list of pyArrow.column
             A list of the columns to be queried
@@ -1567,8 +1718,7 @@ class VastdbApi:
 
         """
 
-
-        #create a transaction
+        # create a transaction
         txid, created_txid = self._begin_tx_if_necessary(txid)
         executor_sessions = []
         try:
@@ -1634,7 +1784,6 @@ class VastdbApi:
             out_table = out_table.slice(length=limit) if limit else out_table
             _logger.info("query: out_table len=%s row_count=%s",
                           len(out_table), len(out_table))
-
             return out_table
 
         except Exception as e:
@@ -1652,7 +1801,6 @@ class VastdbApi:
                     session.session.close()
                 except Exception:
                     _logger.exception(f'failed to close session {session}')
-
 
     """
     source_files: list of (bucket_name, file_name)
@@ -1777,7 +1925,7 @@ class VastdbApi:
 
         return serialized_slices
 
-    def insert(self, bucket, schema, table, rows, rows_per_insert=None, txid=0):
+    def insert(self, bucket, schema, table, rows=None, record_batch=None, rows_per_insert=None, txid=0):
         """
         Insert rows into a table. The operation may be split into multiple commands, such that by default no more than 512KB will be inserted per command.
 
@@ -1793,6 +1941,10 @@ class VastdbApi:
             The rows to insert.
             dictionary key: column name
             dictionary value: array of cell values to insert
+            default: None (if None, record_batch must be provided)
+        record_batch : pyarrow.RecordBatch
+            A pyarrow RecordBatch
+            default: None (if None, rows dictionary must be provided)
         rows_per_insert : integer
             Split the operation so that each insert command will be limited to this value
             default: None (will be selected automatically)
@@ -1811,30 +1963,36 @@ class VastdbApi:
         insert('some_bucket', 'some_schema', 'some_table', {'name': ['Alice','Bob'], 'age': [25,24]})
 
         """
-        columns = self._list_table_columns(bucket, schema, table, field_names=rows.keys())
-        columns_dict = dict([(column[0], column[1]) for column in columns])
-        arrow_schema = pa.schema([])
-        arrays = []
-        for column_name, column_values in rows.items():
-            column_type = columns_dict[column_name]
-            field = pa.field(column_name, column_type)
-            arrow_schema = arrow_schema.append(field)
-            arrays.append(pa.array(column_values, column_type))
-        batch = pa.record_batch(arrays, arrow_schema)
+        if (not rows and not record_batch) or (rows and record_batch):
+            raise ValueError(f'insert: missing argument - either rows or record_batch must be provided')
+
+        # create a transaction
+        txid, created_txid = self._begin_tx_if_necessary(txid)
+
+        if rows:
+            columns = self._list_table_columns(bucket, schema, table, field_names=rows.keys())
+            columns_dict = dict([(column[0], column[1]) for column in columns])
+            arrow_schema = pa.schema([])
+            arrays = []
+            for column_name, column_values in rows.items():
+                column_type = columns_dict[column_name]
+                field = pa.field(column_name, column_type)
+                arrow_schema = arrow_schema.append(field)
+                arrays.append(pa.array(column_values, column_type))
+            record_batch = pa.record_batch(arrays, arrow_schema)
 
         # split the record batch into multiple slices
-        serialized_slices = self._record_batch_slices(batch, rows_per_insert)
+        serialized_slices = self._record_batch_slices(record_batch, rows_per_insert)
         _logger.info(f'inserting record batch using {len(serialized_slices)} slices')
 
         insert_queue = queue.Queue()
 
         [insert_queue.put(insert_rows_req) for insert_rows_req in serialized_slices]
 
-        #create a transaction
-        txid, created_txid = self._begin_tx_if_necessary(txid)
         try:
             executor_sessions = [VastdbApi(self.executor_hosts[i], self.access_key, self.secret_key, self.username,
                                            self.password, self.port, self.secure, self.auth_type) for i in range(len(self.executor_hosts))]
+
             def insert_executor(self, split_id):
 
                 try:
@@ -1847,7 +2005,7 @@ class VastdbApi:
                         except queue.Empty:
                             break
                         session.insert_rows(bucket=bucket, schema=schema,
-                                            table=table, record_batch=insert_rows_req)
+                                            table=table, record_batch=insert_rows_req, txid=txid)
                         num_inserts += 1
                     _logger.info(f'insert_executor split_id={split_id} num_inserts={num_inserts}')
                     if killall:
@@ -2138,6 +2296,220 @@ class VastdbApi:
 
             return columns, next_key, is_truncated, count
 
+def parse_proto_buf_message(conn, msg_type):
+    msg_size = 0
+    while msg_size == 0: # keepalive
+        msg_size_bytes = conn.read(4)
+        msg_size, = struct.unpack('>L', msg_size_bytes)
+
+    msg = msg_type()
+    msg_bytes = conn.read(msg_size)
+    msg.ParseFromString(msg_bytes)
+    return msg
+
+def parse_rpc_message(conn, msg_name):
+    import vast_protobuf.tabular.rpc_pb2 as rpc_pb
+    rpc_msg = parse_proto_buf_message(conn, rpc_pb.Rpc)
+    if not rpc_msg.HasField(msg_name):
+        raise IOError(f"expected {msg_name} but got rpc_msg={rpc_msg}")
+
+    content_size = rpc_msg.content_size
+    content = conn.read(content_size)
+    return getattr(rpc_msg, msg_name), content
+
+
+def parse_select_row_ids_response(conn, debug=False):
+    rows_arr = array.array('Q', [])
+    while True:
+        select_rows_msg, content = parse_rpc_message(conn, 'select_row_ids_response_packet')
+        msg_type = select_rows_msg.WhichOneof('type')
+        if msg_type == "body":
+            arr = array.array('Q', content)
+            rows_arr += arr
+            if debug:
+                _logger.info(f"arr={arr}")
+        elif msg_type == "trailing":
+            status_code = select_rows_msg.trailing.status.code
+            finished_pagination = select_rows_msg.trailing.finished_pagination
+            _logger.info(f"completed finished_pagination={finished_pagination} res={status_code}")
+            assert finished_pagination
+            if status_code != 0:
+                raise IOError(f"Query data stream failed res={select_rows_msg.trailing.status}")
+
+            return rows_arr.tobytes()
+        else:
+            raise EOFError(f"unknown response type={msg_type}")
+
+
+def parse_count_rows_response(conn):
+    count_rows_msg, _ = parse_rpc_message(conn, 'count_rows_response_packet')
+    assert count_rows_msg.WhichOneof('type') == "body"
+    subsplit_id = count_rows_msg.body.subsplit.id
+    num_rows = count_rows_msg.body.amount_of_rows
+    _logger.info(f"num_rows={num_rows} subsplit_id={subsplit_id}")
+
+    count_rows_msg, _ = parse_rpc_message(conn, 'count_rows_response_packet')
+    assert count_rows_msg.WhichOneof('type') == "trailing"
+    assert count_rows_msg.trailing.status.code == 0
+    assert count_rows_msg.trailing.finished_pagination
+
+    return (subsplit_id, num_rows)
+
+
+def get_proto_field_type(f):
+    import vast_protobuf.substrait.type_pb2 as type_pb
+    t = type_pb.Type()
+    if f.type.equals(pa.string()):
+        t.string.nullability = 0
+    elif f.type.equals(pa.int8()):
+        t.i8.nullability = 0
+    elif f.type.equals(pa.int16()):
+        t.i16.nullability = 0
+    elif f.type.equals(pa.int32()):
+        t.i32.nullability = 0
+    elif f.type.equals(pa.int64()):
+        t.i64.nullability = 0
+    elif f.type.equals(pa.float32()):
+        t.fp32.nullability = 0
+    elif f.type.equals(pa.float64()):
+        t.fp64.nullability = 0
+    else:
+        raise ValueError(f'unsupported type={f.type}')
+
+    return t
+
+def serialize_proto_request(req):
+    req_str = req.SerializeToString()
+    buf = struct.pack('>L', len(req_str))
+    buf += req_str
+    return buf
+
+def build_read_column_request(ids, schema, handles = [], num_subsplits = 1):
+    import vast_protobuf.tabular.rpc_pb2 as rpc_pb
+    rpc_msg = rpc_pb.Rpc()
+    req = rpc_msg.read_columns_request
+    req.num_subsplits = num_subsplits
+    block = req.row_ids_blocks.add()
+    block.row_ids.info.offset = 0
+    block.row_ids.info.size = len(ids)
+    rpc_msg.content_size = len(ids)
+    if handles:
+        req.projection_table_handles.extend(handles)
+
+    for f in schema:
+        req.column_schema.names.append(f.name)
+        t = get_proto_field_type(f)
+        req.column_schema.struct.types.append(t)
+
+    return serialize_proto_request(rpc_msg) + ids
+
+def build_count_rows_request(schema: 'pa.Schema' = pa.schema([]), filters: dict = None, field_names: list = None,
+                             split=(0, 1, 1), num_subsplits=1):
+    import vast_protobuf.tabular.rpc_pb2 as rpc_pb
+    rpc_msg = rpc_pb.Rpc()
+    req = rpc_msg.count_rows_request
+    req.split.id = split[0]
+    req.split.config.total = split[1]
+    req.split.config.row_groups_per_split = split[2]
+    # add empty state
+    state = rpc_pb.SubSplit.State()
+    for _ in range(num_subsplits):
+        req.subsplits.states.append(state)
+
+    for f in schema:
+        req.relation.read.base_schema.names.append(f.name)
+        t = get_proto_field_type(f)
+        req.relation.read.base_schema.struct.types.append(t)
+
+    return serialize_proto_request(rpc_msg)
+
+"""
+ Expected messages in the ReadColumns flow:
+
+ ProtoMsg+Schema+RecordBatch,
+ ProtoMsg+RecordBatch
+ ProtoMsg+RecordBatch
+ ...
+ ProtoMsg+RecordBatch+EOS
+ ProtoMsg+Schema+RecordBatch,
+ ...
+ ProtoMsg+RecordBatch+EOS
+ ProtoMsg+Schema+RecordBatch,
+ ...
+ ProtoMsg+RecordBatch+EOS
+ ProtoMsg Completed
+"""
+def _iter_read_column_resp_columns(conn, readers):
+    while True:
+        read_column_resp, content = parse_rpc_message(conn, 'read_columns_response_packet')
+        stream = BytesIO(content)
+
+        msg_type = read_column_resp.WhichOneof('type')
+        if msg_type == "body":
+            body = read_column_resp.body
+            stream_id = body.subsplit_id
+            start_row_offset = body.start_row_offset
+            arrow_msg_size = body.arrow_ipc_info.size
+            _logger.info(f"start stream_id={stream_id} arrow_msg_size={arrow_msg_size} start_row_offset={start_row_offset}")
+        elif msg_type == "trailing":
+            status_code = read_column_resp.trailing.status.code
+            _logger.info(f"completed stream_id={stream_id} res={status_code}")
+            if status_code != 0:
+                raise IOError(f"Query data stream failed res={read_column_resp.trailing.status}")
+
+            return
+        else:
+            raise EOFError(f"unknown response type={msg_type}")
+
+        start_pos = stream.tell()
+        if stream_id not in readers:
+            # we implicitly read 1st message (Arrow schema) when constructing RecordBatchStreamReader
+            reader = pa.ipc.RecordBatchStreamReader(stream)
+            _logger.info(f"read ipc stream_id={stream_id} schema={reader.schema}")
+            readers[stream_id] = (reader, [])
+
+        (reader, batches) = readers[stream_id]
+        while stream.tell() - start_pos < arrow_msg_size:
+            try:
+                batch = reader.read_next_batch() # read single-column chunk data
+                batches.append(batch)
+            except StopIteration:  # we got an end-of-stream IPC message for a given stream ID
+                reader, batches = readers.pop(stream_id)  # end of column
+                table = pa.Table.from_batches(batches)  # concatenate all column chunks (as a single)
+                _logger.info(f"end of stream_id={stream_id} rows={len(table)} column={table}")
+                yield (start_row_offset, stream_id, table)
+
+ResponsePart = namedtuple('response_part', ['start_row_offset', 'table'])
+
+def _parse_read_column_stream(conn, schema, debug=False):
+    is_empty_projection = (len(schema) == 0)
+    parsers = defaultdict(lambda: QueryDataParser(schema, debug=debug))  # {stream_id: QueryDataParser}
+    readers = {}  # {stream_id: pa.ipc.RecordBatchStreamReader}
+    streams_list = []
+    for start_row_offset, stream_id, table in _iter_read_column_resp_columns(conn, readers):
+        parser = parsers[stream_id]
+        for column in table.columns:
+            parser.parse(column)
+
+        parsed_table = parser.build()
+        if parsed_table is not None:  # when we got all columns (and before starting a new "select_rows" cycle)
+            parsers.pop(stream_id)
+            if is_empty_projection:  # VAST returns an empty RecordBatch, with the correct rows' count
+                parsed_table = table
+
+            _logger.info(f"parse_read_column_response stream_id={stream_id} rows={len(parsed_table)} table={parsed_table}")
+            streams_list.append(ResponsePart(start_row_offset, parsed_table))
+
+    if parsers:
+        raise EOFError(f'all streams should be done before EOF. {parsers}')
+
+    return streams_list
+
+def parse_read_column_response(conn, schema, debug=False):
+    response_parts = _parse_read_column_stream(conn, schema, debug)
+    response_parts.sort(key=lambda s: s.start_row_offset)
+    tables = [s.table for s in response_parts]
+    return pa.concat_tables(tables)
 
 def _iter_query_data_response_columns(fileobj, stream_ids=None):
     readers = {}  # {stream_id: pa.ipc.RecordBatchStreamReader}
@@ -2198,14 +2570,18 @@ def parse_query_data_response(conn, schema, stream_ids=None, start_row_ids=None,
     """
     if start_row_ids is None:
         start_row_ids = {}
-    is_empty_projection = (len(schema) == 0)
-    parsers = defaultdict(lambda: QueryDataParser(schema, debug=debug))  # {stream_id: QueryDataParser}
+    projection_positions = schema.projection_positions
+    arrow_schema = schema.arrow_schema
+    output_field_names = schema.output_field_names
+    _logger.debug(f'projection_positions={projection_positions} len(arrow_schema)={len(arrow_schema)} arrow_schema={arrow_schema}')
+    is_empty_projection = (len(projection_positions) == 0)
+    parsers = defaultdict(lambda: QueryDataParser(arrow_schema, debug=debug, projection_positions=projection_positions))  # {stream_id: QueryDataParser}
     for stream_id, next_row_id, table in _iter_query_data_response_columns(conn, stream_ids):
         parser = parsers[stream_id]
         for column in table.columns:
             parser.parse(column)
 
-        parsed_table = parser.build()
+        parsed_table = parser.build(output_field_names)
         if parsed_table is not None:  # when we got all columns (and before starting a new "select_rows" cycle)
             parsers.pop(stream_id)
             if is_empty_projection:  # VAST returns an empty RecordBatch, with the correct rows' count
@@ -2217,6 +2593,147 @@ def parse_query_data_response(conn, schema, stream_ids=None, start_row_ids=None,
 
     if parsers:
         raise EOFError(f'all streams should be done before EOF. {parsers}')
+
+def get_field_type(builder: flatbuffers.Builder, field: pa.Field):
+    if field.type.equals(pa.int64()):
+        field_type_type = Type.Int
+        fb_int.Start(builder)
+        fb_int.AddBitWidth(builder, field.type.bit_width)
+        fb_int.AddIsSigned(builder, True)
+        field_type = fb_int.End(builder)
+
+    elif field.type.equals(pa.int32()):
+        field_type_type = Type.Int
+        fb_int.Start(builder)
+        fb_int.AddBitWidth(builder, field.type.bit_width)
+        fb_int.AddIsSigned(builder, True)
+        field_type = fb_int.End(builder)
+
+    elif field.type.equals(pa.int16()):
+        field_type_type = Type.Int
+        fb_int.Start(builder)
+        fb_int.AddBitWidth(builder, field.type.bit_width)
+        fb_int.AddIsSigned(builder, True)
+        field_type = fb_int.End(builder)
+
+    elif field.type.equals(pa.int8()):
+        field_type_type = Type.Int
+        fb_int.Start(builder)
+        fb_int.AddBitWidth(builder, field.type.bit_width)
+        fb_int.AddIsSigned(builder, True)
+        field_type = fb_int.End(builder)
+
+    elif field.type.equals(pa.uint64()):
+        field_type_type = Type.Int
+        fb_int.Start(builder)
+        fb_int.AddBitWidth(builder, field.type.bit_width)
+        fb_int.AddIsSigned(builder, False)
+        field_type = fb_int.End(builder)
+
+    elif field.type.equals(pa.uint32()):
+        field_type_type = Type.Int
+        fb_int.Start(builder)
+        fb_int.AddBitWidth(builder, field.type.bit_width)
+        fb_int.AddIsSigned(builder, False)
+        field_type = fb_int.End(builder)
+
+    elif field.type.equals(pa.uint16()):
+        field_type_type = Type.Int
+        fb_int.Start(builder)
+        fb_int.AddBitWidth(builder, field.type.bit_width)
+        fb_int.AddIsSigned(builder, False)
+        field_type = fb_int.End(builder)
+
+    elif field.type.equals(pa.uint8()):
+        field_type_type = Type.Int
+        fb_int.Start(builder)
+        fb_int.AddBitWidth(builder, field.type.bit_width)
+        fb_int.AddIsSigned(builder, False)
+        field_type = fb_int.End(builder)
+
+    elif field.type.equals(pa.float32()):
+        field_type_type = Type.FloatingPoint
+        fb_floating_point.Start(builder)
+        fb_floating_point.AddPrecision(builder, 1)  # single
+        field_type = fb_floating_point.End(builder)
+
+    elif field.type.equals(pa.float64()):
+        field_type_type = Type.FloatingPoint
+        fb_floating_point.Start(builder)
+        fb_floating_point.AddPrecision(builder, 2)  # double
+        field_type = fb_floating_point.End(builder)
+
+    elif field.type.equals(pa.string()):
+        field_type_type = Type.Utf8
+        fb_utf8.Start(builder)
+        field_type = fb_utf8.End(builder)
+
+    elif field.type.equals(pa.date32()):  # pa.date64()
+        field_type_type = Type.Date
+        fb_date.Start(builder)
+        fb_date.AddUnit(builder, DateUnit.DAY)
+        field_type = fb_date.End(builder)
+
+    elif isinstance(field.type, pa.TimestampType):
+        field_type_type = Type.Timestamp
+        fb_timestamp.Start(builder)
+        fb_timestamp.AddUnit(builder, get_unit_to_flatbuff_time_unit(field.type.unit))
+        field_type = fb_timestamp.End(builder)
+
+    elif field.type.equals(pa.time32('s')) or field.type.equals(pa.time32('ms')) or field.type.equals(pa.time64('us')) or field.type.equals(pa.time64('ns')):
+        field_type_str = str(field.type)
+        start = field_type_str.index('[')
+        end = field_type_str.index(']')
+        unit = field_type_str[start + 1:end]
+
+        field_type_type = Type.Time
+        fb_time.Start(builder)
+        fb_time.AddBitWidth(builder, field.type.bit_width)
+        fb_time.AddUnit(builder, get_unit_to_flatbuff_time_unit(unit))
+        field_type = fb_time.End(builder)
+
+    elif field.type.equals(pa.bool_()):
+        field_type_type = Type.Bool
+        fb_bool.Start(builder)
+        field_type = fb_bool.End(builder)
+
+    elif isinstance(field.type, pa.Decimal128Type):
+        field_type_type = Type.Decimal
+        fb_decimal.Start(builder)
+        fb_decimal.AddPrecision(builder, field.type.precision)
+        fb_decimal.AddScale(builder, field.type.scale)
+        field_type = fb_decimal.End(builder)
+
+    elif field.type.equals(pa.binary()):
+        field_type_type = Type.Binary
+        fb_binary.Start(builder)
+        field_type = fb_binary.End(builder)
+
+    elif isinstance(field.type, pa.StructType):
+        field_type_type = Type.Struct_
+        fb_struct.Start(builder)
+        field_type = fb_struct.End(builder)
+
+    elif isinstance(field.type, pa.ListType):
+        field_type_type = Type.List
+        fb_list.Start(builder)
+        field_type = fb_list.End(builder)
+
+    elif isinstance(field.type, pa.MapType):
+        field_type_type = Type.Map
+        fb_map.Start(builder)
+        field_type = fb_map.End(builder)
+
+    elif isinstance(field.type, pa.FixedSizeBinaryType):
+        field_type_type = Type.FixedSizeBinary
+        fb_fixed_size_binary.Start(builder)
+        fb_fixed_size_binary.AddByteWidth(builder, field.type.byte_width)
+        field_type = fb_fixed_size_binary.End(builder)
+
+    else:
+        raise ValueError(f'unsupported predicate for type={field.type}')
+
+    return field_type, field_type_type
 
 def build_field(builder: flatbuffers.Builder, f: pa.Field, name: str):
     _logger.info(f"name={f.name}")
@@ -2261,11 +2778,41 @@ def build_field(builder: flatbuffers.Builder, f: pa.Field, name: str):
     return fb_field.End(builder)
 
 
+class VastDBResponseSchema:
+    def __init__(self, arrow_schema, projection_positions, output_field_names):
+        self.arrow_schema = arrow_schema
+        self.projection_positions = projection_positions
+        self.output_field_names = output_field_names
+
 class QueryDataRequest:
     def __init__(self, serialized, response_schema):
         self.serialized = serialized
         self.response_schema = response_schema
 
+
+def build_select_rows_request(schema: 'pa.Schema' = pa.schema([]), filters: dict = None, field_names: list = None, split_id=0,
+                              total_split=1, row_group_per_split=8, num_subsplits=1):
+    import vast_protobuf.tabular.rpc_pb2 as rpc_pb
+    rpc_msg = rpc_pb.Rpc()
+    select_rows_req = rpc_msg.select_row_ids_request
+    select_rows_req.split.id = split_id
+    select_rows_req.split.config.total = total_split
+    select_rows_req.split.config.row_groups_per_split = row_group_per_split
+
+    # add empty state
+    state = rpc_pb.SubSplit.State()
+    for _ in range(num_subsplits):
+        select_rows_req.subsplits.states.append(state)
+
+    for field in schema:
+        select_rows_req.relation.read.base_schema.names.append(field.name)
+        field_type = get_proto_field_type(field)
+        select_rows_req.relation.read.base_schema.struct.types.append(field_type)
+
+    return serialize_proto_request(rpc_msg)
+
+    # TODO use ibis or other library to build SelectRowIds protobuf
+    # meanwhile can be similar to build_count_rows_request
 
 def build_query_data_request(schema: 'pa.Schema' = pa.schema([]), filters: dict = None, field_names: list = None):
     filters = filters or {}
@@ -2289,17 +2836,35 @@ def build_query_data_request(schema: 'pa.Schema' = pa.schema([]), filters: dict 
     filter_obj = predicate.serialize(builder)
 
     parser = QueryDataParser(schema)
-    fields_map = {node.field.name: node.field for node in parser.nodes}
-    leaves_map = {node.field.name: [leaf.index for leaf in node._iter_leaves()] for node in parser.nodes}
+    leaves_map = {}
+    for node in parser.nodes:
+        for descendent in node._iter_nodes():
+            if descendent.parent and isinstance(descendent.parent.type, (pa.ListType, pa.MapType)):
+                continue
+            iter_from_root = reversed(list(descendent._iter_to_root()))
+            descendent_full_name = '.'.join([n.field.name for n in iter_from_root])
+            _logger.debug(f'build_query_data_request: descendent_full_name={descendent_full_name}')
+            descendent_leaves = [leaf.index for leaf in descendent._iter_leaves()]
+            leaves_map[descendent_full_name] = descendent_leaves
+    _logger.debug(f'build_query_data_request: leaves_map={leaves_map}')
+
+    output_field_names = None
     if field_names is None:
         field_names = [field.name for field in schema]
+    else:
+        output_field_names  = [f.split('.')[0] for f in field_names]
+        # sort projected field_names according to positions to maintain ordering according to the schema
+        def compare_field_names_by_pos(field_name1, field_name2):
+            return leaves_map[field_name1][0]-leaves_map[field_name2][0]
+        field_names = sorted(field_names, key=cmp_to_key(compare_field_names_by_pos))
+    _logger.debug(f'build_query_data_request: sorted field_names={field_names} schema={schema}')
 
-    response_schema = pa.schema([fields_map[name] for name in field_names])
     projection_fields = []
+    projection_positions = []
     for field_name in field_names:
-        # TODO: only root-level projection pushdown is supported (i.e. no support for SELECT s.x FROM t)
         positions = leaves_map[field_name]
         _logger.info("projecting field=%s positions=%s", field_name, positions)
+        projection_positions.extend(positions)
         for leaf_position in positions:
             fb_field_index.Start(builder)
             fb_field_index.AddPosition(builder, leaf_position)
@@ -2309,6 +2874,8 @@ def build_query_data_request(schema: 'pa.Schema' = pa.schema([]), filters: dict 
     for offset in reversed(projection_fields):
         builder.PrependUOffsetTRelative(offset)
     projection = builder.EndVector()
+
+    response_schema = VastDBResponseSchema(schema, projection_positions, output_field_names=output_field_names)
 
     fb_source.Start(builder)
     fb_source.AddName(builder, source_name)

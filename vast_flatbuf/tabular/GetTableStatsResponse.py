@@ -38,7 +38,14 @@ class GetTableStatsResponse(object):
             return self._tab.Get(flatbuffers.number_types.Int64Flags, o + self._tab.Pos)
         return 0
 
-def Start(builder): builder.StartObject(2)
+    # GetTableStatsResponse
+    def IsExternalRowidAlloc(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(8))
+        if o != 0:
+            return bool(self._tab.Get(flatbuffers.number_types.BoolFlags, o + self._tab.Pos))
+        return False
+
+def Start(builder): builder.StartObject(3)
 def GetTableStatsResponseStart(builder):
     """This method is deprecated. Please switch to Start."""
     return Start(builder)
@@ -50,6 +57,10 @@ def AddSizeInBytes(builder, sizeInBytes): builder.PrependInt64Slot(1, sizeInByte
 def GetTableStatsResponseAddSizeInBytes(builder, sizeInBytes):
     """This method is deprecated. Please switch to AddSizeInBytes."""
     return AddSizeInBytes(builder, sizeInBytes)
+def AddIsExternalRowidAlloc(builder, isExternalRowidAlloc): builder.PrependBoolSlot(2, isExternalRowidAlloc, 0)
+def GetTableStatsResponseAddIsExternalRowidAlloc(builder, isExternalRowidAlloc):
+    """This method is deprecated. Please switch to AddIsExternalRowidAlloc."""
+    return AddIsExternalRowidAlloc(builder, isExternalRowidAlloc)
 def End(builder): return builder.EndObject()
 def GetTableStatsResponseEnd(builder):
     """This method is deprecated. Please switch to End."""
