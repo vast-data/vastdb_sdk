@@ -3,7 +3,7 @@
 **NOTE**
 - Please note that this API & the documentation is currently in a pre-release stage. Until version 1.x is officially released, the API should be considered unstable.
 
-## VastdbApi - Content Overview 
+## VastdbApi - Content Overview
 
 - **[Introduction](#what-is-a-vastdbapi)**
 - **[Getting Started](#getting-started)**
@@ -34,12 +34,12 @@
       - **[Timestamp Filtering](#timestamp-filtering)**
       - **[Reporting](#reporting)**
       - **[Catalog Snapshots Comparisons](#catalog-snapshots-comparisons)**
-      
+
   
 
 ## What is a VastdbApi
 
-**`VastdbApi`** is a Python based API designed for interacting with VastDB & Vast Catalog, enabling operations such as schema and table management, data querying, and transaction handling.  
+**`VastdbApi`** is a Python based API designed for interacting with VastDB & Vast Catalog, enabling operations such as schema and table management, data querying, and transaction handling.
 Key libraries used in this API include requests for HTTP requests, pyarrow for handling Apache Arrow data formats, and flatbuffers for efficient serialization of data structures.
 
 
@@ -67,7 +67,7 @@ Key libraries used in this API include requests for HTTP requests, pyarrow for h
 - Recommended to have the latest pip and setuptools:
   - `pip install --upgrade pip setuptools`
 
-#### Install the 'vastdb' package 
+#### Install the 'vastdb' package
 ```
 pip install vastdb
 ```
@@ -96,9 +96,8 @@ pip install vastdb
 
 
 ```python
-from vastdb import vastdb_api
 import pyarrow as pa
-from vastdb.vastdb_api import VastdbApi
+from vastdb.api import VastdbApi
 
 def create_vastdb_session(access_key, secret_key):
     return VastdbApi(host='172.25.54.1:172.16.54.16', access_key=access_key, secret_key=secret_key)
@@ -185,13 +184,36 @@ vastdb_session = create_vastdb_session(access_key, secret_key)
 - **Parameters**:
   - `bucket` (str): Name of the bucket.
   - `schema` (str): Name of the schema.
-  - `table` (str): Name of the table to create.
+  - `name` (str): Name of the table to create.
+  - `arrow_schema` (pyarrow.Schema): A pyarrow schema which defines the table columns
   - `txid` (int, optional): Transaction ID (default is `0`).  
-  - `tenant_id` (int, optional): Tenant ID (default is `0`). 
 - **Example**:
 ```python
   arrow_schema = pa.schema([('column1', pa.int32()), ('column2', pa.string())])
   vastdb_session.create_table(bucket_name, schema_name, table='new_table', arrow_schema=arrow_schema)
+```
+
+#### `create_table_from_parquet_file`
+
+- **Usage**: Create a new table using the schema of a specified parquet file.
+- **Parameters**:
+  - `bucket` (str): Name of the bucket.
+  - `schema` (str): Name of the schema.
+  - `name` (str): Name of the table to create.
+  - 'parquet_path' (str, optional): Parquet file from which to build the pyarrow.Schema which define the table columns
+  - 'parquet_bucket_name' (str, optional): Name of bucket that contains the Parquet object from which to build the pyarrow.Schema which define the table columns
+  - 'parquet_object_name' (str, optional): Name of the Parquet object from which to build the pyarrow.Schema which define the table columns
+  - `txid` (int, optional): Transaction ID (default is `0`).
+  - `client_tags` (list of str, optional): Strings identifying the client (default is empty `[]`).
+
+- **Example**:
+```python
+  # Create from parquet file on a filesystem
+  vastdb_session.create_table(bucket_name, schema_name, table='new_table', parquet_path='path/to/file.parquet')
+  # Create from parquet object on as s3 bucket
+  vastdb_session.create_table(bucket_name, schema_name, table='new_table',
+                              parquet_bucket_name='s3-bucket-name',
+                              parquet_object_name='path/to/object.parquet')
 ```
 
 #### `list_tables`
@@ -299,16 +321,16 @@ vastdb_session = create_vastdb_session(access_key, secret_key)
   - `bucket` (str): The bucket to retrieve data from.
   - `schema` (str): The schema to use.
   - `table` (str): The name of the table.
-  - `name` (str): The name of the column.
+  - `column_name` (str): The name of the column.
   - `txid` (int, optional): Transaction ID (default is `0`).
   - `column_properties` (str, optional): Properties/metadata of the column (default is an empty string `""`).
-  - `new_name` (str, optional): New column name (default is an empty string `""`).
+  - `new_column_name` (str, optional): New column name (default is an empty string `""`).
   - `column_sep` (str, optional): Separator for columns (default is `"."`).
   - `column_stats` (str, optional): Statistics for the column (default is an empty string `""`).
   - `tenant_id` (int, optional): Tenant ID (default is `0`).
 - **Example**:
 ```python
-  vastdb_session.alter_column(bucket_name, schema_name, table_name, name='existing_column', new_name='renamed_column')
+  vastdb_session.alter_column(bucket_name, schema_name, table_name, column_name='existing_column', new_column_name='renamed_column')
 ```
 
 #### `drop_columns`
@@ -383,7 +405,7 @@ vastdb_session = create_vastdb_session(access_key, secret_key)
   - `filed_names` (list, optional): A list of column names to be returned in the output table
 
 ##### Filter Predicates in VastdbApi
-- You can use these filters in the VastdbApi API:  
+- You can use these filters in the VastdbApi API:
 
   - **`eq`**: Equal -> `'column_name': ['eq value']`
   - **`ge`**: Greater Than or Equal -> `'column_name': ['ge value']`
@@ -394,18 +416,21 @@ vastdb_session = create_vastdb_session(access_key, secret_key)
   - **`is_not_null`**: Checks for non-null values -> `'column_name': ['is_not_null']`
 
 **Note:**
+  - OR of filters on the same column is done as follows `filters = {'Citizen_Age': ['eq 38', 'eq 90')]`
+  - AND of filters on the same column requires () around the filter, such as `filters = {'Citizen_Age': [('gt 38', 'lt 90')]`
+  - It is possible to filter and project on a nested data type whose full ancesestry are structs.
   - If using pandas dataframe, pandas predicates can also be used. (Perfomance might be reflected because it's not API-native filters)
     - **Example** [Query a table using Pandas predicates](#query-a-table-using-pandas-predicates)
-    
+  - It is possible to filter and project on a nested data type whose full ancesestry are structs.
 
 - **Example**:
 ```python
-  # i.e. "SELECT Citizen_Age, Citizen_Name, Is_married FROM table WHERE Citizen_Age > 38 limit 10"
+  # i.e. "SELECT Citizen_Age, Citizen_Name, Is_married, Citizen_Address.Street, Citizen_Address.Number FROM table WHERE Citizen_Age > 38 AND Citizen_Age < 90 AND Citizen_Address.Street = 'Sesame' LIMIT 10"
 
-  field_names = ['Citizen_Age', 'Citizen_Name', 'Is_married']
-  filters = {'Citizen_Age': ['gt 38']}
+  field_names = ['Citizen_Age', 'Citizen_Name', 'Is_married', 'Citizen_Address.Street', 'Citizen_Address.Number']
+  filters = {'Citizen_Age': [('gt 38', 'lt 90')], 'Citizen_Address.Street': ['eq Sesame']}
 
-  table = vastdb_session.query(bucket_name, schema_name, table_name, filters=filters, field_names=field_names, limit=5, num_sub_splits=10)
+  table = vastdb_session.query(bucket_name, schema_name, table_name, filters=filters, field_names=field_names, limit=10, num_sub_splits=10)
   print(table)
 ```
   **[See more advanced examples on how to query data](#advanced-examples)**
@@ -473,13 +498,14 @@ for record_batch in vastdb_session.query_iterator('my_bucket', 'my_schema', 'my_
   - `schema` (str): Name of the schema.
   - `table` (str): Name of the table.
   - `rows` (dict): Array of cell values to insert. Dict-key are columns & Dict-values are values, i.e `{'column': ['value', 'value']}`
+  - `record_batch` (pyarrow.RecordBatch): pyarrow RecordBatch to insert
   - `rows_per_insert`: (int, optional) Split the operation so that each insert command will be limited to this value. default: None (will be selected
   automatically)
   - `txid` (int, optional): Transaction ID.
-  - `tenant_id` (int, optional): Tenant ID (default is `0`).  
 - **Example**:
 ```python
   vastdb_session.insert(bucket_name, schema_name, table_name, {'name': ['Alice','Bob'], 'age': [25,24]})
+  vastdb_session.insert(bucket_name, schema_name, table_name, record_batch)
 ```
 
 #### `update_rows`
@@ -510,7 +536,7 @@ for record_batch in vastdb_session.query_iterator('my_bucket', 'my_schema', 'my_
   - `tenant_id` (int, optional): Tenant ID (default is `0`).  
 - **Example**:
 ```python
-  from vastdb.vastdb_api import build_record_batch
+  from vastdb.api import build_record_batch
 
   column_to_delete = [(pa.uint64(), '$row_id')]  
   delete_rows = [9963, 9964] # row's id's to delete
@@ -628,7 +654,7 @@ for record_batch in vastdb_session.query_iterator('my_bucket', 'my_schema', 'my_
 
 ## VastdbApi help function
 
-- **Usage**: List all classes and functions in the vastdb_api
+- **Usage**: List all classes and functions in the vastdb.api
 - **Example**:
 ```python
   help(VastdbApi)
@@ -714,18 +740,18 @@ df = table.to_pandas()
 print(df)
 ```
 
-##### (Citizen_experience =< 25) AND (Citizen_Age between 55 to 75)
+##### (Citizen_experience => 25) AND (Citizen_Age between 55 to 75)
 
 ```python
 field_names = ['Citizen_Age', 'Citizen_Name', 'Citizen_experience', 'Citizen_id']
-filters = {'Citizen_experience': ['le 25'], 'Citizen_Age': [('ge 55' , 'le 75')]} 
+filters = {'Citizen_experience': ['le 25'], 'Citizen_Age': [('ge 55' , 'le 75')]}
 table = vastdb_session.query(bucket_name, schema_name, table_name, filters=filters, field_names=field_names)
 
 df = table.to_pandas()
 print(df)
 ```
 
-##### Query a table using Pandas predicates: 
+##### Query a table using Pandas predicates:
 
 ```python
 table = vastdb_session.query(bucket_name, schema_name, table_name)
@@ -742,9 +768,8 @@ display(df[(df['uid'] == 555) & (df['size'] > 4096)].head(10))
 
 ```python
 
-from vastdb import vastdb_api
 import pyarrow as pa
-from vastdb.vastdb_api import VastdbApi
+from vastdb.api import VastdbApi
 
 def create_vastdb_session(access_key, secret_key):
     return VastdbApi(host='pool1.vast55-kfs.vasteng.lab', access_key=access_key, secret_key=secret_key)
@@ -787,7 +812,7 @@ else:
 
 # INSERT DATA TO THE CREATED COLUMNS
 
-rows = { 
+rows = {
         'Citizen_Name': ['Alice', 'Bob', 'Koko', 'Menny'],
         'Citizen_Age': [45, 38, 27, 51],
         'Citizen_experience': [25.5, 17.9, 5.3, 28.2],
@@ -806,7 +831,7 @@ print(df)
 columns_to_update = [(pa.uint64(), '$row_id'), (pa.int64(), 'Citizen_Age'), (pa.bool_(), 'Is_married')]
 column_values_to_update = {pa.uint64(): [0, 2], pa.int64(): [43, 28], pa.bool_(): [False, True]}
 
-update_rows_req = vastdb_api.build_record_batch(columns_to_update, column_values_to_update)
+update_rows_req = build_record_batch(columns_to_update, column_values_to_update)
 vastdb_session.update_rows(bucket=bucket_name, schema=schema_name, table=table_name, record_batch=update_rows_req)
 
 table = vastdb_session.query(bucket_name, schema_name, table_name)
@@ -829,7 +854,7 @@ print(res_schema)
 
 # INSERT DATA TO THE ADDED COLUMNS
 
-rows = { 
+rows = {
         'Citizen_Name': ['Alice', 'Bob', 'Koko', 'Menny'],
         'Citizen_Age': [45, 38, 27, 51],
         'Citizen_experience': [25.5, 17.9, 5.3, 28.2],
@@ -1086,7 +1111,7 @@ df_filtered['full_path'] = df_filtered['parent_path'] + df_filtered['name']
 print("Objects created after 2023-09-01 12:00:01:")
 display(df_filtered['full_path'])
 ```
-  - **NOTE** : Same method can be applied for acces-time (atime), modification-time (mtime) & metadata-update-times (ctime). 
+  - **NOTE** : Same method can be applied for acces-time (atime), modification-time (mtime) & metadata-update-times (ctime).
 
 
 ### Reporting
