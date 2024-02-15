@@ -40,11 +40,11 @@ setup(
     license='Copyright (C) VAST Data Ltd.',
     packages=find_packages(),
     install_requires=[
-        'flatbuffers',
-        'pyarrow',
-        'requests',
-        'aws-requests-auth',
-        'xmltodict',
+        'flatbuffers==2.0.0',
+        'pyarrow==6.0.1',
+        'requests==2.24.0',
+        'aws-requests-auth==0.4.3',
+        'xmltodict==0.13.0',
         'protobuf==3.19.6'
     ],
     long_description=long_description,
