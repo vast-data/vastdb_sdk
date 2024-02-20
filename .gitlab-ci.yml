@@ -1,0 +1,14 @@
+.build: &build
+  image: alonid/rockylinux-rpm-builder:8.6.20227707
+  stage: build
+  interruptible: true
+  before_script:
+    - pip3 install wheel
+
+build_vastdb_sdk:
+  <<: *build
+  script:
+    - python3 setup.py bdist_wheel
+    - ./upload.sh
+  tags:
+    - package-builder

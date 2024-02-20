@@ -30,10 +30,18 @@ vastdb_session = create_vastdb_session(access_key, secret_key)
 
 """
 
+def _get_version_suffix():
+    import subprocess
+    import traceback
+
+    commit = subprocess.check_output(["git", "rev-parse", "HEAD"])
+    print(f"Git commit: {commit}")
+    return f".dev1+vast.{commit.decode()[:16]}"
+
 setup(
     name='vastdb',
     description='VAST Data SDK',
-    version='0.0.4.0',
+    version='0.0.4.0' + _get_version_suffix(),
     url='https://github.com/vast-data/vastdb_sdk',
     author='VAST DATA',
     author_email='hello@vastdata.com',
