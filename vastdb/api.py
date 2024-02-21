@@ -125,6 +125,11 @@ class AuthType(Enum):
     SIGV2 = "s3"
     BASIC = "basic"
 
+
+class TabularException(Exception):
+    pass
+
+
 def get_unit_to_flatbuff_time_unit(type):
     unit_to_flatbuff_time_unit = {
         'ns': TimeUnit.NANOSECOND,
@@ -1806,7 +1811,7 @@ class VastdbApi:
     source_files: list of (bucket_name, file_name)
     """
     def import_data(self, bucket, schema, table, source_files, txid=0, client_tags=[], expected_retvals=[], case_sensitive=True,
-                    schedule_id=None, retry_count=0):
+                    schedule_id=None, retry_count=0, blocking=True):
         """
         POST /mybucket/myschema/mytable?data HTTP/1.1
         Content-Length: ContentLength
@@ -1854,6 +1859,23 @@ class VastdbApi:
         builder.Finish(params)
         import_req = builder.Output()
 
+        def iterate_over_import_data_response(response, expected_retvals):
+            if response.status_code != 200:
+                return response
+
+            chunk_size = 1024
+            for chunk in res.iter_content(chunk_size=chunk_size):
+                chunk_dict = json.loads(chunk)
+                _logger.info(f"import data chunk={chunk}, result: {chunk_dict['res']}")
+                if chunk_dict['res'] in expected_retvals:
+                    _logger.info(f"import finished with expected result={chunk_dict['res']}, error message: {chunk_dict['err_msg']}")
+                    return response
+                elif chunk_dict['res'] != 'Success' and chunk_dict['res'] != 'TabularInProgress':
+                    raise TabularException(f"Received unexpected error in import_data. "
+                                           f"status: {chunk_dict['res']}, error message: {chunk_dict['err_msg']}")
+                _logger.info(f"import_data is in progress. status: {chunk_dict['res']}")
+            return response
+
         headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
         headers['Content-Length'] = str(len(import_req))
         headers['tabular-case-sensitive'] = str(case_sensitive)
@@ -1863,6 +1885,8 @@ class VastdbApi:
             headers['tabular-retry-count'] = str(retry_count)
         res = self.session.post(self._api_prefix(bucket=bucket, schema=schema, table=table, command="data"),
                                 data=import_req, headers=headers, stream=True)
+        if blocking:
+            res = iterate_over_import_data_response(res, expected_retvals)
 
         return self._check_res(res, "import_data", expected_retvals)
 
