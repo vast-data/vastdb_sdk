@@ -7,7 +7,7 @@ from datetime import datetime
 from enum import Enum
 from typing import List, Union, Optional, Iterator
 import xmltodict
-import concurrent
+import concurrent.futures
 import threading
 import queue
 import math
@@ -22,7 +22,6 @@ import hashlib
 import hmac
 import json
 import itertools
-import concurrent.futures
 from aws_requests_auth.aws_auth import AWSRequestsAuth
 from io import BytesIO
 
@@ -72,8 +71,8 @@ import vast_flatbuf.tabular.S3File as tabular_s3_file
 import vast_flatbuf.tabular.CreateProjectionRequest as tabular_create_projection
 import vast_flatbuf.tabular.Column as tabular_projecion_column
 import vast_flatbuf.tabular.ColumnType as tabular_proj_column_type
-#import vast_protobuf.tabular.rpc_pb2 as rpc_pb
-#import vast_protobuf.substrait.type_pb2 as type_pb
+import vast_protobuf.tabular.rpc_pb2 as rpc_pb
+import vast_protobuf.substrait.type_pb2 as type_pb
 
 from vast_flatbuf.org.apache.arrow.computeir.flatbuf.Deref import Deref
 from vast_flatbuf.org.apache.arrow.computeir.flatbuf.ExpressionImpl import ExpressionImpl
@@ -1004,7 +1003,7 @@ class VastdbApi:
 
     def create_table_from_parquet_schema(self, bucket, schema, name, parquet_path=None,
                                          parquet_bucket_name=None, parquet_object_name=None,
-                                         txid=0, client_tags=[]):
+                                         txid=0, client_tags=[], expected_retvals=[]):
 
         # Use pyarrow.parquet.ParquetDataset to open the Parquet file
         if parquet_path:
@@ -1025,7 +1024,7 @@ class VastdbApi:
             raise RuntimeError(f'invalid type(parquet_ds.schema) = {type(parquet_ds.schema)}')
 
         # create the table
-        return self.create_table(bucket, schema, name, arrow_schema, txid, client_tags)
+        return self.create_table(bucket, schema, name, arrow_schema, txid, client_tags, expected_retvals)
 
 
     def get_table_stats(self, bucket, schema, name, txid=0, client_tags=[], expected_retvals=[]):
@@ -1230,6 +1229,11 @@ class VastdbApi:
         if bc_list_internals:
             headers['tabular-bc-list-internal-col'] = "true"
 
+        if exact_match:
+            headers['tabular-name-exact-match'] = name_prefix
+        else:
+            headers['tabular-name-prefix'] = name_prefix
+
         res = self.session.get(self._api_prefix(bucket=bucket, schema=schema, table=table, command="column"),
                                headers=headers, stream=True)
         self._check_res(res, "list_columns", expected_retvals)
@@ -1243,11 +1247,8 @@ class VastdbApi:
                 schema_buf = b''.join(res.iter_content(chunk_size=128))
                 schema_out = pa.ipc.open_stream(schema_buf).schema
     #            _logger.info(f"schema={schema_out}")
-                for i in range(len(schema_out)):
-                    f = schema_out.field(i)
-                    add_column = not name_prefix or (exact_match and f.name == name_prefix) or (not exact_match and f.name.startswith(name_prefix))
-                    if add_column:
-                        columns.append([f.name, f.type, f.metadata, f])
+                for f in schema_out:
+                    columns.append([f.name, f.type, f.metadata, f])
 
             return columns, next_key, is_truncated, count
 
@@ -2296,6 +2297,12 @@ class VastdbApi:
         headers['tabular-max-keys'] = str(max_keys)
         headers['tabular-next-key'] = str(next_key)
         headers['tabular-list-count-only'] = str(count_only)
+
+        if exact_match:
+            headers['tabular-name-exact-match'] = name_prefix
+        else:
+            headers['tabular-name-prefix'] = name_prefix
+
         url_params = {'name': projection}
 
         res = self.session.get(self._api_prefix(bucket=bucket, schema=schema, table=table, command="projection-columns", url_params=url_params),
@@ -2311,12 +2318,9 @@ class VastdbApi:
             if not count_only:
                 schema_buf = b''.join(res.iter_content(chunk_size=128))
                 schema_out = pa.ipc.open_stream(schema_buf).schema
-                for i in range(len(schema_out)):
-                    f = schema_out.field(i)
+                for f in schema_out:
+                    columns.append([f.name, f.type, f.metadata])
                 #   sort_type = f.metadata[b'VAST:sort_type'].decode()
-                    add_column = not name_prefix or (exact_match and f.name == name_prefix) or (not exact_match and f.name.startswith(name_prefix))
-                    if add_column:
-                        columns.append([f.name, f.type, f.metadata])
 
             return columns, next_key, is_truncated, count
 
@@ -2332,7 +2336,6 @@ def parse_proto_buf_message(conn, msg_type):
     return msg
 
 def parse_rpc_message(conn, msg_name):
-    import vast_protobuf.tabular.rpc_pb2 as rpc_pb
     rpc_msg = parse_proto_buf_message(conn, rpc_pb.Rpc)
     if not rpc_msg.HasField(msg_name):
         raise IOError(f"expected {msg_name} but got rpc_msg={rpc_msg}")
@@ -2344,23 +2347,30 @@ def parse_rpc_message(conn, msg_name):
 
 def parse_select_row_ids_response(conn, debug=False):
     rows_arr = array.array('Q', [])
+    subsplits_state = {}
     while True:
         select_rows_msg, content = parse_rpc_message(conn, 'select_row_ids_response_packet')
         msg_type = select_rows_msg.WhichOneof('type')
         if msg_type == "body":
+            subsplit_id = select_rows_msg.body.subsplit.id
+            if select_rows_msg.body.subsplit.HasField("state"):
+                subsplits_state[subsplit_id] = select_rows_msg.body.subsplit.state
+
             arr = array.array('Q', content)
             rows_arr += arr
             if debug:
-                _logger.info(f"arr={arr}")
+                _logger.info(f"arr={arr} metrics={select_rows_msg.body.metrics}")
+            else:
+                _logger.info(f"num_rows={len(arr)} metrics={select_rows_msg.body.metrics}")
         elif msg_type == "trailing":
             status_code = select_rows_msg.trailing.status.code
             finished_pagination = select_rows_msg.trailing.finished_pagination
-            _logger.info(f"completed finished_pagination={finished_pagination} res={status_code}")
-            assert finished_pagination
+            total_metrics = select_rows_msg.trailing.metrics
+            _logger.info(f"completed finished_pagination={finished_pagination} res={status_code} metrics={total_metrics}")
             if status_code != 0:
                 raise IOError(f"Query data stream failed res={select_rows_msg.trailing.status}")
 
-            return rows_arr.tobytes()
+            return rows_arr, subsplits_state, finished_pagination
         else:
             raise EOFError(f"unknown response type={msg_type}")
 
@@ -2370,7 +2380,7 @@ def parse_count_rows_response(conn):
     assert count_rows_msg.WhichOneof('type') == "body"
     subsplit_id = count_rows_msg.body.subsplit.id
     num_rows = count_rows_msg.body.amount_of_rows
-    _logger.info(f"num_rows={num_rows} subsplit_id={subsplit_id}")
+    _logger.info(f"completed num_rows={num_rows} subsplit_id={subsplit_id} metrics={count_rows_msg.trailing.metrics}")
 
     count_rows_msg, _ = parse_rpc_message(conn, 'count_rows_response_packet')
     assert count_rows_msg.WhichOneof('type') == "trailing"
@@ -2381,7 +2391,6 @@ def parse_count_rows_response(conn):
 
 
 def get_proto_field_type(f):
-    import vast_protobuf.substrait.type_pb2 as type_pb
     t = type_pb.Type()
     if f.type.equals(pa.string()):
         t.string.nullability = 0
@@ -2409,7 +2418,6 @@ def serialize_proto_request(req):
     return buf
 
 def build_read_column_request(ids, schema, handles = [], num_subsplits = 1):
-    import vast_protobuf.tabular.rpc_pb2 as rpc_pb
     rpc_msg = rpc_pb.Rpc()
     req = rpc_msg.read_columns_request
     req.num_subsplits = num_subsplits
@@ -2428,8 +2436,7 @@ def build_read_column_request(ids, schema, handles = [], num_subsplits = 1):
     return serialize_proto_request(rpc_msg) + ids
 
 def build_count_rows_request(schema: 'pa.Schema' = pa.schema([]), filters: dict = None, field_names: list = None,
-                             split=(0, 1, 1), num_subsplits=1):
-    import vast_protobuf.tabular.rpc_pb2 as rpc_pb
+                             split=(0, 1, 1), num_subsplits=1, build_relation=False):
     rpc_msg = rpc_pb.Rpc()
     req = rpc_msg.count_rows_request
     req.split.id = split[0]
@@ -2440,12 +2447,21 @@ def build_count_rows_request(schema: 'pa.Schema' = pa.schema([]), filters: dict 
     for _ in range(num_subsplits):
         req.subsplits.states.append(state)
 
-    for f in schema:
-        req.relation.read.base_schema.names.append(f.name)
-        t = get_proto_field_type(f)
-        req.relation.read.base_schema.struct.types.append(t)
-
-    return serialize_proto_request(rpc_msg)
+    if build_relation:
+        # TODO use ibis or other library to build substrait relation
+        # meanwhile can be similar to build_count_rows_request
+        for field in schema:
+            req.relation.read.base_schema.names.append(field.name)
+            field_type = get_proto_field_type(field)
+            req.relation.read.base_schema.struct.types.append(field_type)
+        return serialize_proto_request(rpc_msg)
+    else:
+        query_data_flatbuffer = build_query_data_request(schema, filters, field_names)
+        serialized_flatbuffer = query_data_flatbuffer.serialized
+        req.legacy_relation.size = len(serialized_flatbuffer)
+        req.legacy_relation.offset = 0
+        rpc_msg.content_size = req.legacy_relation.size
+        return serialize_proto_request(rpc_msg) + serialized_flatbuffer
 
 """
  Expected messages in the ReadColumns flow:
@@ -2470,14 +2486,14 @@ def _iter_read_column_resp_columns(conn, readers):
 
         msg_type = read_column_resp.WhichOneof('type')
         if msg_type == "body":
-            body = read_column_resp.body
-            stream_id = body.subsplit_id
-            start_row_offset = body.start_row_offset
-            arrow_msg_size = body.arrow_ipc_info.size
-            _logger.info(f"start stream_id={stream_id} arrow_msg_size={arrow_msg_size} start_row_offset={start_row_offset}")
+            stream_id = read_column_resp.body.subsplit_id
+            start_row_offset = read_column_resp.body.start_row_offset
+            arrow_msg_size = read_column_resp.body.arrow_ipc_info.size
+            metrics = read_column_resp.body.metrics
+            _logger.info(f"start stream_id={stream_id} arrow_msg_size={arrow_msg_size} start_row_offset={start_row_offset} metrics={metrics}")
         elif msg_type == "trailing":
             status_code = read_column_resp.trailing.status.code
-            _logger.info(f"completed stream_id={stream_id} res={status_code}")
+            _logger.info(f"completed stream_id={stream_id} res={status_code} metrics{read_column_resp.trailing.metrics}")
             if status_code != 0:
                 raise IOError(f"Query data stream failed res={read_column_resp.trailing.status}")
 
@@ -2778,8 +2794,12 @@ def build_field(builder: flatbuffers.Builder, f: pa.Field, name: str):
             builder.PrependUOffsetTRelative(offset)
         children = builder.EndVector()
 
+        field_type, field_type_type = get_field_type(builder, f)
+
         child_col_name = builder.CreateString("entries")
         fb_field.Start(builder)
+        fb_field.AddTypeType(builder, field_type_type)
+        fb_field.AddType(builder, field_type)
         fb_field.AddName(builder, child_col_name)
         fb_field.AddChildren(builder, children)
 
@@ -2793,9 +2813,12 @@ def build_field(builder: flatbuffers.Builder, f: pa.Field, name: str):
         children = builder.EndVector()
 
     col_name = builder.CreateString(name)
-    _logger.info(f"add col_name={name} to fb")
+    field_type, field_type_type = get_field_type(builder, f)
+    _logger.info(f"add col_name={name} type_type={field_type_type} to fb")
     fb_field.Start(builder)
     fb_field.AddName(builder, col_name)
+    fb_field.AddTypeType(builder, field_type_type)
+    fb_field.AddType(builder, field_type)
     if children is not None:
         _logger.info(f"add col_name={name} childern")
         fb_field.AddChildren(builder, children)
@@ -2815,25 +2838,39 @@ class QueryDataRequest:
 
 
 def build_select_rows_request(schema: 'pa.Schema' = pa.schema([]), filters: dict = None, field_names: list = None, split_id=0,
-                              total_split=1, row_group_per_split=8, num_subsplits=1):
-    import vast_protobuf.tabular.rpc_pb2 as rpc_pb
+                              total_split=1, row_group_per_split=8, num_subsplits=1, build_relation=False, limit_rows=0,
+                              subsplits_state=None):
     rpc_msg = rpc_pb.Rpc()
     select_rows_req = rpc_msg.select_row_ids_request
     select_rows_req.split.id = split_id
     select_rows_req.split.config.total = total_split
     select_rows_req.split.config.row_groups_per_split = row_group_per_split
+    if limit_rows:
+        select_rows_req.limit_rows = limit_rows
 
     # add empty state
-    state = rpc_pb.SubSplit.State()
-    for _ in range(num_subsplits):
-        select_rows_req.subsplits.states.append(state)
+    empty_state = rpc_pb.SubSplit.State()
+    for i in range(num_subsplits):
+        if subsplits_state and i in subsplits_state:
+            select_rows_req.subsplits.states.append(subsplits_state[i])
+        else:
+            select_rows_req.subsplits.states.append(empty_state)
 
-    for field in schema:
-        select_rows_req.relation.read.base_schema.names.append(field.name)
-        field_type = get_proto_field_type(field)
-        select_rows_req.relation.read.base_schema.struct.types.append(field_type)
-
-    return serialize_proto_request(rpc_msg)
+    if build_relation:
+        # TODO use ibis or other library to build substrait relation
+        # meanwhile can be similar to build_count_rows_request
+        for field in schema:
+            select_rows_req.relation.read.base_schema.names.append(field.name)
+            field_type = get_proto_field_type(field)
+            select_rows_req.relation.read.base_schema.struct.types.append(field_type)
+        return serialize_proto_request(rpc_msg)
+    else:
+        query_data_flatbuffer = build_query_data_request(schema, filters, field_names)
+        serialized_flatbuffer = query_data_flatbuffer.serialized
+        select_rows_req.legacy_relation.size = len(serialized_flatbuffer)
+        select_rows_req.legacy_relation.offset = 0
+        rpc_msg.content_size = select_rows_req.legacy_relation.size
+        return serialize_proto_request(rpc_msg) + serialized_flatbuffer
 
     # TODO use ibis or other library to build SelectRowIds protobuf
     # meanwhile can be similar to build_count_rows_request
