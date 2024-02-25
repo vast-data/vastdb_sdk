@@ -1,3 +1,4 @@
+import os
 from setuptools import setup, find_packages
 
 long_description = """
@@ -38,10 +39,14 @@ def _get_version_suffix():
     print(f"Git commit: {commit}")
     return f".dev1+vast.{commit.decode()[:16]}"
 
+suffix = ''
+if os.environ.get('VASTDB_APPEND_VERSION_SUFFIX'):
+    suffix = _get_version_suffix()
+
 setup(
     name='vastdb',
     description='VAST Data SDK',
-    version='0.0.4.0' + _get_version_suffix(),
+    version='0.0.4.0' + suffix,
     url='https://github.com/vast-data/vastdb_sdk',
     author='VAST DATA',
     author_email='hello@vastdata.com',

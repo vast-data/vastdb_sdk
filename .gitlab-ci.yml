@@ -8,7 +8,7 @@
 build_vastdb_sdk:
   <<: *build
   script:
-    - python3 setup.py bdist_wheel
+    - VASTDB_APPEND_VERSION_SUFFIX=true python3 setup.py bdist_wheel
     - ./upload.sh
   tags:
     - package-builder
