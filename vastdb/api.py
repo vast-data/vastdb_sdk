@@ -932,6 +932,7 @@ class VastdbApi:
         headers['tabular-list-count-only'] = str(count_only)
 
         schemas = []
+        schema = schema or ""
         res = self.session.get(self._api_prefix(bucket=bucket, schema=schema, command="schema"), headers=headers, stream=True)
         self._check_res(res, "list_schemas", expected_retvals)
         if res.status_code == 200:
@@ -1393,16 +1394,15 @@ class VastdbApi:
                                data=params, headers=headers, stream=True)
         return self._check_res(res, "query_data", expected_retvals)
 
-    def _list_table_columns(self, bucket, schema, table, filters=None, field_names=None):
+    def _list_table_columns(self, bucket, schema, table, filters=None, field_names=None, txid=0):
         # build a list of the queried column names
         queried_columns = []
         # get all columns from the table
         all_listed_columns = []
         next_key = 0
         while True:
-            cur_columns, next_key, is_truncated, count = self.list_columns(bucket=bucket, schema=schema,
-                                                                           table=table,
-                                                                           next_key=next_key)
+            cur_columns, next_key, is_truncated, count = self.list_columns(
+                bucket=bucket, schema=schema, table=table, next_key=next_key, txid=txid)
             if not cur_columns:
                 break
             all_listed_columns.extend(cur_columns)
@@ -1454,20 +1454,21 @@ class VastdbApi:
 
         return txid, created_txid
 
-    def _prepare_query(self, bucket, schema, table, num_sub_splits, filters=None, field_names=None, queried_columns=None):
-            if not queried_columns:
-                queried_columns = self._list_table_columns(bucket, schema, table, filters, field_names)
-            arrow_schema = pa.schema([(column[0], column[1]) for column in queried_columns])
-            _logger.debug(f'_prepare_query: arrow_schema = {arrow_schema}')
-            query_data_request = build_query_data_request(schema=arrow_schema, filters=filters, field_names=field_names)
-            if self.executor_hosts:
-                executor_hosts = self.executor_hosts
-            else:
-                executor_hosts = [self.host]
-            executor_sessions = [VastdbApi(executor_hosts[i], self.access_key, self.secret_key, self.username,
-                                           self.password, self.port, self.secure, self.auth_type) for i in range(len(executor_hosts))]
+    def _prepare_query(self, bucket, schema, table, num_sub_splits, filters=None, field_names=None,
+                       queried_columns=None, txid=0):
+        if not queried_columns:
+            queried_columns = self._list_table_columns(bucket, schema, table, filters, field_names, txid=txid)
+        arrow_schema = pa.schema([(column[0], column[1]) for column in queried_columns])
+        _logger.debug(f'_prepare_query: arrow_schema = {arrow_schema}')
+        query_data_request = build_query_data_request(schema=arrow_schema, filters=filters, field_names=field_names)
+        if self.executor_hosts:
+            executor_hosts = self.executor_hosts
+        else:
+            executor_hosts = [self.host]
+        executor_sessions = [VastdbApi(executor_hosts[i], self.access_key, self.secret_key, self.username,
+                                       self.password, self.port, self.secure, self.auth_type) for i in range(len(executor_hosts))]
 
-            return queried_columns, arrow_schema, query_data_request, executor_sessions
+        return queried_columns, arrow_schema, query_data_request, executor_sessions
 
     def _more_pages_exist(self, start_row_ids):
         for row_id in start_row_ids.values():
@@ -1561,7 +1562,7 @@ class VastdbApi:
         try:
             # prepare query
             queried_columns, arrow_schema, query_data_request, executor_sessions = \
-                self._prepare_query(bucket, schema, table, num_sub_splits, filters, field_names)
+                self._prepare_query(bucket, schema, table, num_sub_splits, filters, field_names, txid=txid)
 
             # define the per split threaded query func
             def query_iterator_split_id(self, split_id):
@@ -1730,7 +1731,7 @@ class VastdbApi:
         try:
             # prepare query
             queried_columns, arrow_schema, query_data_request, executor_sessions = \
-                self._prepare_query(bucket, schema, table, num_sub_splits, filters, field_names)
+                self._prepare_query(bucket, schema, table, num_sub_splits, filters, field_names, txid=txid)
 
             # define the per split threaded query func
             def query_split_id(self, split_id):
