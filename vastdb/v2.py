@@ -194,9 +194,9 @@ class Table:
 
         try:
             self.ctx._rpc.api.import_data(
-                self.bucket.name, self.schema.name, self.name, files_to_import, txid=self.ctx.tx)
+                self.bucket.name, self.schema.name, self.name, source_files, txid=self.ctx.tx)
         except requests.HTTPError as e:
-            raise ImportFilesError(f"import_files failed with status: {e.response.reason}, reason: {e.response.reason}")
+            raise ImportFilesError(f"import_files failed with status: {e.response.status_code}, reason: {e.response.reason}")
         except Exception as e:
             # TODO: investigate and raise proper error in case of failure mid import.
             raise ImportFilesError("import_files failed") from e
@@ -231,7 +231,7 @@ class Table:
 
 def _parse_table_info(table_info, schema: "Schema"):
     return Table(name=table_info.name, schema=schema, properties=table_info.properties,
-                 handle=table_info.handle, num_rows=table_info.num_rows, size=table_info.size)
+                 handle=table_info.handle, num_rows=table_info.num_rows, size=table_info.size_in_bytes)
 
 
 def _parse_endpoint(endpoint):
