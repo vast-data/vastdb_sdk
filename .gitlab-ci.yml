@@ -2,13 +2,25 @@
   image: alonid/rockylinux-rpm-builder:8.6.20227707
   stage: build
   interruptible: true
-  before_script:
-    - pip3 install wheel
 
-build_vastdb_sdk:
+
+build_and_upload:
   <<: *build
+  variables:
+    VASTDB_APPEND_VERSION_SUFFIX: 'true'
   script:
-    - VASTDB_APPEND_VERSION_SUFFIX=true python3 setup.py bdist_wheel
+    - pip3 install wheel
+    - python3 setup.py bdist_wheel
     - ./upload.sh
   tags:
-    - package-builder
+    - vast-dev-builder
+
+
+check_latest_python:
+  <<: *build
+  script:
+    - yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+    - yum install -y docker-ce
+    - docker build -f Dockerfile .
+  tags:
+    - vast-dev-builder
