@@ -33,6 +33,10 @@ class ImportFilesError(VastException):
     pass
 
 
+class InvalidArgumentError(VastException):
+    pass
+
+
 class RPC:
     def __init__(self, access, secret, endpoint):
         self.access_key = access
@@ -187,11 +191,21 @@ class Table:
     def import_files(self, files_to_import: [str]) -> None:
         source_files = {}
         for f in files_to_import:
-            components = f.split(os.path.sep)
-            bucket_name = components[1]
-            object_path = os.path.sep.join(components[2:])
+            bucket_name, object_path = _parse_bucket_and_object_names(f)
             source_files[(bucket_name, object_path)] = b''
 
+        self._execute_import(source_files)
+
+    def import_partitioned_files(self, files_and_partitions: {str: pa.RecordBatch}) -> None:
+        source_files = {}
+        for f, record_batch in files_and_partitions.items():
+            bucket_name, object_path = _parse_bucket_and_object_names(f)
+            serialized_batch = _serialize_record_batch(record_batch)
+            source_files = {(bucket_name, object_path): serialized_batch.to_pybytes()}
+
+        self._execute_import(source_files)
+
+    def _execute_import(self, source_files):
         try:
             self.ctx._rpc.api.import_data(
                 self.bucket.name, self.schema.name, self.name, source_files, txid=self.ctx.tx)
@@ -228,10 +242,32 @@ class Table:
         log.info("Dropped column(s): %s", column_to_drop)
         self.arrow_schema = self.columns()
 
+    def rename_column(self, current_column_name: str, new_column_name: str) -> None:
+        self.ctx._rpc.api.alter_column(self.bucket.name, self.schema.name, self.name, name=current_column_name,
+                                       new_name=new_column_name, txid=self.ctx.tx)
+        log.info("Renamed column: %s to %s", current_column_name, new_column_name)
+        self.arrow_schema = self.columns()
+
 
 def _parse_table_info(table_info, schema: "Schema"):
     return Table(name=table_info.name, schema=schema, properties=table_info.properties,
                  handle=table_info.handle, num_rows=table_info.num_rows, size=table_info.size_in_bytes)
+
+
+def _parse_bucket_and_object_names(path: str) -> (str, str):
+    if not path.startswith('/'):
+        raise InvalidArgumentError(f"Path {path} must start with a '/'")
+    components = path.split(os.path.sep)
+    bucket_name = components[1]
+    object_path = os.path.sep.join(components[2:])
+    return bucket_name, object_path
+
+
+def _serialize_record_batch(record_batch: pa.RecordBatch) -> pa.lib.Buffer:
+    sink = pa.BufferOutputStream()
+    with pa.ipc.new_stream(sink, record_batch.schema) as writer:
+        writer.write(record_batch)
+    return sink.getvalue()
 
 
 def _parse_endpoint(endpoint):
