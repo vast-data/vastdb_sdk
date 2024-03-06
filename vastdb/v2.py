@@ -93,6 +93,9 @@ class Bucket:
         self.name = name
         self.ctx = ctx
 
+    def __repr__(self):
+        return f"{type(self).__name__}(name={self.name})"
+
     def create_schema(self, path: str) -> None:
         self.ctx._rpc.api.create_schema(self.name, path, txid=self.ctx.tx)
         log.info("Created schema: %s", path)
@@ -130,6 +133,9 @@ class Schema:
         self.bucket = bucket
         self.ctx = bucket.ctx
         self.properties = properties or {}
+
+    def __repr__(self):
+        return f"{type(self).__name__}(name={self.name})"
 
     def create_table(self, table_name: str, columns: pa.Schema) -> None:
         self.ctx._rpc.api.create_table(self.bucket.name, self.name, table_name, columns, txid=self.ctx.tx)
@@ -182,6 +188,10 @@ class Table:
         self.bucket = schema.bucket
         self.stats = TableStats(num_rows, size)
         self.arrow_schema = arrow_schema or self.columns()
+        self._ibis_table = ibis.Schema.from_pyarrow(self.arrow_schema)
+
+    def __repr__(self):
+        return f"{type(self).__name__}(name={self.name})"
 
     def columns(self) -> pa.Schema:
         cols = self.ctx._rpc.api._list_table_columns(self.bucket.name, self.schema.name, self.name, txid=self.ctx.tx)
@@ -215,7 +225,7 @@ class Table:
             # TODO: investigate and raise proper error in case of failure mid import.
             raise ImportFilesError("import_files failed") from e
 
-    def select(self, column_names: [str], predicates: [ibis.expr.types.BooleanColumn], limit: int = None,
+    def select(self, column_names: [str], predicates: ibis.expr.types.BooleanColumn, limit: int = None,
                config: "QueryConfig" = None):
         raise NotImplemented
 
@@ -247,6 +257,9 @@ class Table:
                                        new_name=new_column_name, txid=self.ctx.tx)
         log.info("Renamed column: %s to %s", current_column_name, new_column_name)
         self.arrow_schema = self.columns()
+
+    def __getitem__(self, col_name):
+        return self._ibis_table[col_name]
 
 
 def _parse_table_info(table_info, schema: "Schema"):

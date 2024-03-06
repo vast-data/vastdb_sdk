@@ -45,6 +45,7 @@ if os.environ.get('VASTDB_APPEND_VERSION_SUFFIX'):
 
 setup(
     name='vastdb',
+    python_requires='>=3.9.0',
     description='VAST Data SDK',
     version='0.0.5.1' + suffix,
     url='https://github.com/vast-data/vastdb_sdk',
