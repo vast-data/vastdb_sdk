@@ -1,26 +1,49 @@
-.build: &build
-  image: alonid/rockylinux-rpm-builder:8.6.20227707
+variables:
+  DOCKER_REGISTRY: 110450271409.dkr.ecr.eu-west-1.amazonaws.com
+  PYSDK_BUILDER_IMAGE: $DOCKER_REGISTRY/dev/orion/builder:pysdk-builder
+
+
+Prebuild:
+  stage: .pre
+  script:
+    - aws ecr get-login-password | docker login -u AWS --password-stdin https://$DOCKER_REGISTRY
+    - docker build -f Dockerfile.prebuild -t $PYSDK_BUILDER_IMAGE .
+    - docker push $PYSDK_BUILDER_IMAGE
+  tags:
+    - code-builder-small-shell
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - Dockerfile.prebuild
+    - if: $CI_COMMIT_TAG
+
+
+Build and upload:
   stage: build
   interruptible: true
-
-
-build_and_upload:
-  <<: *build
+  image: $PYSDK_BUILDER_IMAGE
+  tags:
+    - vast-dev-builder
   variables:
     VASTDB_APPEND_VERSION_SUFFIX: 'true'
   script:
-    - pip3 install wheel
     - python3 setup.py bdist_wheel
     - ./upload.sh
+  artifacts:
+    paths:
+      - dist/
+
+
+Check Python versions:
+  stage: build
+  interruptible: true
+  image: $PYSDK_BUILDER_IMAGE
   tags:
     - vast-dev-builder
-
-
-check_latest_python:
-  <<: *build
+  variables:
+    VASTDB_APPEND_VERSION_SUFFIX: 'true'
   script:
-    - yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
-    - yum install -y docker-ce
-    - docker build -f Dockerfile .
-  tags:
-    - vast-dev-builder
+    - docker build -f Dockerfile --build-arg BASE_IMAGE=python:$VERSION .
+  parallel:
+    matrix:
+      - VERSION: ['3.9', '3.10', '3.11', '3.12']
