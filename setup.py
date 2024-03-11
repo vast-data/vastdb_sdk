@@ -60,7 +60,7 @@ setup(
         'aws-requests-auth',
         'xmltodict',
         'protobuf==3.19.6',
-        'ibis',
+        'ibis-framework',
         'boto3'
     ],
     long_description=long_description,
