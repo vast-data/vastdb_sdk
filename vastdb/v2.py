@@ -309,7 +309,14 @@ class QueryConfig:
 
 
 @contextmanager
-def context(access, secret, endpoint):
+def context(access=None, secret=None, endpoint=None):
+    if access is None:
+        access = os.environ['AWS_ACCESS_KEY_ID']
+    if secret is None:
+        secret = os.environ['AWS_SECRET_ACCESS_KEY']
+    if endpoint is None:
+        endpoint = os.environ['AWS_S3_ENDPOINT_URL']
+
     rpc = RPC(access, secret, endpoint)
     tx = rpc.begin_transaction()
     try:
