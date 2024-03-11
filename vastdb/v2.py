@@ -1,12 +1,14 @@
+from contextlib import contextmanager
+from dataclasses import dataclass
 import logging
-import ibis
 import os
-import requests
+
 import boto3
 import botocore
+import ibis
 import pyarrow as pa
-from dataclasses import dataclass
-from contextlib import contextmanager
+import requests
+
 from vastdb.api import VastdbApi
 
 
