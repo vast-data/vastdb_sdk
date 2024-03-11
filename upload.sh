@@ -61,7 +61,7 @@ main() {
 
     jfrog rt upload --flat=false "${other_components}/" "${first_component}/"
 
-    echo "Uploaded as: ${ci_project_name}/${unique_build}"
+    echo "Uploaded to: ${ARTIFACTORY_URL}/${artifacts_path}"
 }
 
 jf-install
