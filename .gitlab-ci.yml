@@ -11,6 +11,9 @@ Prebuild:
     - aws ecr get-login-password | docker login -u AWS --password-stdin https://$DOCKER_REGISTRY
     - docker build -f Dockerfile.prebuild -t $PYSDK_BUILDER_IMAGE .
     - docker push $PYSDK_BUILDER_IMAGE
+  rules:
+    - changes:
+      - Dockerfile.prebuild
   tags:
     - code-builder-small-shell
 
