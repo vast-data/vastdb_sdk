@@ -24,6 +24,7 @@ import json
 import itertools
 from aws_requests_auth.aws_auth import AWSRequestsAuth
 from io import BytesIO
+import urllib3
 
 import vast_flatbuf.org.apache.arrow.computeir.flatbuf.BinaryLiteral as fb_binary_lit
 import vast_flatbuf.org.apache.arrow.computeir.flatbuf.BooleanLiteral as fb_bool_lit
@@ -99,24 +100,7 @@ S3 Tabular API
 """
 
 
-def get_logger(name):
-    log = logging.getLogger(name)
-    log.setLevel(logging.ERROR)
-    ch = logging.StreamHandler()
-    ch.setLevel(logging.INFO)
-    ch.set_name('tabular_stream_handler')
-    formatter = logging.Formatter("%(asctime)s:%(levelname)s:%(message)s")
-    ch.setFormatter(formatter)
-    log.addHandler(ch)
-    log.propagate = False
-    return log
-
-
-_logger = get_logger(__name__)
-
-
-def set_tabular_log_level(level: int = logging.INFO):
-    _logger.setLevel(level)
+_logger = logging.getLogger(__name__)
 
 
 class AuthType(Enum):
@@ -720,44 +704,24 @@ def generate_ip_range(ip_range_str):
     ips = ['.'.join(start_parts[:-1] + [str(start_last_part + i)]) for i in range(num_ips)]
     return ips
 
-def parse_executor_hosts(host):
-        executor_hosts_parsed = host.split(',')
-        executor_hosts_parsed = [host.strip() for host in executor_hosts_parsed]
-        executor_hosts = []
-        for executor_host in executor_hosts_parsed:
-            is_ip_range=False
-            if ':' in executor_host:
-                try:
-                    socket.inet_aton(executor_host.split(':')[0])
-                    socket.inet_aton(executor_host.split(':')[1])
-                    is_ip_range = True
-                except:
-                    pass
-            if is_ip_range:
-                executor_hosts.extend(generate_ip_range(executor_host))
-            else:
-                executor_hosts.append(executor_host)
-        return executor_hosts
-
 class VastdbApi:
-    def __init__(self, host, access_key, secret_key, username=None, password=None, port=None,
+    def __init__(self, endpoint, access_key, secret_key, username=None, password=None,
                  secure=False, auth_type=AuthType.SIGV4):
-        executor_hosts = parse_executor_hosts(host)
-        host = executor_hosts[0]
-        self.host = host
+        url_dict = urllib3.util.parse_url(endpoint)._asdict()
         self.access_key = access_key
         self.secret_key = secret_key
         self.username = username
         self.password = password
-        self.port = port
         self.secure = secure
         self.auth_type = auth_type
-        self.executor_hosts = executor_hosts
+        self.executor_hosts = [endpoint]  # TODO: remove
 
         username = username or ''
         password = password or ''
-        if not port:
-            port = 443 if secure else 80
+        if not url_dict['port']:
+            url_dict['port'] = 443 if secure else 80
+
+        self.port = url_dict['port']
 
         self.session = requests.Session()
         self.session.verify = False
@@ -765,10 +729,10 @@ class VastdbApi:
         if auth_type == AuthType.BASIC:
             self.session.auth = requests.auth.HTTPBasicAuth(username, password)
         else:
-            if port != 80 and port != 443:
-                self.aws_host = f'{host}:{port}'
+            if url_dict['port'] != 80 and url_dict['port'] != 443:
+                self.aws_host = '{host}:{port}'.format(**url_dict)
             else:
-                self.aws_host = f'{host}'
+                self.aws_host = '{host}'.format(**url_dict)
 
             self.session.auth = AWSRequestsAuth(aws_access_key=access_key,
                                                 aws_secret_access_key=secret_key,
@@ -776,8 +740,12 @@ class VastdbApi:
                                                 aws_region='us-east-1',
                                                 aws_service='s3')
 
-        proto = "https" if secure else "http"
-        self.url = f"{proto}://{self.aws_host}"
+        if not url_dict['scheme']:
+            url_dict['scheme'] = "https" if secure else "http"
+
+        url = urllib3.util.Url(**url_dict)
+        self.url = str(url)
+        _logger.debug('url=%s aws_host=%s', self.url, self.aws_host)
 
     def update_mgmt_session(self, access_key: str, secret_key: str, auth_type=AuthType.SIGV4):
         if auth_type != AuthType.BASIC:
@@ -1461,10 +1429,7 @@ class VastdbApi:
         arrow_schema = pa.schema([(column[0], column[1]) for column in queried_columns])
         _logger.debug(f'_prepare_query: arrow_schema = {arrow_schema}')
         query_data_request = build_query_data_request(schema=arrow_schema, filters=filters, field_names=field_names)
-        if self.executor_hosts:
-            executor_hosts = self.executor_hosts
-        else:
-            executor_hosts = [self.host]
+        executor_hosts = self.executor_hosts
         executor_sessions = [VastdbApi(executor_hosts[i], self.access_key, self.secret_key, self.username,
                                        self.password, self.port, self.secure, self.auth_type) for i in range(len(executor_hosts))]
 

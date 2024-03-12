@@ -41,12 +41,11 @@ class InvalidArgumentError(VastException):
 
 class RPC:
     def __init__(self, access, secret, endpoint):
-        self.access_key = access
-        self.secret_key = secret
-        self.endpoint, self.port = _parse_endpoint(endpoint)
-        self.api = VastdbApi(self.endpoint, self.access_key, self.secret_key, port=self.port)
-        self.s3 = boto3.client('s3', aws_access_key_id=self.access_key, aws_secret_access_key=self.secret_key,
-                               endpoint_url=f'http://{self.endpoint}:{self.port}')
+        self.api = VastdbApi(endpoint, access, secret)
+        self.s3 = boto3.client('s3',
+            aws_access_key_id=access,
+            aws_secret_access_key=secret,
+            endpoint_url=endpoint)
 
     def begin_transaction(self) -> int:
         res = self.api.begin_transaction()
