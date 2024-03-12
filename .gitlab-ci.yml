@@ -1,6 +1,8 @@
 variables:
   DOCKER_REGISTRY: 110450271409.dkr.ecr.eu-west-1.amazonaws.com
-  PYSDK_BUILDER_IMAGE: $DOCKER_REGISTRY/dev/orion/builder:pysdk-builder
+  ORION_PREFIX: $DOCKER_REGISTRY/dev/orion
+  PYSDK_BUILDER_IMAGE: $ORION_PREFIX:vastdb-python-sdk-builder-latest
+  PYSDK_IMAGE_PREFIX: $ORION_PREFIX:vastdb-python-sdk-pipe-$CI_PIPELINE_ID
 
 
 Prebuild:
@@ -11,11 +13,6 @@ Prebuild:
     - docker push $PYSDK_BUILDER_IMAGE
   tags:
     - code-builder-small-shell
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-      changes:
-        - Dockerfile.prebuild
-    - if: $CI_COMMIT_TAG
 
 
 Build and upload:
@@ -42,8 +39,11 @@ Check Python versions:
     - vast-dev-builder
   variables:
     VASTDB_APPEND_VERSION_SUFFIX: 'true'
+    PYSDK_IMAGE: ${PYSDK_IMAGE_PREFIX}-${PYTHON_VERSION}
   script:
-    - docker build -f Dockerfile --build-arg BASE_IMAGE=python:$VERSION .
+    - echo "Building $PYSDK_IMAGE..."
+    - docker build -f Dockerfile --build-arg BASE_IMAGE=python:${PYTHON_VERSION} -t $PYSDK_IMAGE .
+    - docker push $PYSDK_IMAGE
   parallel:
     matrix:
-      - VERSION: ['3.9', '3.10', '3.11', '3.12']
+      - PYTHON_VERSION: ['3.9', '3.10', '3.11', '3.12']

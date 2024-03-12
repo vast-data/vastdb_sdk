@@ -4,4 +4,5 @@ RUN yum-config-manager --add-repo https://download.docker.com/linux/centos/docke
 RUN yum install -y docker-ce
 
 RUN python3 --version
-RUN pip3 install wheel
+RUN pip3 install wheel pytest
+RUN pip3 freeze
