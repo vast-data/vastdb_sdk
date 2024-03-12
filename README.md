@@ -49,14 +49,14 @@ Key libraries used in this API include requests for HTTP requests, pyarrow for h
 
 - Linux / Windows / MacOS client server connected on data access with VAST cluster
 - Virtual IP pool configured with DNS service / List of all availble VIP's
-  - [Network Access through Virtual IPs](https://support.vastdata.com/hc/en-us/articles/5140602978844-Configuring-Network-Access)
+  - [Network Access through Virtual IPs](https://support.vastdata.com/s/topic/0TOV40000000FThOAM/configuring-network-access-v50)
 - VIP DNS name - for reaching all availble Cnodes in the API requests
-  - [Configuring the VAST Cluster DNS Service](https://support.vastdata.com/hc/en-us/articles/9859957831452-Configuring-the-VAST-Cluster-DNS-Service)
+  - [Configuring the VAST Cluster DNS Service](https://support.vastdata.com/s/article/UUID-ef655246-0bfa-d641-69d4-b139f1301019)
 - Python 3.7 or above
 - S3 User Access & Secret Keys on VAST cluster
-  - [Managing S3 User Access ](https://support.vastdata.com/hc/en-us/articles/9859972743580#UUID-6a15026a-d0bd-ebe6-e281-4b980674cecc_section-idm4577174596542432775810296988)
+  - [Managing S3 User Access](https://support.vastdata.com/s/article/UUID-4d2e7e23-b2fb-7900-d98f-96c31a499626)
 - Tabular Identity Policy with the proper permissions 
-  - [Creating Identity Policies](https://support.vastdata.com/hc/en-us/articles/9859958983708#UUID-c381c613-81bd-3c09-69c4-ba4dcd8e8d6d)
+  - [Creating Identity Policies](https://support.vastdata.com/s/article/UUID-14322b60-d6a2-89ac-3df0-3dfbb6974182)
 
 
 ### Install the VastdbApi
@@ -900,7 +900,7 @@ print(df)
 ### What is Vast Catalog
 
   - VAST Catalog is a database that indexes metadata attributes of all data on the cluster from periodic snapshots of the cluster's data. The database is stored on a dedicated S3 bucket on the cluster.
-  - [VAST Catalog Overview](https://support.vastdata.com/hc/en-us/articles/9859973783964-VAST-Catalog-Overview)
+  - [VAST Catalog Overview](https://support.vastdata.com/s/article/UUID-b7cf8427-3f50-ac3a-b1fe-c92649823ee7)
 
 
 ### Vast Catalog Schema Structure
@@ -926,7 +926,7 @@ print(df)
 | owner_name         | varchar                                 |
 
 
-- **This is only a few columns, for a full schema structure check [VAST Catalog Overview](https://support.vastdata.com/hc/en-us/articles/9859973783964-VAST-Catalog-Overview)**
+- **This is only a few columns, for a full schema structure check [VAST Catalog Overview](https://support.vastdata.com/s/article/UUID-b7cf8427-3f50-ac3a-b1fe-c92649823ee7)**
 
 
 ## Vast Catalog - Query examples with VastdbApi
