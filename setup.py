@@ -53,16 +53,7 @@ setup(
     author_email='hello@vastdata.com',
     license='Copyright (C) VAST Data Ltd.',
     packages=find_packages(),
-    install_requires=[
-        'flatbuffers',
-        'pyarrow',
-        'requests',
-        'aws-requests-auth',
-        'xmltodict',
-        'protobuf==3.19.6',
-        'ibis-framework',
-        'boto3'
-    ],
+    install_requires=open('requirements.txt').read().strip().split('\n'),
     long_description=long_description,
     long_description_content_type='text/markdown',
 )
