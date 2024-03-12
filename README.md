@@ -190,7 +190,7 @@ vastdb_session = create_vastdb_session(access_key, secret_key)
 - **Example**:
 ```python
   arrow_schema = pa.schema([('column1', pa.int32()), ('column2', pa.string())])
-  vastdb_session.create_table(bucket_name, schema_name, table='new_table', arrow_schema=arrow_schema)
+  vastdb_session.create_table(bucket_name, schema_name, 'new_table', arrow_schema=arrow_schema)
 ```
 
 #### `create_table_from_parquet_file`
@@ -209,9 +209,9 @@ vastdb_session = create_vastdb_session(access_key, secret_key)
 - **Example**:
 ```python
   # Create from parquet file on a filesystem
-  vastdb_session.create_table(bucket_name, schema_name, table='new_table', parquet_path='path/to/file.parquet')
+  vastdb_session.create_table(bucket_name, schema_name, 'new_table', parquet_path='path/to/file.parquet')
   # Create from parquet object on as s3 bucket
-  vastdb_session.create_table(bucket_name, schema_name, table='new_table',
+  vastdb_session.create_table(bucket_name, schema_name, 'new_table',
                               parquet_bucket_name='s3-bucket-name',
                               parquet_object_name='path/to/object.parquet')
 ```
@@ -896,12 +896,12 @@ print(df)
 
 ### Vast Catalog Schema Structure
 
-  - The Vast-Catalog has internal bucket, schema and table. To query the Catalog using the api, define these:
+  - The Vast-Catalog has internal bucket, schema and table. To query the Catalog using the api, use these values:
 
   ```python
-  bucket_name='vast-big-catalog-bucket'
-  schema_name='vast_big_catalog_schema'
-  table_name='vast_big_catalog_table'
+  'vast-big-catalog-bucket'
+  'vast_big_catalog_schema'
+  'vast_big_catalog_table'
   ```
 
   **The schema  columns**
