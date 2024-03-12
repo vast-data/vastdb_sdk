@@ -672,9 +672,9 @@ s3_files = {
 }
 
 result = vastdb_session.import_data(
-    bucket_name='vastdb-bucket-name',
-    schema_name='schema-name',
-    table_name='table-name',
+    'vastdb-bucket-name',
+    'schema-name',
+    'table-name',
     source_files=s3_files,
     txid=0,  # Use an appropriate transaction ID if necessary
     case_sensitive=False
@@ -688,14 +688,11 @@ else:
 
 ### List columns from a table
 
-```python
-bucket_name='vastdb-bucket'
-schema_name='schema-name'
 
 vastdb_session = create_vastdb_session(access_key, secret_key)
 
 # List columns in the table
-cols = vastdb_session.list_columns(bucket_name, schema_name, table_name)
+cols = vastdb_session.list_columns('bucket_name', 'schema_name', 'table_name')
 
 # Create a schema from the column list
 res_schema = pa.schema([(column[0], column[1]) for column in cols[0]])
@@ -707,11 +704,8 @@ print(res_schema)
 ##### Query table without limit, filters and field_names, i.e. "SELECT * FROM table"
 
 ```python
-bucket_name = "vastdb-bucket1"
-schema_name = "citizens-schema"
-table_name = "jersey-citizens-table"
 
-table = vastdb_session.query(bucket_name, schema_name, table_name)
+table = vastdb_session.query('vastdb-bucket1', 'citizens-schema', 'jersey-citizens-table')
 df = table.to_pandas()
 print(df)
 ```
@@ -722,7 +716,7 @@ print(df)
 field_names = ['Citizen_Age', 'Citizen_Name', 'Citizen_experience']
 filters = {'Citizen_Age': ['gt 35'], 'Citizen_experience': ['le 9']}
 
-table = vastdb_session.query(bucket_name, schema_name, table_name, filters=filters, field_names=field_names, limit=10)
+table = vastdb_session.query('vastdb-bucket1', 'citizens-schema', 'jersey-citizens-table', filters=filters, field_names=field_names, limit=10)
 
 df = table.to_pandas()
 print(df)
@@ -734,7 +728,7 @@ print(df)
 field_names = ['Citizen_Age', 'Citizen_Name', 'Citizen_experience']
 filters = {'Citizen_Age': ['eq 50', 'eq 55']}
 
-table = vastdb_session.query(bucket_name, schema_name, table_name, filters=filters, field_names=field_names)
+table = vastdb_session.query('vastdb-bucket1', 'citizens-schema', 'jersey-citizens-table', filters=filters, field_names=field_names)
 
 df = table.to_pandas()
 print(df)
@@ -745,7 +739,7 @@ print(df)
 ```python
 field_names = ['Citizen_Age', 'Citizen_Name', 'Citizen_experience', 'Citizen_id']
 filters = {'Citizen_experience': ['le 25'], 'Citizen_Age': [('ge 55' , 'le 75')]}
-table = vastdb_session.query(bucket_name, schema_name, table_name, filters=filters, field_names=field_names)
+table = vastdb_session.query('vastdb-bucket1', 'citizens-schema', 'jersey-citizens-table', filters=filters, field_names=field_names)
 
 df = table.to_pandas()
 print(df)
@@ -754,7 +748,7 @@ print(df)
 ##### Query a table using Pandas predicates:
 
 ```python
-table = vastdb_session.query(bucket_name, schema_name, table_name)
+table = vastdb_session.query('bucket_name', 'schema_name', 'table_name')
 df = table.to_pandas()
 pd.options.display.max_columns = None
 display(df[(df['uid'] == 555) & (df['size'] > 4096)].head(10))
@@ -780,11 +774,9 @@ secret_key='00k0oQ4eG6o4/PLGAWL..'
 
 vastdb_session = create_vastdb_session(access_key, secret_key)
 
-bucket_name = "vastdb-bucket1"
-schema_name = "my_schema_name"
 
 # Create the schema
-response = vastdb_session.create_schema(bucket_name, schema_name)
+response = vastdb_session.create_schema('bucket_name', 'schema_name')
 if response.status_code == 200:
     print("create_schema successful")
 else:
@@ -793,7 +785,6 @@ else:
 
 
 # Define columns schema (types) & create table with the columns included
-table_name = "my-table-name"
 
 arrow_schema = pa.schema([
         ('Citizen_Age', pa.int64()),
@@ -802,7 +793,7 @@ arrow_schema = pa.schema([
         ('Is_married', pa.bool_()),
     ])
 
-response = vastdb_session.create_table(bucket_name, schema_name, table_name, arrow_schema)
+response = vastdb_session.create_table('bucket_name', 'schema_name', 'table_name', arrow_schema)
 if response.status_code == 200:
     print("create_table successful")
 else:
@@ -819,11 +810,11 @@ rows = {
         'Is_married': [True, False, False, True]
 }
 
-vastdb_session.insert(bucket=bucket_name, schema=schema_name, table=table_name, rows=rows)
+vastdb_session.insert('bucket_name', 'schema_name', 'table_name', rows=rows)
 
 # query table without limit, filters and field_names, i.e. "SELECT * FROM table"
 
-table = vastdb_session.query(bucket_name, schema_name, table_name)
+table = vastdb_session.query('bucket_name', 'schema_name', 'table_name')
 df = table.to_pandas()
 print(df)
 
@@ -832,14 +823,14 @@ columns_to_update = [(pa.uint64(), '$row_id'), (pa.int64(), 'Citizen_Age'), (pa.
 column_values_to_update = {pa.uint64(): [0, 2], pa.int64(): [43, 28], pa.bool_(): [False, True]}
 
 update_rows_req = build_record_batch(columns_to_update, column_values_to_update)
-vastdb_session.update_rows(bucket=bucket_name, schema=schema_name, table=table_name, record_batch=update_rows_req)
+vastdb_session.update_rows('bucket_name', 'schema_name', 'table_name', record_batch=update_rows_req)
 
-table = vastdb_session.query(bucket_name, schema_name, table_name)
+table = vastdb_session.query('bucket_name', 'schema_name', 'table_name')
 print(f'table after update: {table.to_pydict()}')
 
 # Add additional columns to the table schema
 additional_columns_schema = pa.schema([('Citizen_id', pa.int64()), ('Citizen_street', pa.string())])
-response = vastdb_session.add_columns(bucket_name, schema_name, table_name, additional_columns_schema)
+response = vastdb_session.add_columns('bucket_name', 'schema_name', 'table_name', additional_columns_schema)
 if response.status_code == 200:
     print("add_columns successful")
 else:
@@ -847,7 +838,7 @@ else:
     exit(1)
 
 # retrieve columns and new schema
-cols = vastdb_session.list_columns(bucket_name, schema_name, table_name)
+cols = vastdb_session.list_columns('bucket_name', 'schema_name', 'table_name')
 res_schema = pa.schema([(column[0], column[1]) for column in cols[0]])
 print(res_schema)
 
@@ -863,12 +854,12 @@ rows = {
         'Citizen_street': ['street1', 'street4', 'street3', 'street2']
 }
 
-vastdb_session.insert(bucket=bucket_name, schema=schema_name, table=table_name, rows=rows)
+vastdb_session.insert('bucket_name', 'schema', 'table_name', rows=rows)
 
 
 # query table without limit, filters and field_names, i.e. "SELECT * FROM table"
 
-table = vastdb_session.query(bucket_name, schema_name, table_name)
+table = vastdb_session.query('bucket_name', 'schema_name', 'table_name')
 df = table.to_pandas()
 print(df)
 
@@ -879,7 +870,7 @@ s3_files = {('parquet-files-bucket', 'citizens_data_24.parquet'): b'',
             ('parquet-files-bucket', 'citizens_data_26.parquet'): b'',
             ('parquet-files-bucket', 'citizens_data_27.parquet'): b'',
            }
-response = vastdb_session.import_data(bucket_name, schema_name, table_name, source_files=s3_files)
+response = vastdb_session.import_data('bucket_name', 'schema_name', 'table_name', source_files=s3_files)
 if response.status_code == 200:
     print("import_data successful")
 else:
@@ -889,7 +880,7 @@ else:
 
 # query table after importing files, without limit, filters and field_names, i.e. "SELECT * FROM table"
 
-table = vastdb_session.query(bucket_name, schema_name, table_name)
+table = vastdb_session.query('bucket_name', 'schema_name', 'table_name')
 df = table.to_pandas()
 print(df)
 
