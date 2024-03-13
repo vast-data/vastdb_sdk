@@ -1012,14 +1012,12 @@ print(f"Total elements in the catalog: {total_elements}")
 import time
 import datetime
 
-date_str = '2023-11-24'
-pattern = '%Y-%m-%d'
-epoch = int(time.mktime(time.strptime(date_str, pattern)))
+ts = datetime.datetime.fromisoformat("2024-03-12 11:15").timestamp() * 1e3  # in milliseconds
 
 filters = {
     'owner_name': ['eq vastdata'],
     'size': ['gt 50000'],
-    'creation_time': [f'gt {epoch}']
+    'creation_time': [f'ge {ts:.0f}']
 }
 
 field_names = ['creation_time', 'uid', 'owner_name', 'size']
