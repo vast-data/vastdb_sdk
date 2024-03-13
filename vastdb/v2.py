@@ -47,6 +47,9 @@ class RPC:
             aws_secret_access_key=secret,
             endpoint_url=endpoint)
 
+    def __repr__(self):
+        return f'RPC(endpoint={self.api.url}, access={self.api.access_key})'
+
     def begin_transaction(self) -> int:
         res = self.api.begin_transaction()
         txid = res.headers['tabular-txid']
@@ -77,10 +80,10 @@ class RPC:
                 return False
 
 
+@dataclass
 class Context:
-    def __init__(self, rpc: RPC, tx: int):
-        self._rpc = rpc
-        self.tx = tx
+    _rpc: RPC
+    tx: int
 
     def bucket(self, name: str) -> "Bucket":
         if self._rpc.bucket_exists(name):
@@ -89,13 +92,10 @@ class Context:
             raise NotFoundError(f"Bucket {name} does not exist")
 
 
+@dataclass
 class Bucket:
-    def __init__(self, name: str, ctx: Context):
-        self.name = name
-        self.ctx = ctx
-
-    def __repr__(self):
-        return f"{type(self).__name__}(name={self.name})"
+    name: str
+    ctx: Context
 
     def create_schema(self, path: str) -> None:
         self.ctx._rpc.api.create_schema(self.name, path, txid=self.ctx.tx)
@@ -125,19 +125,18 @@ class Bucket:
             if not is_truncated:
                 break
 
-        return [Schema(name=schema[0], bucket=self, properties=schema[1]) for schema in schemas]
+        return [Schema(name=name, bucket=self) for name, *_ in schemas]
 
 
+@dataclass
 class Schema:
-    def __init__(self, name: str, bucket: "Bucket", properties: dict = None):
-        self.name = name
-        self.bucket = bucket
-        self.ctx = bucket.ctx
-        self.properties = properties or {}
+    name: str
+    bucket: Bucket
 
-    def __repr__(self):
-        return f"{type(self).__name__}(name={self.name})"
-
+    @property
+    def ctx(self):
+        return self.bucket.ctx
+    
     def create_table(self, table_name: str, columns: pa.Schema) -> None:
         self.ctx._rpc.api.create_table(self.bucket.name, self.name, table_name, columns, txid=self.ctx.tx)
         log.info("Created table: %s", table_name)
