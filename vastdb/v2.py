@@ -8,7 +8,7 @@ import ibis
 import pyarrow as pa
 import requests
 
-from vastdb.api import VastdbApi
+from vastdb.api import VastdbApi, serialize_record_batch, build_query_data_request, parse_query_data_response, TABULAR_INVALID_ROW_ID
 
 
 log = logging.getLogger(__name__)
@@ -228,12 +228,51 @@ class Table:
             # TODO: investigate and raise proper error in case of failure mid import.
             raise ImportFilesError("import_files failed") from e
 
-    def select(self, column_names: [str], predicates: ibis.expr.types.BooleanColumn, limit: int = None,
+    def select(self, columns: [str], predicate: ibis.expr.types.BooleanColumn = None,
                config: "QueryConfig" = None):
-        raise NotImplementedError
+        if config is None:
+            config = QueryConfig()
+
+        api = self.tx._rpc.api
+        field_names = columns
+        filters = []
+        bucket = self.bucket.name
+        schema = self.schema.name
+        table = self.name
+        query_data_request = build_query_data_request(
+            schema=self.arrow_schema, filters=filters, field_names=field_names)
+
+        start_row_ids = {i: 0 for i in range(config.num_sub_splits)}
+        assert config.num_splits == 1  # TODO()
+        split = (0, 1, config.num_row_groups_per_sub_split)
+        response_row_id = False
+
+        while not all(row_id == TABULAR_INVALID_ROW_ID for row_id in start_row_ids.values()):
+            response = api.query_data(
+                bucket=bucket,
+                schema=schema,
+                table=table,
+                params=query_data_request.serialized,
+                split=split,
+                num_sub_splits=config.num_sub_splits,
+                response_row_id=response_row_id,
+                txid=self.tx.txid,
+                limit_rows=config.limit_per_sub_split,
+                sub_split_start_row_ids=start_row_ids.items())
+
+            pages_iter = parse_query_data_response(
+                conn=response.raw,
+                schema=query_data_request.response_schema,
+                start_row_ids=start_row_ids)
+
+            for page in pages_iter:
+                for batch in page.to_batches():
+                    if len(batch) > 0:
+                        yield batch
 
     def insert(self, rows: pa.RecordBatch) -> None:
-        self.tx._rpc.api.insert(self.bucket.name, self.schema.name, self.name, record_batch=rows, txid=self.tx.txid)
+        blob = serialize_record_batch(rows)
+        self.tx._rpc.api.insert_rows(self.bucket.name, self.schema.name, self.name, record_batch=blob, txid=self.tx.txid)
 
     def drop(self) -> None:
         self.tx._rpc.api.drop_table(self.bucket.name, self.schema.name, self.name, txid=self.tx.txid)
@@ -305,7 +344,7 @@ class TableStats:
 @dataclass
 class QueryConfig:
     num_sub_splits: int = 4
-    num_splits: int = 16
+    num_splits: int = 1
     data_endpoints: [str] = None
     limit_per_sub_split: int = 128 * 1024
     num_row_groups_per_sub_split: int = 8
