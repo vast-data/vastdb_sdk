@@ -58,7 +58,6 @@ setup(
         'requests',
         'aws-requests-auth',
         'xmltodict',
-        'protobuf==3.19.6'
     ],
     long_description=long_description,
     long_description_content_type='text/markdown',
