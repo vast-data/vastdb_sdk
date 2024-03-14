@@ -1,11 +1,8 @@
-from vastdb import v2
-
 import logging
-
 
 log = logging.getLogger(__name__)
 
 
-def test_hello_world():
-    with v2.context() as ctx:
-        log.info("Hello World!")
+def test_hello_world(rpc):
+    with rpc.transaction() as tx:
+        assert tx.txid is not None

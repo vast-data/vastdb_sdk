@@ -1,12 +1,9 @@
-from vastdb import v2
+import pytest
 
 
-def test_schemas(test_bucket_name):
-    with v2.context() as ctx:
-        b = ctx.bucket(test_bucket_name)
-        for s in b.schemas():
-            s.drop()
-
+def test_schemas(rpc, clean_bucket_name):
+    with rpc.transaction() as tx:
+        b = tx.bucket(clean_bucket_name)
         assert b.schemas() == []
 
         b.create_schema('s1')
@@ -21,3 +18,23 @@ def test_schemas(test_bucket_name):
 
         s.drop()
         assert b.schemas() == []
+
+
+def test_commits_and_rollbacks(rpc, clean_bucket_name):
+    with rpc.transaction() as tx:
+        b = tx.bucket(clean_bucket_name)
+        assert b.schemas() == []
+        b.create_schema("s3")
+        assert b.schemas() != []
+        # implicit commit
+
+    with pytest.raises(ZeroDivisionError):
+        with rpc.transaction() as tx:
+            b = tx.bucket(clean_bucket_name)
+            b.schema("s3").drop()
+            assert b.schemas() == []
+            1/0  # rollback schema dropping
+
+    with rpc.transaction() as tx:
+        b = tx.bucket(clean_bucket_name)
+        assert b.schemas() != []

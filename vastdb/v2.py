@@ -19,10 +19,6 @@ class VastException(Exception):
     pass
 
 
-class TransactionError(VastException):
-    pass
-
-
 class NotFoundError(VastException):
     pass
 
@@ -40,7 +36,14 @@ class InvalidArgumentError(VastException):
 
 
 class RPC:
-    def __init__(self, access, secret, endpoint):
+    def __init__(self, access=None, secret=None, endpoint=None):
+        if access is None:
+            access = os.environ['AWS_ACCESS_KEY_ID']
+        if secret is None:
+            secret = os.environ['AWS_SECRET_ACCESS_KEY']
+        if endpoint is None:
+            endpoint = os.environ['AWS_S3_ENDPOINT_URL']
+
         self.api = VastdbApi(endpoint, access, secret)
         self.s3 = boto3.client('s3',
             aws_access_key_id=access,
@@ -50,55 +53,54 @@ class RPC:
     def __repr__(self):
         return f'RPC(endpoint={self.api.url}, access={self.api.access_key})'
 
-    def begin_transaction(self) -> int:
-        res = self.api.begin_transaction()
-        txid = res.headers['tabular-txid']
-        log.info("Started transaction: %s", txid)
-        return txid
+    def transaction(self):
+        return Transaction(self)
 
-    def close_transaction(self, txid) -> None:
-        try:
-            self.api.commit_transaction(txid)
-            log.info("Committed transaction %s", txid)
-        except Exception as e:
-            try:
-                self.api.rollback_transaction(txid)
-            finally:
-                log.info("Rolled-back transaction %s", txid)
-                raise TransactionError(f"Encountered an error while trying to commit transaction id: {txid}") from e
 
-    def bucket_exists(self, name: str) -> bool:
+def connect(*args, **kw):
+    return RPC(*args, **kw)
+
+
+@dataclass
+class Transaction:
+    _rpc: RPC
+    txid: int = None
+
+    def __enter__(self):
+        response = self._rpc.api.begin_transaction()
+        self.txid = int(response.headers['tabular-txid'])
+        log.debug("opened txid=%016x", self.txid)
+        return self
+
+    def __exit__(self, *args):
+        if args == (None, None, None):
+            log.debug("committing txid=%016x", self.txid)
+            self._rpc.api.commit_transaction(self.txid)
+        else:
+            log.exception("rolling back txid=%016x", self.txid)
+            self._rpc.api.rollback_transaction(self.txid)
+
+    def __repr__(self):
+        return f'Transaction(id=0x{self.txid:016x})'
+
+    def bucket(self, name: str) -> "Bucket":
         try:
-            self.s3.head_bucket(Bucket=name)
-            log.info("Found bucket: %s", name)
-            return True
+            self._rpc.s3.head_bucket(Bucket=name)
+            return Bucket(name, self)
         except botocore.exceptions.ClientError as e:
             if e.response['Error']['Code'] == 403:
                 raise AccessDeniedError(f"Access is denied to bucket: {name}") from e
             else:
-                log.info("Didn't find bucket: %s", name)
-                return False
-
-
-@dataclass
-class Context:
-    _rpc: RPC
-    tx: int
-
-    def bucket(self, name: str) -> "Bucket":
-        if self._rpc.bucket_exists(name):
-            return Bucket(name, self)
-        else:
-            raise NotFoundError(f"Bucket {name} does not exist")
+                raise NotFoundError(f"Bucket {name} does not exist") from e
 
 
 @dataclass
 class Bucket:
     name: str
-    ctx: Context
+    tx: Transaction
 
     def create_schema(self, path: str) -> None:
-        self.ctx._rpc.api.create_schema(self.name, path, txid=self.ctx.tx)
+        self.tx._rpc.api.create_schema(self.name, path, txid=self.tx.txid)
         log.info("Created schema: %s", path)
 
     def schema(self, path: str) -> "Schema":
@@ -117,7 +119,7 @@ class Bucket:
         log.info("list schemas param: schema=%s, exact_match=%s", schema, exact_match)
         while True:
             bucket_name, curr_schemas, next_key, is_truncated, _ = \
-                self.ctx._rpc.api.list_schemas(bucket=self.name, next_key=next_key, txid=self.ctx.tx,
+                self.tx._rpc.api.list_schemas(bucket=self.name, next_key=next_key, txid=self.tx.txid,
                                                name_prefix=schema, exact_match=exact_match)
             if not curr_schemas:
                 break
@@ -134,11 +136,11 @@ class Schema:
     bucket: Bucket
 
     @property
-    def ctx(self):
-        return self.bucket.ctx
-    
+    def tx(self):
+        return self.bucket.tx
+
     def create_table(self, table_name: str, columns: pa.Schema) -> None:
-        self.ctx._rpc.api.create_table(self.bucket.name, self.name, table_name, columns, txid=self.ctx.tx)
+        self.tx._rpc.api.create_table(self.bucket.name, self.name, table_name, columns, txid=self.tx.txid)
         log.info("Created table: %s", table_name)
 
     def table(self, name: str) -> "Table":
@@ -156,8 +158,8 @@ class Schema:
         exact_match = bool(table_name)
         while True:
             bucket_name, schema_name, curr_tables, next_key, is_truncated, _ = \
-                self.ctx._rpc.api.list_tables(
-                    bucket=self.bucket.name, schema=self.name, next_key=next_key, txid=self.ctx.tx,
+                self.tx._rpc.api.list_tables(
+                    bucket=self.bucket.name, schema=self.name, next_key=next_key, txid=self.tx.txid,
                     exact_match=exact_match, name_prefix=name_prefix)
             if not curr_tables:
                 break
@@ -168,11 +170,11 @@ class Schema:
         return [_parse_table_info(table, self) for table in tables]
 
     def drop(self) -> None:
-        self.ctx._rpc.api.drop_schema(self.bucket.name, self.name, txid=self.ctx.tx)
+        self.tx._rpc.api.drop_schema(self.bucket.name, self.name, txid=self.tx.txid)
         log.info("Dropped schema: %s", self.name)
 
     def rename(self, new_name) -> None:
-        self.ctx._rpc.api.alter_schema(self.bucket.name, self.name, txid=self.ctx.tx, new_name=new_name)
+        self.tx._rpc.api.alter_schema(self.bucket.name, self.name, txid=self.tx.txid, new_name=new_name)
         log.info("Renamed schema: %s to %s", self.name, new_name)
         self.name = new_name
 
@@ -184,7 +186,7 @@ class Table:
         self.schema = schema
         self.properties = properties if properties else {}
         self.handle = handle
-        self.ctx = schema.ctx
+        self.tx = schema.tx
         self.bucket = schema.bucket
         self.stats = TableStats(num_rows, size)
         self.arrow_schema = arrow_schema or self.columns()
@@ -194,7 +196,7 @@ class Table:
         return f"{type(self).__name__}(name={self.name})"
 
     def columns(self) -> pa.Schema:
-        cols = self.ctx._rpc.api._list_table_columns(self.bucket.name, self.schema.name, self.name, txid=self.ctx.tx)
+        cols = self.tx._rpc.api._list_table_columns(self.bucket.name, self.schema.name, self.name, txid=self.tx.txid)
         self.arrow_schema = pa.schema([(col[0], col[1]) for col in cols])
         return self.arrow_schema
 
@@ -217,8 +219,8 @@ class Table:
 
     def _execute_import(self, source_files):
         try:
-            self.ctx._rpc.api.import_data(
-                self.bucket.name, self.schema.name, self.name, source_files, txid=self.ctx.tx)
+            self.tx._rpc.api.import_data(
+                self.bucket.name, self.schema.name, self.name, source_files, txid=self.tx.txid)
         except requests.HTTPError as e:
             raise ImportFilesError(f"import_files failed with status: {e.response.status_code}, reason: {e.response.reason}")
         except Exception as e:
@@ -230,31 +232,31 @@ class Table:
         raise NotImplemented
 
     def insert(self, rows: pa.RecordBatch) -> None:
-        self.ctx._rpc.api.insert(self.bucket.name, self.schema.name, self.name, record_batch=rows, txid=self.ctx.tx)
+        self.tx._rpc.api.insert(self.bucket.name, self.schema.name, self.name, record_batch=rows, txid=self.tx.txid)
 
     def drop(self) -> None:
-        self.ctx._rpc.api.drop_table(self.bucket.name, self.schema.name, self.name, txid=self.ctx.tx)
+        self.tx._rpc.api.drop_table(self.bucket.name, self.schema.name, self.name, txid=self.tx.txid)
         log.info("Dropped table: %s", self.name)
 
     def rename(self, new_name) -> None:
-        self.ctx._rpc.api.alter_table(
-            self.bucket.name, self.schema.name, self.name, txid=self.ctx.tx, new_name=new_name)
+        self.tx._rpc.api.alter_table(
+            self.bucket.name, self.schema.name, self.name, txid=self.tx.txid, new_name=new_name)
         log.info("Renamed table from %s to %s ", self.name, new_name)
         self.name = new_name
 
     def add_column(self, new_column: pa.Schema) -> None:
-        self.ctx._rpc.api.add_columns(self.bucket.name, self.schema.name, self.name, new_column, txid=self.ctx.tx)
+        self.tx._rpc.api.add_columns(self.bucket.name, self.schema.name, self.name, new_column, txid=self.tx.txid)
         log.info("Added column(s): %s", new_column)
         self.arrow_schema = self.columns()
 
     def drop_column(self, column_to_drop: pa.Schema) -> None:
-        self.ctx._rpc.api.drop_columns(self.bucket.name, self.schema.name, self.name, column_to_drop, txid=self.ctx.tx)
+        self.tx._rpc.api.drop_columns(self.bucket.name, self.schema.name, self.name, column_to_drop, txid=self.tx.txid)
         log.info("Dropped column(s): %s", column_to_drop)
         self.arrow_schema = self.columns()
 
     def rename_column(self, current_column_name: str, new_column_name: str) -> None:
-        self.ctx._rpc.api.alter_column(self.bucket.name, self.schema.name, self.name, name=current_column_name,
-                                       new_name=new_column_name, txid=self.ctx.tx)
+        self.tx._rpc.api.alter_column(self.bucket.name, self.schema.name, self.name, name=current_column_name,
+                                       new_name=new_column_name, txid=self.tx.txid)
         log.info("Renamed column: %s to %s", current_column_name, new_column_name)
         self.arrow_schema = self.columns()
 
@@ -306,20 +308,3 @@ class QueryConfig:
     data_endpoints: [str] = None
     limit_per_sub_split: int = 128 * 1024
     num_row_groups_per_sub_split: int = 8
-
-
-@contextmanager
-def context(access=None, secret=None, endpoint=None):
-    if access is None:
-        access = os.environ['AWS_ACCESS_KEY_ID']
-    if secret is None:
-        secret = os.environ['AWS_SECRET_ACCESS_KEY']
-    if endpoint is None:
-        endpoint = os.environ['AWS_S3_ENDPOINT_URL']
-
-    rpc = RPC(access, secret, endpoint)
-    tx = rpc.begin_transaction()
-    try:
-        yield Context(rpc, tx)
-    finally:
-        rpc.close_transaction(tx)
