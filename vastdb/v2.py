@@ -98,9 +98,10 @@ class Bucket:
     name: str
     tx: Transaction
 
-    def create_schema(self, path: str) -> None:
+    def create_schema(self, path: str) -> "Schema":
         self.tx._rpc.api.create_schema(self.name, path, txid=self.tx.txid)
         log.info("Created schema: %s", path)
+        return self.schema(path)
 
     def schema(self, path: str) -> "Schema":
         schema = self.schemas(path)
@@ -138,9 +139,10 @@ class Schema:
     def tx(self):
         return self.bucket.tx
 
-    def create_table(self, table_name: str, columns: pa.Schema) -> None:
+    def create_table(self, table_name: str, columns: pa.Schema) -> "Table":
         self.tx._rpc.api.create_table(self.bucket.name, self.name, table_name, columns, txid=self.tx.txid)
         log.info("Created table: %s", table_name)
+        return self.table(table_name)
 
     def table(self, name: str) -> "Table":
         t = self.tables(table_name=name)

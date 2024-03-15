@@ -1,6 +1,8 @@
 import pytest
+import boto3
 
 from vastdb import v2
+
 
 def pytest_addoption(parser):
     parser.addoption("--tabular-bucket-name", help="Name of the S3 bucket with Tabular enabled")
@@ -17,9 +19,11 @@ def rpc(request):
         endpoint=request.config.getoption("--tabular-endpoint-url"),
     )
 
+
 @pytest.fixture(scope="module")
 def test_bucket_name(request):
     return request.config.getoption("--tabular-bucket-name")
+
 
 @pytest.fixture(scope="module")
 def clean_bucket_name(request, test_bucket_name, rpc):
@@ -28,3 +32,12 @@ def clean_bucket_name(request, test_bucket_name, rpc):
         for s in b.schemas():
             s.drop()
     return test_bucket_name
+
+
+@pytest.fixture(scope="module")
+def s3(request):
+    return boto3.client(
+        's3',
+        aws_access_key_id=request.config.getoption("--tabular-access-key"),
+        aws_secret_access_key=request.config.getoption("--tabular-secret-key"),
+        endpoint_url=request.config.getoption("--tabular-endpoint-url"))

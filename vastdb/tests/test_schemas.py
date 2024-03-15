@@ -6,8 +6,7 @@ def test_schemas(rpc, clean_bucket_name):
         b = tx.bucket(clean_bucket_name)
         assert b.schemas() == []
 
-        b.create_schema('s1')
-        s = b.schema('s1')
+        s = b.create_schema('s1')
         assert s.bucket == b
         assert b.schemas() == [s]
 
