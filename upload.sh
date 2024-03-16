@@ -10,6 +10,8 @@ ci_project_name="${CI_PROJECT_NAME}"
 ARTIFACTORY_URL=${ARTIFACTORY_URL:-"https://artifactory.vastdata.com"}
 artifactory_repo_path=${ARTIFACTORY_REPO_PATH:-"files"}
 
+DIST_DIR="dist"
+
 jf-install() {
     local af_url
     local af_user
@@ -33,7 +35,7 @@ main() {
     local repopath
 
     # We included githash in Release so the build is unique
-    unique_build=$(ls -1 dist/ | sed 's/.vast_.*//g')
+    unique_build=$(ls -1 ${DIST_DIR}/*.whl | sed 's/.vast_.*//g')
     unique_build=${unique_build%-py3-none-any.whl}
 
     artifacts_path=${artifactory_repo_path}/${ci_project_name}/${unique_build}
@@ -43,7 +45,7 @@ main() {
     rm -rf upload
     mkdir -p ${prep_upload_path}
 
-    cp -al dist/* ${prep_upload_path} # Take the build artifacts
+    cp -al ${DIST_DIR}/* ${prep_upload_path} # Take the build artifacts
     # List is needed so that speardrive can download the artifact tree structure
     (cd ${prep_upload_path} && find -type f) > list.txt
     mv list.txt ${prep_upload_path}

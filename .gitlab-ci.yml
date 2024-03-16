@@ -5,7 +5,7 @@ variables:
   PYSDK_IMAGE_PREFIX: $ORION_PREFIX:vastdb-python-sdk-pipe-$CI_PIPELINE_ID
 
 
-Prebuild:
+pre_build:
   stage: .pre
   script:
     - aws ecr get-login-password | docker login -u AWS --password-stdin https://$DOCKER_REGISTRY
@@ -18,35 +18,38 @@ Prebuild:
     - code-builder-small-shell
 
 
-Build and upload:
+build_and_publish:
   stage: build
   interruptible: true
   image: $PYSDK_BUILDER_IMAGE
   tags:
     - vast-dev-builder
-  variables:
-    VASTDB_APPEND_VERSION_SUFFIX: 'true'
-  script:
-    - python3 setup.py bdist_wheel
-    - ./upload.sh
-  artifacts:
-    paths:
-      - dist/
 
-
-Check Python versions:
-  stage: build
-  interruptible: true
-  image: $PYSDK_BUILDER_IMAGE
-  tags:
-    - vast-dev-builder
   variables:
     VASTDB_APPEND_VERSION_SUFFIX: 'true'
     PYSDK_IMAGE: ${PYSDK_IMAGE_PREFIX}-${PYTHON_VERSION}
+
   script:
     - echo "Building $PYSDK_IMAGE..."
     - docker build -f Dockerfile --build-arg BASE_IMAGE=python:${PYTHON_VERSION} -t $PYSDK_IMAGE .
+    - docker inspect $PYSDK_IMAGE
+
+    - echo "Testing $PYSDK_IMAGE..."
+    - docker run --rm $PYSDK_IMAGE ruff check vastdb/
+
+    - echo "Publishing $PYSDK_IMAGE..."
     - docker push $PYSDK_IMAGE
+
+    - if [ "$PYTHON_VERSION" = "3.9" ]; then
+        echo "Publishing artifacts...";
+        docker run
+          -e ARTIFACTORY_URL=$ARTIFACTORY_URL
+          -e ARTIFACTORY_JF_USER=$ARTIFACTORY_JF_USER
+          -e ARTIFACTORY_JF_PW=$ARTIFACTORY_JF_PW
+          -e CI_PIPELINE_ID=$CI_PIPELINE_ID
+          -e CI_PROJECT_NAME=$CI_PROJECT_NAME
+          $PYSDK_IMAGE ./upload.sh;
+      fi
   parallel:
     matrix:
       - PYTHON_VERSION: ['3.9', '3.10', '3.11', '3.12']
