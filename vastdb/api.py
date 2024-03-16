@@ -5,21 +5,17 @@ import urllib.parse
 from collections import defaultdict, namedtuple
 from datetime import datetime
 from enum import Enum
-from typing import List, Union, Optional, Iterator
+from typing import Union, Optional, Iterator
 import xmltodict
 import concurrent.futures
 import threading
 import queue
 import math
-import socket
 from functools import cmp_to_key
 import pyarrow.parquet as pq
 import flatbuffers
 import pyarrow as pa
 import requests
-import datetime
-import hashlib
-import hmac
 import json
 import itertools
 from aws_requests_auth.aws_auth import AWSRequestsAuth
@@ -793,10 +789,10 @@ class VastdbApi:
         try:
             res.raise_for_status()
             if res.status_code != 200:
-                if not  res.status_code in expected_retvals:
+                if res.status_code not in expected_retvals:
                     raise ValueError(f"Expected status code mismatch. status_code={res.status_code}")
             else:
-                if not len(expected_retvals) == 0:
+                if expected_retvals:
                     raise ValueError(f"Expected {expected_retvals} but status_code={res.status_code}")
             return res
         except requests.HTTPError as e:
@@ -1007,7 +1003,6 @@ class VastdbApi:
         headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
         res = self.session.get(self._api_prefix(bucket=bucket, schema=schema, table=name, command="stats"), headers=headers)
         if res.status_code == 200:
-            res_headers = res.headers
             flatbuf = b''.join(res.iter_content(chunk_size=128))
             stats = get_table_stats.GetRootAs(flatbuf)
             num_rows = stats.NumRows()
@@ -1557,7 +1552,7 @@ class VastdbApi:
                     _logger.exception('query_iterator_split_id: exception occurred')
                     try:
                         self.rollback_transaction(txid)
-                    except:
+                    except Exception:
                         _logger.exception(f'failed to rollback txid {txid}')
                     error_queue.put(None)
                     raise e
@@ -1620,7 +1615,7 @@ class VastdbApi:
             _logger.exception('exception occurred')
             try:
                 self.rollback_transaction(txid)
-            except:
+            except Exception:
                 _logger.exception(f'failed to rollback txid {txid}')
             raise e
 
@@ -1731,7 +1726,7 @@ class VastdbApi:
                     _logger.exception('query_split_id: exception occurred')
                     try:
                         self.rollback_transaction(txid)
-                    except:
+                    except Exception:
                         _logger.exception(f'failed to rollback txid {txid}')
                     raise e
 
@@ -1762,7 +1757,7 @@ class VastdbApi:
             _logger.exception('exception occurred')
             try:
                 self.rollback_transaction(txid)
-            except:
+            except Exception:
                 _logger.exception(f'failed to rollback txid {txid}')
             raise e
 
@@ -1955,7 +1950,7 @@ class VastdbApi:
 
         """
         if (not rows and not record_batch) or (rows and record_batch):
-            raise ValueError(f'insert: missing argument - either rows or record_batch must be provided')
+            raise ValueError('insert: missing argument - either rows or record_batch must be provided')
 
         # create a transaction
         txid, created_txid = self._begin_tx_if_necessary(txid)
@@ -2023,7 +2018,7 @@ class VastdbApi:
             _logger.exception('exception occurred')
             try:
                 self.rollback_transaction(txid)
-            except:
+            except Exception:
                 _logger.exception(f'failed to rollback txid {txid}')
             raise e
 
@@ -2769,7 +2764,7 @@ def build_field(builder: flatbuffers.Builder, f: pa.Field, name: str):
         fb_field.AddName(builder, child_col_name)
         fb_field.AddChildren(builder, children)
 
-        _logger.info(f"added key and map to entries")
+        _logger.info("added key and map to entries")
         children = [fb_field.End(builder)]
 
     if children is not None:

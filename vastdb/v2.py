@@ -1,4 +1,3 @@
-from contextlib import contextmanager
 from dataclasses import dataclass
 import logging
 import os
@@ -229,7 +228,7 @@ class Table:
 
     def select(self, column_names: [str], predicates: ibis.expr.types.BooleanColumn, limit: int = None,
                config: "QueryConfig" = None):
-        raise NotImplemented
+        raise NotImplementedError
 
     def insert(self, rows: pa.RecordBatch) -> None:
         self.tx._rpc.api.insert(self.bucket.name, self.schema.name, self.name, record_batch=rows, txid=self.tx.txid)
