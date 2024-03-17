@@ -1,4 +1,3 @@
-import array
 import logging
 import struct
 import urllib.parse
@@ -19,7 +18,6 @@ import requests
 import json
 import itertools
 from aws_requests_auth.aws_auth import AWSRequestsAuth
-from io import BytesIO
 import urllib3
 
 import vast_flatbuf.org.apache.arrow.computeir.flatbuf.BinaryLiteral as fb_binary_lit
@@ -68,8 +66,6 @@ import vast_flatbuf.tabular.S3File as tabular_s3_file
 import vast_flatbuf.tabular.CreateProjectionRequest as tabular_create_projection
 import vast_flatbuf.tabular.Column as tabular_projecion_column
 import vast_flatbuf.tabular.ColumnType as tabular_proj_column_type
-import vast_protobuf.tabular.rpc_pb2 as rpc_pb
-import vast_protobuf.substrait.type_pb2 as type_pb
 
 from vast_flatbuf.org.apache.arrow.computeir.flatbuf.Deref import Deref
 from vast_flatbuf.org.apache.arrow.computeir.flatbuf.ExpressionImpl import ExpressionImpl
@@ -2285,232 +2281,6 @@ class VastdbApi:
 
             return columns, next_key, is_truncated, count
 
-def parse_proto_buf_message(conn, msg_type):
-    msg_size = 0
-    while msg_size == 0: # keepalive
-        msg_size_bytes = conn.read(4)
-        msg_size, = struct.unpack('>L', msg_size_bytes)
-
-    msg = msg_type()
-    msg_bytes = conn.read(msg_size)
-    msg.ParseFromString(msg_bytes)
-    return msg
-
-def parse_rpc_message(conn, msg_name):
-    rpc_msg = parse_proto_buf_message(conn, rpc_pb.Rpc)
-    if not rpc_msg.HasField(msg_name):
-        raise IOError(f"expected {msg_name} but got rpc_msg={rpc_msg}")
-
-    content_size = rpc_msg.content_size
-    content = conn.read(content_size)
-    return getattr(rpc_msg, msg_name), content
-
-
-def parse_select_row_ids_response(conn, debug=False):
-    rows_arr = array.array('Q', [])
-    subsplits_state = {}
-    while True:
-        select_rows_msg, content = parse_rpc_message(conn, 'select_row_ids_response_packet')
-        msg_type = select_rows_msg.WhichOneof('type')
-        if msg_type == "body":
-            subsplit_id = select_rows_msg.body.subsplit.id
-            if select_rows_msg.body.subsplit.HasField("state"):
-                subsplits_state[subsplit_id] = select_rows_msg.body.subsplit.state
-
-            arr = array.array('Q', content)
-            rows_arr += arr
-            if debug:
-                _logger.info(f"arr={arr} metrics={select_rows_msg.body.metrics}")
-            else:
-                _logger.info(f"num_rows={len(arr)} metrics={select_rows_msg.body.metrics}")
-        elif msg_type == "trailing":
-            status_code = select_rows_msg.trailing.status.code
-            finished_pagination = select_rows_msg.trailing.finished_pagination
-            total_metrics = select_rows_msg.trailing.metrics
-            _logger.info(f"completed finished_pagination={finished_pagination} res={status_code} metrics={total_metrics}")
-            if status_code != 0:
-                raise IOError(f"Query data stream failed res={select_rows_msg.trailing.status}")
-
-            return rows_arr, subsplits_state, finished_pagination
-        else:
-            raise EOFError(f"unknown response type={msg_type}")
-
-
-def parse_count_rows_response(conn):
-    count_rows_msg, _ = parse_rpc_message(conn, 'count_rows_response_packet')
-    assert count_rows_msg.WhichOneof('type') == "body"
-    subsplit_id = count_rows_msg.body.subsplit.id
-    num_rows = count_rows_msg.body.amount_of_rows
-    _logger.info(f"completed num_rows={num_rows} subsplit_id={subsplit_id} metrics={count_rows_msg.trailing.metrics}")
-
-    count_rows_msg, _ = parse_rpc_message(conn, 'count_rows_response_packet')
-    assert count_rows_msg.WhichOneof('type') == "trailing"
-    assert count_rows_msg.trailing.status.code == 0
-    assert count_rows_msg.trailing.finished_pagination
-
-    return (subsplit_id, num_rows)
-
-
-def get_proto_field_type(f):
-    t = type_pb.Type()
-    if f.type.equals(pa.string()):
-        t.string.nullability = 0
-    elif f.type.equals(pa.int8()):
-        t.i8.nullability = 0
-    elif f.type.equals(pa.int16()):
-        t.i16.nullability = 0
-    elif f.type.equals(pa.int32()):
-        t.i32.nullability = 0
-    elif f.type.equals(pa.int64()):
-        t.i64.nullability = 0
-    elif f.type.equals(pa.float32()):
-        t.fp32.nullability = 0
-    elif f.type.equals(pa.float64()):
-        t.fp64.nullability = 0
-    else:
-        raise ValueError(f'unsupported type={f.type}')
-
-    return t
-
-def serialize_proto_request(req):
-    req_str = req.SerializeToString()
-    buf = struct.pack('>L', len(req_str))
-    buf += req_str
-    return buf
-
-def build_read_column_request(ids, schema, handles = [], num_subsplits = 1):
-    rpc_msg = rpc_pb.Rpc()
-    req = rpc_msg.read_columns_request
-    req.num_subsplits = num_subsplits
-    block = req.row_ids_blocks.add()
-    block.row_ids.info.offset = 0
-    block.row_ids.info.size = len(ids)
-    rpc_msg.content_size = len(ids)
-    if handles:
-        req.projection_table_handles.extend(handles)
-
-    for f in schema:
-        req.column_schema.names.append(f.name)
-        t = get_proto_field_type(f)
-        req.column_schema.struct.types.append(t)
-
-    return serialize_proto_request(rpc_msg) + ids
-
-def build_count_rows_request(schema: 'pa.Schema' = pa.schema([]), filters: dict = None, field_names: list = None,
-                             split=(0, 1, 1), num_subsplits=1, build_relation=False):
-    rpc_msg = rpc_pb.Rpc()
-    req = rpc_msg.count_rows_request
-    req.split.id = split[0]
-    req.split.config.total = split[1]
-    req.split.config.row_groups_per_split = split[2]
-    # add empty state
-    state = rpc_pb.SubSplit.State()
-    for _ in range(num_subsplits):
-        req.subsplits.states.append(state)
-
-    if build_relation:
-        # TODO use ibis or other library to build substrait relation
-        # meanwhile can be similar to build_count_rows_request
-        for field in schema:
-            req.relation.read.base_schema.names.append(field.name)
-            field_type = get_proto_field_type(field)
-            req.relation.read.base_schema.struct.types.append(field_type)
-        return serialize_proto_request(rpc_msg)
-    else:
-        query_data_flatbuffer = build_query_data_request(schema, filters, field_names)
-        serialized_flatbuffer = query_data_flatbuffer.serialized
-        req.legacy_relation.size = len(serialized_flatbuffer)
-        req.legacy_relation.offset = 0
-        rpc_msg.content_size = req.legacy_relation.size
-        return serialize_proto_request(rpc_msg) + serialized_flatbuffer
-
-"""
- Expected messages in the ReadColumns flow:
-
- ProtoMsg+Schema+RecordBatch,
- ProtoMsg+RecordBatch
- ProtoMsg+RecordBatch
- ...
- ProtoMsg+RecordBatch+EOS
- ProtoMsg+Schema+RecordBatch,
- ...
- ProtoMsg+RecordBatch+EOS
- ProtoMsg+Schema+RecordBatch,
- ...
- ProtoMsg+RecordBatch+EOS
- ProtoMsg Completed
-"""
-def _iter_read_column_resp_columns(conn, readers):
-    while True:
-        read_column_resp, content = parse_rpc_message(conn, 'read_columns_response_packet')
-        stream = BytesIO(content)
-
-        msg_type = read_column_resp.WhichOneof('type')
-        if msg_type == "body":
-            stream_id = read_column_resp.body.subsplit_id
-            start_row_offset = read_column_resp.body.start_row_offset
-            arrow_msg_size = read_column_resp.body.arrow_ipc_info.size
-            metrics = read_column_resp.body.metrics
-            _logger.info(f"start stream_id={stream_id} arrow_msg_size={arrow_msg_size} start_row_offset={start_row_offset} metrics={metrics}")
-        elif msg_type == "trailing":
-            status_code = read_column_resp.trailing.status.code
-            _logger.info(f"completed stream_id={stream_id} res={status_code} metrics{read_column_resp.trailing.metrics}")
-            if status_code != 0:
-                raise IOError(f"Query data stream failed res={read_column_resp.trailing.status}")
-
-            return
-        else:
-            raise EOFError(f"unknown response type={msg_type}")
-
-        start_pos = stream.tell()
-        if stream_id not in readers:
-            # we implicitly read 1st message (Arrow schema) when constructing RecordBatchStreamReader
-            reader = pa.ipc.RecordBatchStreamReader(stream)
-            _logger.info(f"read ipc stream_id={stream_id} schema={reader.schema}")
-            readers[stream_id] = (reader, [])
-
-        (reader, batches) = readers[stream_id]
-        while stream.tell() - start_pos < arrow_msg_size:
-            try:
-                batch = reader.read_next_batch() # read single-column chunk data
-                batches.append(batch)
-            except StopIteration:  # we got an end-of-stream IPC message for a given stream ID
-                reader, batches = readers.pop(stream_id)  # end of column
-                table = pa.Table.from_batches(batches)  # concatenate all column chunks (as a single)
-                _logger.info(f"end of stream_id={stream_id} rows={len(table)} column={table}")
-                yield (start_row_offset, stream_id, table)
-
-ResponsePart = namedtuple('response_part', ['start_row_offset', 'table'])
-
-def _parse_read_column_stream(conn, schema, debug=False):
-    is_empty_projection = (len(schema) == 0)
-    parsers = defaultdict(lambda: QueryDataParser(schema, debug=debug))  # {stream_id: QueryDataParser}
-    readers = {}  # {stream_id: pa.ipc.RecordBatchStreamReader}
-    streams_list = []
-    for start_row_offset, stream_id, table in _iter_read_column_resp_columns(conn, readers):
-        parser = parsers[stream_id]
-        for column in table.columns:
-            parser.parse(column)
-
-        parsed_table = parser.build()
-        if parsed_table is not None:  # when we got all columns (and before starting a new "select_rows" cycle)
-            parsers.pop(stream_id)
-            if is_empty_projection:  # VAST returns an empty RecordBatch, with the correct rows' count
-                parsed_table = table
-
-            _logger.info(f"parse_read_column_response stream_id={stream_id} rows={len(parsed_table)} table={parsed_table}")
-            streams_list.append(ResponsePart(start_row_offset, parsed_table))
-
-    if parsers:
-        raise EOFError(f'all streams should be done before EOF. {parsers}')
-
-    return streams_list
-
-def parse_read_column_response(conn, schema, debug=False):
-    response_parts = _parse_read_column_stream(conn, schema, debug)
-    response_parts.sort(key=lambda s: s.start_row_offset)
-    tables = [s.table for s in response_parts]
-    return pa.concat_tables(tables)
 
 def _iter_query_data_response_columns(fileobj, stream_ids=None):
     readers = {}  # {stream_id: pa.ipc.RecordBatchStreamReader}
@@ -2797,44 +2567,6 @@ class QueryDataRequest:
         self.serialized = serialized
         self.response_schema = response_schema
 
-
-def build_select_rows_request(schema: 'pa.Schema' = pa.schema([]), filters: dict = None, field_names: list = None, split_id=0,
-                              total_split=1, row_group_per_split=8, num_subsplits=1, build_relation=False, limit_rows=0,
-                              subsplits_state=None):
-    rpc_msg = rpc_pb.Rpc()
-    select_rows_req = rpc_msg.select_row_ids_request
-    select_rows_req.split.id = split_id
-    select_rows_req.split.config.total = total_split
-    select_rows_req.split.config.row_groups_per_split = row_group_per_split
-    if limit_rows:
-        select_rows_req.limit_rows = limit_rows
-
-    # add empty state
-    empty_state = rpc_pb.SubSplit.State()
-    for i in range(num_subsplits):
-        if subsplits_state and i in subsplits_state:
-            select_rows_req.subsplits.states.append(subsplits_state[i])
-        else:
-            select_rows_req.subsplits.states.append(empty_state)
-
-    if build_relation:
-        # TODO use ibis or other library to build substrait relation
-        # meanwhile can be similar to build_count_rows_request
-        for field in schema:
-            select_rows_req.relation.read.base_schema.names.append(field.name)
-            field_type = get_proto_field_type(field)
-            select_rows_req.relation.read.base_schema.struct.types.append(field_type)
-        return serialize_proto_request(rpc_msg)
-    else:
-        query_data_flatbuffer = build_query_data_request(schema, filters, field_names)
-        serialized_flatbuffer = query_data_flatbuffer.serialized
-        select_rows_req.legacy_relation.size = len(serialized_flatbuffer)
-        select_rows_req.legacy_relation.offset = 0
-        rpc_msg.content_size = select_rows_req.legacy_relation.size
-        return serialize_proto_request(rpc_msg) + serialized_flatbuffer
-
-    # TODO use ibis or other library to build SelectRowIds protobuf
-    # meanwhile can be similar to build_count_rows_request
 
 def build_query_data_request(schema: 'pa.Schema' = pa.schema([]), filters: dict = None, field_names: list = None):
     filters = filters or {}

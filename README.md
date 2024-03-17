@@ -49,14 +49,14 @@ Key libraries used in this API include requests for HTTP requests, pyarrow for h
 
 - Linux / Windows / MacOS client server connected on data access with VAST cluster
 - Virtual IP pool configured with DNS service / List of all availble VIP's
-  - [Network Access through Virtual IPs](https://support.vastdata.com/hc/en-us/articles/5140602978844-Configuring-Network-Access)
+  - [Network Access through Virtual IPs](https://support.vastdata.com/s/topic/0TOV40000000FThOAM/configuring-network-access-v50)
 - VIP DNS name - for reaching all availble Cnodes in the API requests
-  - [Configuring the VAST Cluster DNS Service](https://support.vastdata.com/hc/en-us/articles/9859957831452-Configuring-the-VAST-Cluster-DNS-Service)
+  - [Configuring the VAST Cluster DNS Service](https://support.vastdata.com/s/article/UUID-ef655246-0bfa-d641-69d4-b139f1301019)
 - Python 3.7 or above
 - S3 User Access & Secret Keys on VAST cluster
-  - [Managing S3 User Access ](https://support.vastdata.com/hc/en-us/articles/9859972743580#UUID-6a15026a-d0bd-ebe6-e281-4b980674cecc_section-idm4577174596542432775810296988)
+  - [Managing S3 User Access](https://support.vastdata.com/s/article/UUID-4d2e7e23-b2fb-7900-d98f-96c31a499626)
 - Tabular Identity Policy with the proper permissions 
-  - [Creating Identity Policies](https://support.vastdata.com/hc/en-us/articles/9859958983708#UUID-c381c613-81bd-3c09-69c4-ba4dcd8e8d6d)
+  - [Creating Identity Policies](https://support.vastdata.com/s/article/UUID-14322b60-d6a2-89ac-3df0-3dfbb6974182)
 
 
 ### Install the VastdbApi
@@ -190,7 +190,7 @@ vastdb_session = create_vastdb_session(access_key, secret_key)
 - **Example**:
 ```python
   arrow_schema = pa.schema([('column1', pa.int32()), ('column2', pa.string())])
-  vastdb_session.create_table(bucket_name, schema_name, table='new_table', arrow_schema=arrow_schema)
+  vastdb_session.create_table(bucket_name, schema_name, 'new_table', arrow_schema=arrow_schema)
 ```
 
 #### `create_table_from_parquet_file`
@@ -209,9 +209,9 @@ vastdb_session = create_vastdb_session(access_key, secret_key)
 - **Example**:
 ```python
   # Create from parquet file on a filesystem
-  vastdb_session.create_table(bucket_name, schema_name, table='new_table', parquet_path='path/to/file.parquet')
+  vastdb_session.create_table(bucket_name, schema_name, 'new_table', parquet_path='path/to/file.parquet')
   # Create from parquet object on as s3 bucket
-  vastdb_session.create_table(bucket_name, schema_name, table='new_table',
+  vastdb_session.create_table(bucket_name, schema_name, 'new_table',
                               parquet_bucket_name='s3-bucket-name',
                               parquet_object_name='path/to/object.parquet')
 ```
@@ -672,9 +672,9 @@ s3_files = {
 }
 
 result = vastdb_session.import_data(
-    bucket_name='vastdb-bucket-name',
-    schema_name='schema-name',
-    table_name='table-name',
+    'vastdb-bucket-name',
+    'schema-name',
+    'table-name',
     source_files=s3_files,
     txid=0,  # Use an appropriate transaction ID if necessary
     case_sensitive=False
@@ -688,14 +688,11 @@ else:
 
 ### List columns from a table
 
-```python
-bucket_name='vastdb-bucket'
-schema_name='schema-name'
 
 vastdb_session = create_vastdb_session(access_key, secret_key)
 
 # List columns in the table
-cols = vastdb_session.list_columns(bucket_name, schema_name, table_name)
+cols = vastdb_session.list_columns('bucket_name', 'schema_name', 'table_name')
 
 # Create a schema from the column list
 res_schema = pa.schema([(column[0], column[1]) for column in cols[0]])
@@ -707,11 +704,8 @@ print(res_schema)
 ##### Query table without limit, filters and field_names, i.e. "SELECT * FROM table"
 
 ```python
-bucket_name = "vastdb-bucket1"
-schema_name = "citizens-schema"
-table_name = "jersey-citizens-table"
 
-table = vastdb_session.query(bucket_name, schema_name, table_name)
+table = vastdb_session.query('vastdb-bucket1', 'citizens-schema', 'jersey-citizens-table')
 df = table.to_pandas()
 print(df)
 ```
@@ -722,7 +716,7 @@ print(df)
 field_names = ['Citizen_Age', 'Citizen_Name', 'Citizen_experience']
 filters = {'Citizen_Age': ['gt 35'], 'Citizen_experience': ['le 9']}
 
-table = vastdb_session.query(bucket_name, schema_name, table_name, filters=filters, field_names=field_names, limit=10)
+table = vastdb_session.query('vastdb-bucket1', 'citizens-schema', 'jersey-citizens-table', filters=filters, field_names=field_names, limit=10)
 
 df = table.to_pandas()
 print(df)
@@ -734,7 +728,7 @@ print(df)
 field_names = ['Citizen_Age', 'Citizen_Name', 'Citizen_experience']
 filters = {'Citizen_Age': ['eq 50', 'eq 55']}
 
-table = vastdb_session.query(bucket_name, schema_name, table_name, filters=filters, field_names=field_names)
+table = vastdb_session.query('vastdb-bucket1', 'citizens-schema', 'jersey-citizens-table', filters=filters, field_names=field_names)
 
 df = table.to_pandas()
 print(df)
@@ -745,7 +739,7 @@ print(df)
 ```python
 field_names = ['Citizen_Age', 'Citizen_Name', 'Citizen_experience', 'Citizen_id']
 filters = {'Citizen_experience': ['le 25'], 'Citizen_Age': [('ge 55' , 'le 75')]}
-table = vastdb_session.query(bucket_name, schema_name, table_name, filters=filters, field_names=field_names)
+table = vastdb_session.query('vastdb-bucket1', 'citizens-schema', 'jersey-citizens-table', filters=filters, field_names=field_names)
 
 df = table.to_pandas()
 print(df)
@@ -754,7 +748,7 @@ print(df)
 ##### Query a table using Pandas predicates:
 
 ```python
-table = vastdb_session.query(bucket_name, schema_name, table_name)
+table = vastdb_session.query('bucket_name', 'schema_name', 'table_name')
 df = table.to_pandas()
 pd.options.display.max_columns = None
 display(df[(df['uid'] == 555) & (df['size'] > 4096)].head(10))
@@ -780,11 +774,9 @@ secret_key='00k0oQ4eG6o4/PLGAWL..'
 
 vastdb_session = create_vastdb_session(access_key, secret_key)
 
-bucket_name = "vastdb-bucket1"
-schema_name = "my_schema_name"
 
 # Create the schema
-response = vastdb_session.create_schema(bucket_name, schema_name)
+response = vastdb_session.create_schema('bucket_name', 'schema_name')
 if response.status_code == 200:
     print("create_schema successful")
 else:
@@ -793,7 +785,6 @@ else:
 
 
 # Define columns schema (types) & create table with the columns included
-table_name = "my-table-name"
 
 arrow_schema = pa.schema([
         ('Citizen_Age', pa.int64()),
@@ -802,7 +793,7 @@ arrow_schema = pa.schema([
         ('Is_married', pa.bool_()),
     ])
 
-response = vastdb_session.create_table(bucket_name, schema_name, table_name, arrow_schema)
+response = vastdb_session.create_table('bucket_name', 'schema_name', 'table_name', arrow_schema)
 if response.status_code == 200:
     print("create_table successful")
 else:
@@ -819,11 +810,11 @@ rows = {
         'Is_married': [True, False, False, True]
 }
 
-vastdb_session.insert(bucket=bucket_name, schema=schema_name, table=table_name, rows=rows)
+vastdb_session.insert('bucket_name', 'schema_name', 'table_name', rows=rows)
 
 # query table without limit, filters and field_names, i.e. "SELECT * FROM table"
 
-table = vastdb_session.query(bucket_name, schema_name, table_name)
+table = vastdb_session.query('bucket_name', 'schema_name', 'table_name')
 df = table.to_pandas()
 print(df)
 
@@ -832,14 +823,14 @@ columns_to_update = [(pa.uint64(), '$row_id'), (pa.int64(), 'Citizen_Age'), (pa.
 column_values_to_update = {pa.uint64(): [0, 2], pa.int64(): [43, 28], pa.bool_(): [False, True]}
 
 update_rows_req = build_record_batch(columns_to_update, column_values_to_update)
-vastdb_session.update_rows(bucket=bucket_name, schema=schema_name, table=table_name, record_batch=update_rows_req)
+vastdb_session.update_rows('bucket_name', 'schema_name', 'table_name', record_batch=update_rows_req)
 
-table = vastdb_session.query(bucket_name, schema_name, table_name)
+table = vastdb_session.query('bucket_name', 'schema_name', 'table_name')
 print(f'table after update: {table.to_pydict()}')
 
 # Add additional columns to the table schema
 additional_columns_schema = pa.schema([('Citizen_id', pa.int64()), ('Citizen_street', pa.string())])
-response = vastdb_session.add_columns(bucket_name, schema_name, table_name, additional_columns_schema)
+response = vastdb_session.add_columns('bucket_name', 'schema_name', 'table_name', additional_columns_schema)
 if response.status_code == 200:
     print("add_columns successful")
 else:
@@ -847,7 +838,7 @@ else:
     exit(1)
 
 # retrieve columns and new schema
-cols = vastdb_session.list_columns(bucket_name, schema_name, table_name)
+cols = vastdb_session.list_columns('bucket_name', 'schema_name', 'table_name')
 res_schema = pa.schema([(column[0], column[1]) for column in cols[0]])
 print(res_schema)
 
@@ -863,12 +854,12 @@ rows = {
         'Citizen_street': ['street1', 'street4', 'street3', 'street2']
 }
 
-vastdb_session.insert(bucket=bucket_name, schema=schema_name, table=table_name, rows=rows)
+vastdb_session.insert('bucket_name', 'schema', 'table_name', rows=rows)
 
 
 # query table without limit, filters and field_names, i.e. "SELECT * FROM table"
 
-table = vastdb_session.query(bucket_name, schema_name, table_name)
+table = vastdb_session.query('bucket_name', 'schema_name', 'table_name')
 df = table.to_pandas()
 print(df)
 
@@ -879,7 +870,7 @@ s3_files = {('parquet-files-bucket', 'citizens_data_24.parquet'): b'',
             ('parquet-files-bucket', 'citizens_data_26.parquet'): b'',
             ('parquet-files-bucket', 'citizens_data_27.parquet'): b'',
            }
-response = vastdb_session.import_data(bucket_name, schema_name, table_name, source_files=s3_files)
+response = vastdb_session.import_data('bucket_name', 'schema_name', 'table_name', source_files=s3_files)
 if response.status_code == 200:
     print("import_data successful")
 else:
@@ -889,7 +880,7 @@ else:
 
 # query table after importing files, without limit, filters and field_names, i.e. "SELECT * FROM table"
 
-table = vastdb_session.query(bucket_name, schema_name, table_name)
+table = vastdb_session.query('bucket_name', 'schema_name', 'table_name')
 df = table.to_pandas()
 print(df)
 
@@ -900,17 +891,17 @@ print(df)
 ### What is Vast Catalog
 
   - VAST Catalog is a database that indexes metadata attributes of all data on the cluster from periodic snapshots of the cluster's data. The database is stored on a dedicated S3 bucket on the cluster.
-  - [VAST Catalog Overview](https://support.vastdata.com/hc/en-us/articles/9859973783964-VAST-Catalog-Overview)
+  - [VAST Catalog Overview](https://support.vastdata.com/s/article/UUID-b7cf8427-3f50-ac3a-b1fe-c92649823ee7)
 
 
 ### Vast Catalog Schema Structure
 
-  - The Vast-Catalog has internal bucket, schema and table. To query the Catalog using the api, define these:
+  - The Vast-Catalog has internal bucket, schema and table. To query the Catalog using the api, use these values:
 
   ```python
-  bucket_name='vast-big-catalog-bucket'
-  schema_name='vast_big_catalog_schema'
-  table_name='vast_big_catalog_table'
+  'vast-big-catalog-bucket'
+  'vast_big_catalog_schema'
+  'vast_big_catalog_table'
   ```
 
   **The schema  columns**
@@ -926,7 +917,7 @@ print(df)
 | owner_name         | varchar                                 |
 
 
-- **This is only a few columns, for a full schema structure check [VAST Catalog Overview](https://support.vastdata.com/hc/en-us/articles/9859973783964-VAST-Catalog-Overview)**
+- **This is only a few columns, for a full schema structure check [VAST Catalog Overview](https://support.vastdata.com/s/article/UUID-b7cf8427-3f50-ac3a-b1fe-c92649823ee7)**
 
 
 ## Vast Catalog - Query examples with VastdbApi
@@ -1012,14 +1003,12 @@ print(f"Total elements in the catalog: {total_elements}")
 import time
 import datetime
 
-date_str = '2023-11-24'
-pattern = '%Y-%m-%d'
-epoch = int(time.mktime(time.strptime(date_str, pattern)))
+ts = datetime.datetime.fromisoformat("2024-03-12 11:15").timestamp() * 1e3  # in milliseconds
 
 filters = {
     'owner_name': ['eq vastdata'],
     'size': ['gt 50000'],
-    'creation_time': [f'gt {epoch}']
+    'creation_time': [f'ge {ts:.0f}']
 }
 
 field_names = ['creation_time', 'uid', 'owner_name', 'size']

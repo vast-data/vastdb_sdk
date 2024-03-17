@@ -2,7 +2,6 @@ aws-requests-auth
 boto3
 flatbuffers
 ibis-framework
-protobuf==3.19.6
 pyarrow
 requests
 xmltodict
