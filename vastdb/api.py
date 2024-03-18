@@ -150,7 +150,6 @@ class Predicate:
             for field in self.schema:
                 self.get_field_indexes(field, _field_name_per_index)
             self._field_name_per_index = {field: index for index, field in enumerate(_field_name_per_index)}
-            _logger.debug(f'field_name_per_index: {self._field_name_per_index}')
         return self._field_name_per_index
 
     def get_projections(self, builder: 'flatbuffers.builder.Builder', field_names: list = None):
@@ -199,7 +198,6 @@ class Predicate:
         field = self.schema.field(field_name)
         for attr in field_attrs:
             field = field.type[attr]
-        _logger.info(f'trying to append field: {field} with domains: {filters}')
         for filter_by_name in filters:
             offsets.append(self.build_range(column=column, field=field, filter_by_name=filter_by_name))
         return self.build_or(offsets)
@@ -241,11 +239,9 @@ class Predicate:
         return self.build_and(rules)
 
     def build_function(self, name: str, *offsets):
-        _logger.info(f'name: {name}, offsets: {offsets}')
         offset_name = self.builder.CreateString(name)
         fb_call.StartArgumentsVector(self.builder, len(offsets))
         for offset in reversed(offsets):
-            _logger.info(f'offset: {offset}')
             self.builder.PrependUOffsetTRelative(offset)
         offset_arguments = self.builder.EndVector()
 
@@ -552,9 +548,8 @@ class FieldNode:
     def build(self) -> pa.Array:
         """Construct an Arrow array from the collected buffers (recursively)."""
         children = self.children and [node.build() for node in self.children if node.is_projected]
-        _logger.debug(f'build: self.field.name={self.field.name}, '
-                      f'self.projected_field.type={self.projected_field.type}, self.length={self.length} '
-                      f'self.buffers={self.buffers} children={children}')
+        _logger.debug('build: self.field.name=%s, self.projected_field.type=%s, self.length=%s, self.buffers=%s children=%s',
+                      self.field.name, self.projected_field.type, self.length, self.buffers, children)
         result = pa.Array.from_buffers(self.projected_field.type, self.length, buffers=self.buffers, children=children)
         if self.debug:
             _logger.debug('%s result=%s', self.field, result)
@@ -580,11 +575,9 @@ class QueryDataParser:
             for node in self.nodes:
                 node.debug_log()
         self.leaves = [leaf for node in self.nodes for leaf in node._iter_leaves()]
-        _logger.debug(f'QueryDataParser: self.leaves = {[(leaf.field.name, leaf.index) for leaf in self.leaves]}')
         self.mark_projected_nodes()
         [node.build_projected_field() for node in self.nodes]
         self.projected_leaves = [leaf for node in self.nodes for leaf in node._iter_projected_leaves()]
-        _logger.debug(f'QueryDataParser: self.projected_leaves = {[(leaf.field.name, leaf.index) for leaf in self.projected_leaves]}')
 
         self.leaf_offset = 0
 
@@ -593,7 +586,6 @@ class QueryDataParser:
             if self.projection_positions is None or leaf.index in self.projection_positions:
                 for node in leaf._iter_to_root():
                     node.is_projected = True
-                    _logger.debug(f'mark_projected_nodes node.field.name={node.field.name}')
 
     def parse(self, column: pa.Array):
         """Parse a single column response from VAST (see FieldNode.set for details)"""
@@ -671,7 +663,6 @@ def _parse_table_info(obj):
     return TableInfo(name, properties, handle, num_rows, used_bytes)
 
 def build_record_batch(column_info, column_values):
-    _logger.info(f"column_info={column_info}")
     fields = [pa.field(column_name, column_type) for column_type, column_name in column_info]
     schema = pa.schema(fields)
     arrays = [pa.array(column_values[column_type], type=column_type) for column_type, _ in column_info]
@@ -793,7 +784,7 @@ class VastdbApi:
             return res
         except requests.HTTPError as e:
             if res.status_code in expected_retvals:
-                _logger.info(f"{cmd} has failed as expected res={res}")
+                _logger.info("%s has failed as expected res=%s", cmd, res)
                 return res
             else:
                 raise e
@@ -976,7 +967,6 @@ class VastdbApi:
             raise RuntimeError(f'invalid params parquet_path={parquet_path} parquet_bucket_name={parquet_bucket_name} parquet_object_name={parquet_object_name}')
 
         # Get the schema of the Parquet file
-        _logger.info(f'type(parquet_ds.schema) = {type(parquet_ds.schema)}')
         if isinstance(parquet_ds.schema, pq.ParquetSchema):
             arrow_schema = parquet_ds.schema.to_arrow_schema()
         elif isinstance(parquet_ds.schema, pa.Schema):
@@ -1206,7 +1196,6 @@ class VastdbApi:
             if not count_only:
                 schema_buf = b''.join(res.iter_content(chunk_size=128))
                 schema_out = pa.ipc.open_stream(schema_buf).schema
-    #            _logger.info(f"schema={schema_out}")
                 for f in schema_out:
                     columns.append([f.name, f.type, f.metadata, f])
 
@@ -1824,14 +1813,15 @@ class VastdbApi:
             chunk_size = 1024
             for chunk in res.iter_content(chunk_size=chunk_size):
                 chunk_dict = json.loads(chunk)
-                _logger.info(f"import data chunk={chunk}, result: {chunk_dict['res']}")
+                _logger.info("import data chunk=%s, result: %s", chunk, chunk_dict['res'])
                 if chunk_dict['res'] in expected_retvals:
-                    _logger.info(f"import finished with expected result={chunk_dict['res']}, error message: {chunk_dict['err_msg']}")
+                    _logger.info("import finished with expected result=%s, error message: %s",
+                                 chunk_dict['res'], chunk_dict['err_msg'])
                     return response
                 elif chunk_dict['res'] != 'Success' and chunk_dict['res'] != 'TabularInProgress':
                     raise TabularException(f"Received unexpected error in import_data. "
-                                           f"status: {chunk_dict['res']}, error message: {chunk_dict['err_msg']}")
-                _logger.info(f"import_data is in progress. status: {chunk_dict['res']}")
+                                           f"status: {res}, error message: {chunk_dict['err_msg']}")
+                _logger.debug("import_data is in progress. status: %s", chunk_dict['res'])
             return response
 
         headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
@@ -1871,7 +1861,8 @@ class VastdbApi:
         batch_len = len(batch)
         serialized_batch = serialize_record_batch(batch)
         batch_size_in_bytes = len(serialized_batch)
-        _logger.info(f'max_slice_size_in_bytes={max_slice_size_in_bytes} batch_len={batch_len} batch_size_in_bytes={batch_size_in_bytes}')
+        _logger.debug('max_slice_size_in_bytes=%d batch_len=%d batch_size_in_bytes=%d',
+                      max_slice_size_in_bytes, batch_len, batch_size_in_bytes)
 
         if not rows_per_slice:
             if batch_size_in_bytes < max_slice_size_in_bytes:
@@ -1965,7 +1956,7 @@ class VastdbApi:
 
         # split the record batch into multiple slices
         serialized_slices = self._record_batch_slices(record_batch, rows_per_insert)
-        _logger.info(f'inserting record batch using {len(serialized_slices)} slices')
+        _logger.debug('inserting record batch using %d slices', len(serialized_slices))
 
         insert_queue = queue.Queue()
 
@@ -1978,7 +1969,7 @@ class VastdbApi:
             def insert_executor(self, split_id):
 
                 try:
-                    _logger.info(f'insert_executor split_id={split_id} starting')
+                    _logger.debug('insert_executor split_id=%d starting', split_id)
                     session = executor_sessions[split_id]
                     num_inserts = 0
                     while not killall:
@@ -1989,7 +1980,7 @@ class VastdbApi:
                         session.insert_rows(bucket=bucket, schema=schema,
                                             table=table, record_batch=insert_rows_req, txid=txid)
                         num_inserts += 1
-                    _logger.info(f'insert_executor split_id={split_id} num_inserts={num_inserts}')
+                    _logger.debug('insert_executor split_id=%d num_inserts=%d', split_id, num_inserts)
                     if killall:
                         _logger.info('insert_executor killall=True')
 
@@ -2295,41 +2286,40 @@ def _iter_query_data_response_columns(fileobj, stream_ids=None):
         if stream_ids is not None:
             stream_ids.update([stream_id])  # count stream IDs using a collections.Counter
         if stream_id == TABULAR_KEEP_ALIVE_STREAM_ID:
-#            _logger.info(f"stream_id={stream_id} (skipping)")
             continue
 
         if stream_id == TABULAR_QUERY_DATA_COMPLETED_STREAM_ID:
             # read the terminating end chunk from socket
             res = fileobj.read()
-            _logger.info(f"stream_id={stream_id} res={res} (finish)")
+            _logger.debug("stream_id=%d res=%s (finish)", stream_id, res)
             return
 
         if stream_id == TABULAR_QUERY_DATA_FAILED_STREAM_ID:
             # read the terminating end chunk from socket
             res = fileobj.read()
-            _logger.info(f"stream_id={stream_id} res={res} (failed)")
+            _logger.warn("stream_id=%d res=%s (failed)", stream_id, res)
             raise IOError(f"Query data stream failed res={res}")
 
         next_row_id_bytes = fileobj.read(8)
         next_row_id, = struct.unpack('<Q', next_row_id_bytes)
-        _logger.info(f"stream_id={stream_id} next_row_id={next_row_id}")
+        _logger.debug("stream_id=%d next_row_id=%d", stream_id, next_row_id)
 
         if stream_id not in readers:
             # we implicitly read 1st message (Arrow schema) when constructing RecordBatchStreamReader
             reader = pa.ipc.RecordBatchStreamReader(fileobj)
-            _logger.info(f"stream_id={stream_id} schema={reader.schema}")
+            _logger.debug("stream_id=%d schema=%s", stream_id, reader.schema)
             readers[stream_id] = (reader, [])
             continue
 
         (reader, batches) = readers[stream_id]
         try:
             batch = reader.read_next_batch() # read single-column chunk data
-            _logger.info(f"stream_id={stream_id} rows={len(batch)} chunk={batch}")
+            _logger.debug("stream_id=%d rows=%d chunk=%s", stream_id, len(batch), batch)
             batches.append(batch)
         except StopIteration:  # we got an end-of-stream IPC message for a given stream ID
             reader, batches = readers.pop(stream_id)  # end of column
             table = pa.Table.from_batches(batches)  # concatenate all column chunks (as a single)
-            _logger.info(f"stream_id={stream_id} rows={len(table)} column={table}")
+            _logger.debug("stream_id=%d rows=%d column=%s", stream_id, len(table), table)
             yield (stream_id, next_row_id, table)
 
 
@@ -2358,7 +2348,8 @@ def parse_query_data_response(conn, schema, stream_ids=None, start_row_ids=None,
             if is_empty_projection:  # VAST returns an empty RecordBatch, with the correct rows' count
                 parsed_table = table
 
-            _logger.info(f"stream_id={stream_id} rows={len(parsed_table)} next_row_id={next_row_id} table={parsed_table}")
+            _logger.debug("stream_id=%d rows=%d next_row_id=%d table=%s",
+                          stream_id, len(parsed_table), next_row_id, parsed_table)
             start_row_ids[stream_id] = next_row_id
             yield parsed_table  # the result of a single "select_rows()" cycle
 
@@ -2507,7 +2498,6 @@ def get_field_type(builder: flatbuffers.Builder, field: pa.Field):
     return field_type, field_type_type
 
 def build_field(builder: flatbuffers.Builder, f: pa.Field, name: str):
-    _logger.info(f"name={f.name}")
     children = None
     if isinstance(f.type, pa.StructType):
         children = [build_field(builder, child, child.name) for child in list(f.type)]
@@ -2534,7 +2524,6 @@ def build_field(builder: flatbuffers.Builder, f: pa.Field, name: str):
         fb_field.AddName(builder, child_col_name)
         fb_field.AddChildren(builder, children)
 
-        _logger.info("added key and map to entries")
         children = [fb_field.End(builder)]
 
     if children is not None:
@@ -2545,13 +2534,11 @@ def build_field(builder: flatbuffers.Builder, f: pa.Field, name: str):
 
     col_name = builder.CreateString(name)
     field_type, field_type_type = get_field_type(builder, f)
-    _logger.info(f"add col_name={name} type_type={field_type_type} to fb")
     fb_field.Start(builder)
     fb_field.AddName(builder, col_name)
     fb_field.AddTypeType(builder, field_type_type)
     fb_field.AddType(builder, field_type)
     if children is not None:
-        _logger.info(f"add col_name={name} childern")
         fb_field.AddChildren(builder, children)
     return fb_field.End(builder)
 
@@ -2597,10 +2584,8 @@ def build_query_data_request(schema: 'pa.Schema' = pa.schema([]), filters: dict 
                 continue
             iter_from_root = reversed(list(descendent._iter_to_root()))
             descendent_full_name = '.'.join([n.field.name for n in iter_from_root])
-            _logger.debug(f'build_query_data_request: descendent_full_name={descendent_full_name}')
             descendent_leaves = [leaf.index for leaf in descendent._iter_leaves()]
             leaves_map[descendent_full_name] = descendent_leaves
-    _logger.debug(f'build_query_data_request: leaves_map={leaves_map}')
 
     output_field_names = None
     if field_names is None:
@@ -2611,13 +2596,11 @@ def build_query_data_request(schema: 'pa.Schema' = pa.schema([]), filters: dict 
         def compare_field_names_by_pos(field_name1, field_name2):
             return leaves_map[field_name1][0]-leaves_map[field_name2][0]
         field_names = sorted(field_names, key=cmp_to_key(compare_field_names_by_pos))
-    _logger.debug(f'build_query_data_request: sorted field_names={field_names} schema={schema}')
 
     projection_fields = []
     projection_positions = []
     for field_name in field_names:
         positions = leaves_map[field_name]
-        _logger.info("projecting field=%s positions=%s", field_name, positions)
         projection_positions.extend(positions)
         for leaf_position in positions:
             fb_field_index.Start(builder)
@@ -2674,11 +2657,9 @@ def convert_column_types(table: 'pa.Table') -> 'pa.Table':
             indexes_of_fields_to_change[field.name] = index
     for changing_index in ts_indexes:
         field_name = table.schema[changing_index].name
-        _logger.info(f'changing resolution for {field_name} to us')
         new_column = table[field_name].cast(pa.timestamp('us'), safe=False)
         table = table.set_column(changing_index, field_name, new_column)
     for field_name, changing_index in indexes_of_fields_to_change.items():
-        _logger.info(f'applying custom rules to {field_name}')
         new_column = table[field_name].to_pylist()
         new_column = list(map(column_matcher[field_name], new_column))
         new_column = pa.array(new_column, table[field_name].type)
