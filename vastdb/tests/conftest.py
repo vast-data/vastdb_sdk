@@ -30,6 +30,8 @@ def clean_bucket_name(request, test_bucket_name, rpc):
     with rpc.transaction() as tx:
         b = tx.bucket(test_bucket_name)
         for s in b.schemas():
+            for t in s.tables():
+                t.drop()
             s.drop()
     return test_bucket_name
 
