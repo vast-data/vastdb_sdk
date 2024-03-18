@@ -9,7 +9,9 @@ def test_tables(rpc, clean_bucket_name):
             ('b', pa.float32()),
             ('s', pa.utf8()),
         ])
+        assert s.tables() == []
         t = s.create_table('t1', columns)
+        assert s.tables() == [t]
 
         rb = pa.record_batch(schema=columns, data=[
             [111, 222],

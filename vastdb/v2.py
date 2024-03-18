@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import logging
 import os
 
@@ -180,18 +180,43 @@ class Schema:
         self.name = new_name
 
 
+@dataclass
+class TableStats:
+    num_rows: int
+    size: int
+
+
+@dataclass
+class QueryConfig:
+    num_sub_splits: int = 4
+    num_splits: int = 1
+    data_endpoints: [str] = None
+    limit_per_sub_split: int = 128 * 1024
+    num_row_groups_per_sub_split: int = 8
+
+
+@dataclass
 class Table:
-    def __init__(self, name: str, schema: Schema, properties: dict = None, handle: str = None, num_rows: int = 0,
-                 size: int = 0, arrow_schema: pa.Schema = None):
-        self.name = name
-        self.schema = schema
-        self.properties = properties if properties else {}
-        self.handle = handle
-        self.tx = schema.tx
-        self.bucket = schema.bucket
-        self.stats = TableStats(num_rows, size)
-        self.arrow_schema = arrow_schema or self.columns()
+    name: str
+    schema: pa.Schema
+    handle: int
+    stats: TableStats
+    properties: dict = None
+    arrow_schema: pa.Schema = field(init=False, compare=False)
+    _ibis_table: ibis.Schema = field(init=False, compare=False)
+
+    def __post_init__(self):
+        self.properties = self.properties or {}
+        self.arrow_schema = self.columns()
         self._ibis_table = ibis.Schema.from_pyarrow(self.arrow_schema)
+
+    @property
+    def tx(self):
+        return self.schema.tx
+
+    @property
+    def bucket(self):
+        return self.schema.bucket
 
     def __repr__(self):
         return f"{type(self).__name__}(name={self.name})"
@@ -305,8 +330,8 @@ class Table:
 
 
 def _parse_table_info(table_info, schema: "Schema"):
-    return Table(name=table_info.name, schema=schema, properties=table_info.properties,
-                 handle=table_info.handle, num_rows=table_info.num_rows, size=table_info.size_in_bytes)
+    stats = TableStats(num_rows=table_info.num_rows, size=table_info.size_in_bytes)
+    return Table(name=table_info.name, schema=schema, handle=int(table_info.handle), stats=stats)
 
 
 def _parse_bucket_and_object_names(path: str) -> (str, str):
@@ -333,18 +358,3 @@ def _parse_endpoint(endpoint):
         port = 80
     log.debug("endpoint: %s, port: %d", endpoint, port)
     return endpoint, port
-
-
-@dataclass
-class TableStats:
-    num_rows: int
-    size: int
-
-
-@dataclass
-class QueryConfig:
-    num_sub_splits: int = 4
-    num_splits: int = 1
-    data_endpoints: [str] = None
-    limit_per_sub_split: int = 128 * 1024
-    num_row_groups_per_sub_split: int = 8
