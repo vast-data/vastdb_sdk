@@ -109,14 +109,14 @@ class Bucket:
         if not schema:
             raise NotFoundError(f"Schema '{path}' was not found in bucket: {self.name}")
         assert len(schema) == 1, f"Expected to receive only a single schema, but got: {len(schema)}. ({schema})"
-        log.info("Found schema: %s", schema[0].name)
+        log.debug("Found schema: %s", schema[0].name)
         return schema[0]
 
     def schemas(self, schema: str = None) -> ["Schema"]:
         schemas = []
         next_key = 0
         exact_match = bool(schema)
-        log.info("list schemas param: schema=%s, exact_match=%s", schema, exact_match)
+        log.debug("list schemas param: schema=%s, exact_match=%s", schema, exact_match)
         while True:
             bucket_name, curr_schemas, next_key, is_truncated, _ = \
                 self.tx._rpc.api.list_schemas(bucket=self.name, next_key=next_key, txid=self.tx.txid,
@@ -149,7 +149,7 @@ class Schema:
         if not t:
             raise NotFoundError(f"Table '{name}' was not found under schema: {self.name}")
         assert len(t) == 1, f"Expected to receive only a single table, but got: {len(t)}. tables: {t}"
-        log.info("Found table: %s", {t[0]})
+        log.debug("Found table: %s", t[0])
         return t[0]
 
     def tables(self, table_name=None) -> ["Table"]:

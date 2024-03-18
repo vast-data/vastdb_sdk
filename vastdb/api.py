@@ -1813,12 +1813,8 @@ class VastdbApi:
             chunk_size = 1024
             for chunk in res.iter_content(chunk_size=chunk_size):
                 chunk_dict = json.loads(chunk)
-                _logger.info("import data chunk=%s, result: %s", chunk, chunk_dict['res'])
-                if chunk_dict['res'] in expected_retvals:
-                    _logger.info("import finished with expected result=%s, error message: %s",
-                                 chunk_dict['res'], chunk_dict['err_msg'])
-                    return response
-                elif chunk_dict['res'] != 'Success' and chunk_dict['res'] != 'TabularInProgress':
+                _logger.debug("import data chunk=%s, result: %s", chunk, chunk_dict['res'])
+                if chunk_dict['res'] != 'Success' and chunk_dict['res'] != 'TabularInProgress':
                     raise TabularException(f"Received unexpected error in import_data. "
                                            f"status: {res}, error message: {chunk_dict['err_msg']}")
                 _logger.debug("import_data is in progress. status: %s", chunk_dict['res'])

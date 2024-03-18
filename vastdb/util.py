@@ -26,10 +26,14 @@ def create_table_from_files(
         parquet_ds = pq.ParquetDataset(prq_file.lstrip('/'), filesystem=s3fs)
         current_schema = schema_merge_func(current_schema, parquet_ds.schema)
 
+
+    log.info("Creating table %s from %d Parquet files, with columns: %s",
+             table_name, len(parquet_files), list(current_schema))
     table = schema.create_table(table_name, current_schema)
 
-    log.info("Starting import of %d files to table %s with columns %s", len(parquet_files), table, table.arrow_schema)
+    log.info("Starting import of %d files to table: %s", len(parquet_files), table)
     table.import_files(parquet_files)
+    log.info("Finished import of %d files to table: %s", len(parquet_files), table)
     return table
 
 
