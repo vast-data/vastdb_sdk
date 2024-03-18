@@ -19,6 +19,7 @@ import json
 import itertools
 from aws_requests_auth.aws_auth import AWSRequestsAuth
 import urllib3
+import re
 
 import vast_flatbuf.org.apache.arrow.computeir.flatbuf.BinaryLiteral as fb_binary_lit
 import vast_flatbuf.org.apache.arrow.computeir.flatbuf.BooleanLiteral as fb_bool_lit
@@ -688,6 +689,9 @@ def generate_ip_range(ip_range_str):
     return ips
 
 class VastdbApi:
+    # we expect the vast version to be major.minor.<patch>.<protocol>
+    VAST_VERSION_REGEX = re.compile(r'vast ((\d+)(\.(\d+)){1,3})')
+
     def __init__(self, endpoint, access_key, secret_key, username=None, password=None,
                  secure=False, auth_type=AuthType.SIGV4):
         url_dict = urllib3.util.parse_url(endpoint)._asdict()
@@ -729,6 +733,22 @@ class VastdbApi:
         url = urllib3.util.Url(**url_dict)
         self.url = str(url)
         _logger.debug('url=%s aws_host=%s', self.url, self.aws_host)
+
+        # probe the cluster for a version
+        self.vast_version = None
+        try:
+            res = self.session.options(self.url)
+            server_header = res.headers.get("Server")
+            if server_header is None:
+                _logger.warning("OPTIONS respose doesn't contain 'Server' header. Can't determine vast version")
+            else:
+                _logger.debug("Server header is '%s'", server_header)
+                if m := self.VAST_VERSION_REGEX.match(server_header):
+                    self.vast_version = m.groups()[0]
+                else:
+                    _logger.warning("'Server' header '%s' doesn't match the expected pattern - can't determine vast version", server_header)
+        except Exception:
+            _logger.exception("Failed to probe vast version.")
 
     def update_mgmt_session(self, access_key: str, secret_key: str, auth_type=AuthType.SIGV4):
         if auth_type != AuthType.BASIC:
