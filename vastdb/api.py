@@ -1464,11 +1464,19 @@ class VastdbApi:
         return txid, created_txid
 
     def _prepare_query(self, bucket, schema, table, num_sub_splits, filters=None, field_names=None,
-                       queried_columns=None, txid=0):
+                       queried_columns=None, response_row_id=False, txid=0):
+        queried_fields = []
+        if response_row_id:
+            queried_fields.append(pa.field('$row_id', pa.uint64()))
+
         if not queried_columns:
             queried_columns = self._list_table_columns(bucket, schema, table, filters, field_names, txid=txid)
-        arrow_schema = pa.schema([(column[0], column[1]) for column in queried_columns])
+
+        queried_fields.extend(pa.field(column[0], column[1]) for column in queried_columns)
+        arrow_schema = pa.schema(queried_fields)
+
         _logger.debug(f'_prepare_query: arrow_schema = {arrow_schema}')
+
         query_data_request = build_query_data_request(schema=arrow_schema, filters=filters, field_names=field_names)
         executor_hosts = self.executor_hosts
         executor_sessions = [VastdbApi(executor_hosts[i], self.access_key, self.secret_key, self.username,
@@ -1568,7 +1576,7 @@ class VastdbApi:
         try:
             # prepare query
             queried_columns, arrow_schema, query_data_request, executor_sessions = \
-                self._prepare_query(bucket, schema, table, num_sub_splits, filters, field_names, txid=txid)
+                self._prepare_query(bucket, schema, table, num_sub_splits, filters, field_names, response_row_id=response_row_id, txid=txid)
 
             # define the per split threaded query func
             def query_iterator_split_id(self, split_id):
@@ -1737,7 +1745,7 @@ class VastdbApi:
         try:
             # prepare query
             queried_columns, arrow_schema, query_data_request, executor_sessions = \
-                self._prepare_query(bucket, schema, table, num_sub_splits, filters, field_names, txid=txid)
+                self._prepare_query(bucket, schema, table, num_sub_splits, filters, field_names, response_row_id=response_row_id, txid=txid)
 
             # define the per split threaded query func
             def query_split_id(self, split_id):
