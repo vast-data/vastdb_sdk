@@ -13,9 +13,9 @@ log = logging.getLogger(__name__)
 def create_table_from_files(
         schema: Schema, table_name: str, parquet_files: [str], schema_merge_func: Callable = None) -> Table:
     if not schema_merge_func:
-        schema_merge_func = _default_schema_merge
+        schema_merge_func = default_schema_merge
     else:
-        assert schema_merge_func in [_default_schema_merge, _strict_schema_merge, _union_schema_merge]
+        assert schema_merge_func in [default_schema_merge, strict_schema_merge, union_schema_merge]
     tx = schema.tx
     current_schema = pa.schema([])
     s3fs = pa.fs.S3FileSystem(
@@ -33,23 +33,29 @@ def create_table_from_files(
     return table
 
 
-def _default_schema_merge(current_schema: pa.Schema, new_schema: pa.Schema) -> pa.Schema:
+def default_schema_merge(current_schema: pa.Schema, new_schema: pa.Schema) -> pa.Schema:
     """
     This function validates a schema is contained in another schema
     Raises an InvalidArgumentError if a certain field does not exist in the target schema
     """
     if not current_schema.names:
         return new_schema
-    schema_a, schema_b = (current_schema, new_schema) \
-        if len(new_schema.names) >= len(current_schema.names) else (new_schema, current_schema)
-    for field in schema_a:
-        if field not in schema_b:
-            log.error("field %s doesn't exist in schema %s", field, schema_b)
-            raise InvalidArgumentError("Found mismatch in parquet files schemas")
-    return schema_b
+    s1 = set(current_schema)
+    s2 = set(new_schema)
+
+    if len(s1) > len(s2):
+        s1, s2 = s2, s1
+        result = current_schema  # We need this variable in order to preserve the original fields order
+    else:
+        result = new_schema
+
+    if not s1.issubset(s2):
+        log.error("Schema mismatch. schema: %s isn't contained in schema: %s.", s1, s2)
+        raise InvalidArgumentError("Found mismatch in parquet files schemas.")
+    return result
 
 
-def _strict_schema_merge(current_schema: pa.Schema, new_schema: pa.Schema) -> pa.Schema:
+def strict_schema_merge(current_schema: pa.Schema, new_schema: pa.Schema) -> pa.Schema:
     """
     This function validates two Schemas are identical.
     Raises an InvalidArgumentError if schemas aren't identical.
@@ -60,7 +66,7 @@ def _strict_schema_merge(current_schema: pa.Schema, new_schema: pa.Schema) -> pa
     return new_schema
 
 
-def _union_schema_merge(current_schema: pa.Schema, new_schema: pa.Schema) -> pa.Schema:
+def union_schema_merge(current_schema: pa.Schema, new_schema: pa.Schema) -> pa.Schema:
     """
     This function returns a unified schema from potentially two different schemas.
     """
