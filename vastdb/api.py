@@ -1642,7 +1642,12 @@ class VastdbApi:
                     if record_batch:
                         # signal to the thread to read the next record batch and yield the current
                         next_sems[split_id].release()
-                        yield record_batch
+                        try:
+                            yield record_batch
+                        except GeneratorExit:
+                            killall = True
+                            _logger.debug("cancelling query_iterator")
+                            raise
                     else:
                         done_count += 1
 
