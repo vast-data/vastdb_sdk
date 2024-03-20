@@ -3,6 +3,7 @@ variables:
   ORION_PREFIX: $DOCKER_REGISTRY/dev/orion
   PYSDK_BUILDER_IMAGE: $ORION_PREFIX:vastdb-python-sdk-builder-latest
   PYSDK_IMAGE_PREFIX: $ORION_PREFIX:vastdb-python-sdk-pipe-$CI_PIPELINE_ID
+  ORION_BRANCH: BUILD/roman.zeyde/pysdk-ci-job-upstream
 
 
 pre_build:
@@ -53,3 +54,15 @@ build_and_publish:
   parallel:
     matrix:
       - PYTHON_VERSION: ['3.9', '3.10', '3.11', '3.12']
+
+
+test_orion [latest]:
+  stage: test
+  when: always
+  trigger:
+    project: dev/orion
+    branch: $ORION_BRANCH
+    strategy: depend
+  allow_failure: true
+  variables:
+    PYSDK_IMAGE_PREFIX: $ORION_PREFIX:vastdb-python-sdk-pipe-$CI_PIPELINE_ID
