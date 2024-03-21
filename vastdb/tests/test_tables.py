@@ -1,8 +1,11 @@
 import pyarrow as pa
 import pyarrow.compute as pc
 
-from contextlib import contextmanager
+import pyarrow.parquet as pq
+from tempfile import NamedTemporaryFile
+import logging
 
+from contextlib import contextmanager, closing
 
 @contextmanager
 def prepare_data(rpc, clean_bucket_name, schema_name, table_name, arrow_table):
@@ -14,6 +17,7 @@ def prepare_data(rpc, clean_bucket_name, schema_name, table_name, arrow_table):
         t.drop()
         s.drop()
 
+log = logging.getLogger(__name__)
 
 def test_tables(rpc, clean_bucket_name):
     columns = pa.schema([
@@ -80,3 +84,37 @@ def test_filters(rpc, clean_bucket_name):
         assert select(t['s'] != 'bb') == expected.filter(pc.field('s') != 'bb')
         assert select(t['s'] <= 'bb') == expected.filter(pc.field('s') <= 'bb')
         assert select(t['s'] >= 'bb') == expected.filter(pc.field('s') >= 'bb')
+
+
+def test_parquet_export(rpc, clean_bucket_name):
+    with rpc.transaction() as tx:
+        s = tx.bucket(clean_bucket_name).create_schema('s1')
+        columns = pa.schema([
+            ('a', pa.int16()),
+            ('b', pa.float32()),
+            ('s', pa.utf8()),
+        ])
+        assert s.tables() == []
+        t = s.create_table('t1', columns)
+        assert s.tables() == [t]
+
+        rb = pa.record_batch(schema=columns, data=[
+            [111, 222],
+            [0.5, 1.5],
+            ['a', 'b'],
+        ])
+        expected = pa.Table.from_batches([rb])
+        t.insert(rb)
+
+        actual = pa.Table.from_batches(t.select(columns=['a', 'b', 's']))
+        assert actual == expected
+
+        table_batches = t.select(columns=['a', 'b', 's'])
+
+        with NamedTemporaryFile() as parquet_file:
+            log.info("Writing table into parquet file: '%s'", parquet_file.name)
+            with closing(pq.ParquetWriter(parquet_file.name, table_batches.schema)) as parquet_writer:
+                for batch in table_batches:
+                    parquet_writer.write_batch(batch)
+
+            assert expected == pq.read_table(parquet_file.name)
