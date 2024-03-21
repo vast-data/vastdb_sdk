@@ -257,7 +257,7 @@ class Table:
 
     def select(self, columns: [str] = None,
                predicate: ibis.expr.types.BooleanColumn = None,
-               config: "QueryConfig" = None):
+               config: "QueryConfig" = None) -> pa.RecordBatchReader:
         if config is None:
             config = QueryConfig()
 
@@ -270,29 +270,31 @@ class Table:
         assert config.num_splits == 1  # TODO()
         split = (0, 1, config.num_row_groups_per_sub_split)
         response_row_id = False
+        def batches_iterator():
+            while not all(row_id == TABULAR_INVALID_ROW_ID for row_id in start_row_ids.values()):
+                response = self.tx._rpc.api.query_data(
+                    bucket=self.bucket.name,
+                    schema=self.schema.name,
+                    table=self.name,
+                    params=query_data_request.serialized,
+                    split=split,
+                    num_sub_splits=config.num_sub_splits,
+                    response_row_id=response_row_id,
+                    txid=self.tx.txid,
+                    limit_rows=config.limit_per_sub_split,
+                    sub_split_start_row_ids=start_row_ids.items())
 
-        while not all(row_id == TABULAR_INVALID_ROW_ID for row_id in start_row_ids.values()):
-            response = self.tx._rpc.api.query_data(
-                bucket=self.bucket.name,
-                schema=self.schema.name,
-                table=self.name,
-                params=query_data_request.serialized,
-                split=split,
-                num_sub_splits=config.num_sub_splits,
-                response_row_id=response_row_id,
-                txid=self.tx.txid,
-                limit_rows=config.limit_per_sub_split,
-                sub_split_start_row_ids=start_row_ids.items())
+                pages_iter = parse_query_data_response(
+                    conn=response.raw,
+                    schema=query_data_request.response_schema,
+                    start_row_ids=start_row_ids)
 
-            pages_iter = parse_query_data_response(
-                conn=response.raw,
-                schema=query_data_request.response_schema,
-                start_row_ids=start_row_ids)
+                for page in pages_iter:
+                    for batch in page.to_batches():
+                        if len(batch) > 0:
+                            yield batch
 
-            for page in pages_iter:
-                for batch in page.to_batches():
-                    if len(batch) > 0:
-                        yield batch
+        return pa.RecordBatchReader.from_batches(query_data_request.response_schema.arrow_schema, batches_iterator())
 
     def insert(self, rows: pa.RecordBatch) -> None:
         blob = serialize_record_batch(rows)
