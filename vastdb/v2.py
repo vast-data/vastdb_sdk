@@ -198,7 +198,7 @@ class QueryConfig:
 @dataclass
 class Table:
     name: str
-    schema: pa.Schema
+    schema: Schema
     handle: int
     stats: TableStats
     properties: dict = None
@@ -208,7 +208,9 @@ class Table:
     def __post_init__(self):
         self.properties = self.properties or {}
         self.arrow_schema = self.columns()
-        self._ibis_table = ibis.Schema.from_pyarrow(self.arrow_schema)
+
+        table_path = f'{self.schema.bucket.name}/{self.schema.name}/{self.name}'
+        self._ibis_table = ibis.table(ibis.Schema.from_pyarrow(self.arrow_schema), table_path)
 
     @property
     def tx(self):
@@ -253,19 +255,16 @@ class Table:
             # TODO: investigate and raise proper error in case of failure mid import.
             raise ImportFilesError("import_files failed") from e
 
-    def select(self, columns: [str], predicate: ibis.expr.types.BooleanColumn = None,
+    def select(self, columns: [str] = None,
+               predicate: ibis.expr.types.BooleanColumn = None,
                config: "QueryConfig" = None):
         if config is None:
             config = QueryConfig()
 
-        api = self.tx._rpc.api
-        field_names = columns
-        filters = []
-        bucket = self.bucket.name
-        schema = self.schema.name
-        table = self.name
         query_data_request = build_query_data_request(
-            schema=self.arrow_schema, filters=filters, field_names=field_names)
+            schema=self.arrow_schema,
+            predicate=predicate,
+            field_names=columns)
 
         start_row_ids = {i: 0 for i in range(config.num_sub_splits)}
         assert config.num_splits == 1  # TODO()
@@ -273,10 +272,10 @@ class Table:
         response_row_id = False
 
         while not all(row_id == TABULAR_INVALID_ROW_ID for row_id in start_row_ids.values()):
-            response = api.query_data(
-                bucket=bucket,
-                schema=schema,
-                table=table,
+            response = self.tx._rpc.api.query_data(
+                bucket=self.bucket.name,
+                schema=self.schema.name,
+                table=self.name,
                 params=query_data_request.serialized,
                 split=split,
                 num_sub_splits=config.num_sub_splits,

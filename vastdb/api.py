@@ -5,6 +5,7 @@ from collections import defaultdict, namedtuple
 from datetime import datetime
 from enum import Enum
 from typing import Union, Optional, Iterator
+import ibis
 import xmltodict
 import concurrent.futures
 import threading
@@ -123,11 +124,10 @@ class Predicate:
         's': 0.001
     }
 
-    def __init__(self, schema: 'pa.Schema', filters: dict):
+    def __init__(self, schema: 'pa.Schema', expr: ibis.expr.types.BooleanColumn):
         self.schema = schema
-        self.filters = filters
+        self.expr = expr
         self.builder = None
-        self._field_name_per_index = None
 
     def get_field_indexes(self, field: 'pa.Field', field_name_per_index: list) -> None:
         field_name_per_index.append(field.name)
@@ -168,10 +168,48 @@ class Predicate:
         return builder.EndVector()
 
     def serialize(self, builder: 'flatbuffers.builder.Builder'):
+        from ibis.expr.operations.generic import TableColumn
+        from ibis.expr.operations.generic import Literal
+
+        builder_map = {
+            ibis.expr.operations.logical.Greater: self.build_greater,
+            ibis.expr.operations.logical.GreaterEqual: self.build_greater_equal,
+            ibis.expr.operations.logical.Less: self.build_less,
+            ibis.expr.operations.logical.LessEqual: self.build_less_equal,
+            ibis.expr.operations.logical.Equals: self.build_equal,
+            ibis.expr.operations.logical.NotEquals: self.build_not_equal,
+        }
+
+        positions_map = dict((f.name, index) for index, f in enumerate(self.schema)) # TODO: BFS
+
         self.builder = builder
+
         offsets = []
-        for field_name in self.filters:
-            offsets.append(self.build_domain(self.build_column(self.field_name_per_index[field_name]), field_name))
+        if self.expr is not None:
+            op = self.expr.op()
+            builder_func = builder_map.get(type(op))
+            if not builder_func:
+                raise NotImplementedError(op)
+
+            left, right = op.args
+            if not isinstance(left, TableColumn):
+                raise NotImplementedError(op)
+            if not isinstance(right, Literal):
+                raise NotImplementedError(op)
+
+            field_name = left.name
+            field = self.schema.field(field_name)
+            value = right.value
+
+            column_offset = self.build_column(position=positions_map[field_name])
+            literal_offset = self.build_literal(field=field, value=value)
+
+            domain_offset = self.build_or([
+                 builder_func(column_offset, literal_offset)
+            ])
+            offsets.append(domain_offset)
+
+
         return self.build_and(offsets)
 
     def build_column(self, position: int):
@@ -433,6 +471,9 @@ class Predicate:
 
     def build_equal(self, column: int, literal: int):
         return self.build_function('equal', column, literal)
+
+    def build_not_equal(self, column: int, literal: int):
+        return self.build_function('not_equal', column, literal)
 
     def build_greater(self, column: int, literal: int):
         return self.build_function('greater', column, literal)
@@ -2571,9 +2612,7 @@ class QueryDataRequest:
         self.response_schema = response_schema
 
 
-def build_query_data_request(schema: 'pa.Schema' = pa.schema([]), filters: dict = None, field_names: list = None):
-    filters = filters or {}
-
+def build_query_data_request(schema: 'pa.Schema' = pa.schema([]), predicate: ibis.expr.types.BooleanColumn = None, field_names: list = None):
     builder = flatbuffers.Builder(1024)
 
     source_name = builder.CreateString('')  # required
@@ -2589,7 +2628,7 @@ def build_query_data_request(schema: 'pa.Schema' = pa.schema([]), filters: dict 
     fb_schema.AddFields(builder, fields)
     schema_obj = fb_schema.End(builder)
 
-    predicate = Predicate(schema, filters)
+    predicate = Predicate(schema=schema, expr=predicate)
     filter_obj = predicate.serialize(builder)
 
     parser = QueryDataParser(schema)
