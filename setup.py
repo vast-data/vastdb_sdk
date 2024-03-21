@@ -33,7 +33,6 @@ vastdb_session = create_vastdb_session(access_key, secret_key)
 
 def _get_version_suffix():
     import subprocess
-    import traceback
 
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"])
     print(f"Git commit: {commit}")
