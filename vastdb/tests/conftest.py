@@ -1,14 +1,15 @@
 import pytest
 import boto3
+import os
 
 from vastdb import v2
 
 
 def pytest_addoption(parser):
-    parser.addoption("--tabular-bucket-name", help="Name of the S3 bucket with Tabular enabled")
-    parser.addoption("--tabular-access-key", help="Access key with Tabular permissions")
-    parser.addoption("--tabular-secret-key", help="Secret key with Tabular permissions")
-    parser.addoption("--tabular-endpoint-url", help="Tabular server endpoint")
+    parser.addoption("--tabular-bucket-name", help="Name of the S3 bucket with Tabular enabled", default = "vastdb")
+    parser.addoption("--tabular-access-key", help="Access key with Tabular permissions (AWS_ACCESS_KEY_ID)", default = os.environ.get("AWS_ACCESS_KEY_ID", None))
+    parser.addoption("--tabular-secret-key", help="Secret key with Tabular permissions (AWS_SECRET_ACCESS_KEY)" , default = os.environ.get("AWS_SECRET_ACCESS_KEY", None))
+    parser.addoption("--tabular-endpoint-url", help="Tabular server endpoint", default = "http://localhost:9090")
 
 
 @pytest.fixture(scope="module")
