@@ -4,7 +4,10 @@ export VASTDB_APPEND_VERSION_SUFFIX=true
 
 python3 --version
 python3 setup.py sdist bdist_wheel
-ls -l dist/
+cd dist
 
-pip3 install dist/*.whl
+ls -lh
+sha256sum * | tee SHA256SUMS
+
+pip3 install *.whl
 pip3 freeze
