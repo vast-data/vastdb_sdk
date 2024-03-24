@@ -1508,7 +1508,7 @@ class VastdbApi:
         _logger.info(f"query_page_iterator: start_row_ids={start_row_ids}")
 
     def query_iterator(self, bucket, schema, table, num_sub_splits=1, num_row_groups_per_sub_split=8,
-                       response_row_id=False, txid=0, limit_per_sub_split=128*1024, filters=None, field_names=None):
+                       response_row_id=False, txid=0, limit_rows_per_sub_split=128*1024, filters=None, field_names=None):
         """
         query rows into a table.
 
@@ -1532,7 +1532,7 @@ class VastdbApi:
         txid : integer
             A transaction id. The transaction may be initiated before the query, and if not, the query will initiate it
             default: 0 (will be created by the api)
-        limit_per_sub_split : integer
+        limit_rows_per_sub_split : integer
             Limit the number of rows from a single sub_split for a single rpc
             default:131072
         filters : dict
@@ -1585,7 +1585,7 @@ class VastdbApi:
                         for record_batch in session._query_page_iterator(bucket=bucket, schema=schema, table=table, query_data_request=query_data_request,
                                                                          split=(split_id, num_splits, num_row_groups_per_sub_split),
                                                                          num_sub_splits=num_sub_splits, response_row_id=response_row_id,
-                                                                         txid=txid, limit_rows=limit_per_sub_split,
+                                                                         txid=txid, limit_rows=limit_rows_per_sub_split,
                                                                          start_row_ids=start_row_ids):
                             output_queue.put((split_id, record_batch))
                             while not next_sems[split_id].acquire(timeout=1): # wait for the main thread to request the next record batch
@@ -1674,7 +1674,7 @@ class VastdbApi:
                     _logger.exception(f'failed to close session {session}')
 
     def query(self, bucket, schema, table, num_sub_splits=1, num_row_groups_per_sub_split=8,
-              response_row_id=False, txid=0, limit=0, limit_per_sub_split=131072, filters=None, field_names=None,
+              response_row_id=False, txid=0, limit=0, limit_rows_per_sub_split=131072, filters=None, field_names=None,
               queried_columns=None):
         """
         query rows into a table.
@@ -1703,7 +1703,7 @@ class VastdbApi:
         limit : integer
             Limit the number of rows in the response
             default: 0 (no limit)
-        limit_per_sub_split : integer
+        limit_rows_per_sub_split : integer
             Limit the number of rows from a single sub_split for a single rpc
             default:131072
         filters : dict
@@ -1753,9 +1753,9 @@ class VastdbApi:
 
                         # determine the limit rows
                         if limit:
-                            limit_rows = min(limit_per_sub_split, limit-row_count)
+                            limit_rows = min(limit_rows_per_sub_split, limit-row_count)
                         else:
-                            limit_rows = limit_per_sub_split
+                            limit_rows = limit_rows_per_sub_split
 
                         # query one page
                         table_page, start_row_ids = session._query_page(bucket=bucket, schema=schema, table=table, query_data_request=query_data_request,

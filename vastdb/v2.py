@@ -192,7 +192,7 @@ class QueryConfig:
     num_sub_splits: int = 4
     num_splits: int = 1
     data_endpoints: [str] = None
-    limit_per_sub_split: int = 128 * 1024
+    limit_rows_per_sub_split: int = 128 * 1024
     num_row_groups_per_sub_split: int = 8
 
 
@@ -291,7 +291,7 @@ class Table:
                     num_sub_splits=config.num_sub_splits,
                     response_row_id=response_row_id,
                     txid=self.tx.txid,
-                    limit_rows=config.limit_per_sub_split,
+                    limit_rows=config.limit_rows_per_sub_split,
                     sub_split_start_row_ids=start_row_ids.items())
 
                 pages_iter = parse_query_data_response(
