@@ -1305,7 +1305,7 @@ class VastdbApi:
         return self._check_res(res, "get_transaction", expected_retvals)
 
     def select_row_ids(self, bucket, schema, table, params, txid=0, client_tags=[], expected_retvals=[],
-                       retry_count=0, enable_sorted_projections=False):
+                       retry_count=0, enable_sorted_projections=True):
         """
         POST /mybucket/myschema/mytable?query-data=SelectRowIds HTTP/1.1
         """
@@ -1322,7 +1322,7 @@ class VastdbApi:
         return self._check_res(res, "query_data", expected_retvals)
 
     def read_columns_data(self, bucket, schema, table, params, txid=0, client_tags=[], expected_retvals=[], tenant_guid=None,
-                          retry_count=0, enable_sorted_projections=False):
+                          retry_count=0, enable_sorted_projections=True):
         """
         POST /mybucket/myschema/mytable?query-data=ReadColumns HTTP/1.1
         """
@@ -1338,7 +1338,7 @@ class VastdbApi:
         return self._check_res(res, "query_data", expected_retvals)
 
     def count_rows(self, bucket, schema, table, params, txid=0, client_tags=[], expected_retvals=[], tenant_guid=None,
-                   retry_count=0, enable_sorted_projections=False):
+                   retry_count=0, enable_sorted_projections=True):
         """
         POST /mybucket/myschema/mytable?query-data=CountRows HTTP/1.1
         """

@@ -194,6 +194,7 @@ class QueryConfig:
     data_endpoints: [str] = None
     limit_rows_per_sub_split: int = 128 * 1024
     num_row_groups_per_sub_split: int = 8
+    use_semi_sorted_projections: bool = True
 
 
 @dataclass
@@ -292,7 +293,8 @@ class Table:
                     response_row_id=response_row_id,
                     txid=self.tx.txid,
                     limit_rows=config.limit_rows_per_sub_split,
-                    sub_split_start_row_ids=start_row_ids.items())
+                    sub_split_start_row_ids=start_row_ids.items(),
+                    enable_sorted_projections=config.use_semi_sorted_projections)
 
                 pages_iter = parse_query_data_response(
                     conn=response.raw,
