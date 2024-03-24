@@ -2007,7 +2007,7 @@ class VastdbApi:
         txid, created_txid = self._begin_tx_if_necessary(txid)
 
         if rows:
-            columns = self._list_table_columns(bucket, schema, table, field_names=rows.keys())
+            columns = self._list_table_columns(bucket, schema, table, field_names=rows.keys(), txid=txid)
             columns_dict = dict([(column[0], column[1]) for column in columns])
             arrow_schema = pa.schema([])
             arrays = []
