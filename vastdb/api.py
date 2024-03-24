@@ -751,6 +751,7 @@ class VastdbApi:
 
         self.port = url_dict['port']
 
+        self.default_max_list_columns_page_size = 1000
         self.session = requests.Session()
         self.session.verify = False
         self.session.headers['user-agent'] = "VastData Tabular API 1.0 - 2022 (c)"
@@ -1219,7 +1220,7 @@ class VastdbApi:
                                 data=serialized_schema, headers=headers)
         return self._check_res(res, "drop_columns", expected_retvals)
 
-    def list_columns(self, bucket, schema, table, *, txid=0, client_tags=None, max_keys=1000, next_key=0,
+    def list_columns(self, bucket, schema, table, *, txid=0, client_tags=None, max_keys=None, next_key=0,
                      count_only=False, name_prefix="", exact_match=False,
                      expected_retvals=None, bc_list_internals=False):
         """
@@ -1230,6 +1231,7 @@ class VastdbApi:
         tabular-max-keys: 1000
         tabular-next-key: NextColumnId
         """
+        max_keys = max_keys or self.default_max_list_columns_page_size
         client_tags = client_tags or []
         expected_retvals = expected_retvals or []
 
