@@ -103,8 +103,10 @@ class AuthType(Enum):
     BASIC = "basic"
 
 
-class TabularException(Exception):
-    pass
+class ImportFilesError(Exception):
+    def __init__(self, message, error_dict):
+        super().__init__(message)
+        self.error_dict = error_dict
 
 
 def get_unit_to_flatbuff_time_unit(type):
@@ -1882,18 +1884,22 @@ class VastdbApi:
         builder.Finish(params)
         import_req = builder.Output()
 
-        def iterate_over_import_data_response(response, expected_retvals):
+        def iterate_over_import_data_response(response):
             if response.status_code != 200:
                 return response
 
             chunk_size = 1024
-            for chunk in res.iter_content(chunk_size=chunk_size):
+            for chunk in response.iter_content(chunk_size=chunk_size):
                 chunk_dict = json.loads(chunk)
-                _logger.debug("import data chunk=%s, result: %s", chunk, chunk_dict['res'])
+                _logger.debug("import data chunk=%s, result: %s", chunk_dict, chunk_dict['res'])
                 if chunk_dict['res'] != 'Success' and chunk_dict['res'] != 'TabularInProgress':
-                    raise TabularException(f"Received unexpected error in import_data. "
-                                           f"status: {res}, error message: {chunk_dict['err_msg']}")
-                _logger.debug("import_data is in progress. status: %s", chunk_dict['res'])
+                    raise ImportFilesError(
+                        f"Encountered an error during import_data. status: {chunk_dict['res']}, "
+                        f"error message: {chunk_dict['err_msg'] or 'Unexpected error'} during import of "
+                        f"object name: {chunk_dict['object_name']}", chunk_dict)
+                else:
+                    _logger.debug("import_data of object name '%s' is in progress. "
+                                  "status: %s", chunk_dict['object_name'], chunk_dict['res'])
             return response
 
         headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
@@ -1906,7 +1912,7 @@ class VastdbApi:
         res = self.session.post(self._api_prefix(bucket=bucket, schema=schema, table=table, command="data"),
                                 data=import_req, headers=headers, stream=True)
         if blocking:
-            res = iterate_over_import_data_response(res, expected_retvals)
+            res = iterate_over_import_data_response(res)
 
         return self._check_res(res, "import_data", expected_retvals)
 

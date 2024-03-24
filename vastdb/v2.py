@@ -6,7 +6,6 @@ import boto3
 import botocore
 import ibis
 import pyarrow as pa
-import requests
 
 from vastdb.api import VastdbApi, serialize_record_batch, build_query_data_request, parse_query_data_response, TABULAR_INVALID_ROW_ID
 
@@ -24,10 +23,6 @@ class NotFoundError(VastException):
 
 
 class AccessDeniedError(VastException):
-    pass
-
-
-class ImportFilesError(VastException):
     pass
 
 
@@ -248,14 +243,8 @@ class Table:
         self._execute_import(source_files)
 
     def _execute_import(self, source_files):
-        try:
-            self.tx._rpc.api.import_data(
-                self.bucket.name, self.schema.name, self.name, source_files, txid=self.tx.txid)
-        except requests.HTTPError as e:
-            raise ImportFilesError(f"import_files failed with status: {e.response.status_code}, reason: {e.response.reason}")
-        except Exception as e:
-            # TODO: investigate and raise proper error in case of failure mid import.
-            raise ImportFilesError("import_files failed") from e
+        self.tx._rpc.api.import_data(
+            self.bucket.name, self.schema.name, self.name, source_files, txid=self.tx.txid)
 
     def select(self, columns: [str] = None,
                predicate: ibis.expr.types.BooleanColumn = None,
