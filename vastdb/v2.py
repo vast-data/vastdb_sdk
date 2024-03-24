@@ -12,6 +12,7 @@ from vastdb.api import VastdbApi, serialize_record_batch, build_query_data_reque
 
 
 log = logging.getLogger(__name__)
+INTERNAL_ROW_ID = "$row_id"
 
 
 class VastException(Exception):
@@ -257,12 +258,21 @@ class Table:
 
     def select(self, columns: [str] = None,
                predicate: ibis.expr.types.BooleanColumn = None,
-               config: "QueryConfig" = None) -> pa.RecordBatchReader:
+               config: "QueryConfig" = None,
+               *,
+               internal_row_id = False) -> pa.RecordBatchReader:
         if config is None:
             config = QueryConfig()
 
+        query_schema = self.arrow_schema
+        if internal_row_id:
+            queried_fields = [pa.field(INTERNAL_ROW_ID, pa.uint64())]
+            queried_fields.extend(column for column in self.arrow_schema)
+            query_schema = pa.schema(queried_fields)
+            columns.append(INTERNAL_ROW_ID)
+
         query_data_request = build_query_data_request(
-            schema=self.arrow_schema,
+            schema=query_schema,
             predicate=predicate,
             field_names=columns)
 

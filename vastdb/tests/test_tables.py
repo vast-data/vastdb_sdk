@@ -1,11 +1,12 @@
 import pyarrow as pa
 import pyarrow.compute as pc
+import logging
 
 import pyarrow.parquet as pq
 from tempfile import NamedTemporaryFile
-import logging
-
 from contextlib import contextmanager, closing
+
+log = logging.getLogger(__name__)
 
 @contextmanager
 def prepare_data(rpc, clean_bucket_name, schema_name, table_name, arrow_table):
@@ -45,6 +46,13 @@ def test_tables(rpc, clean_bucket_name):
 
         actual = pa.Table.from_batches(t.select(columns=[]))
         assert actual == expected.select([])
+
+        actual = pa.Table.from_batches(t.select(columns=['s'], internal_row_id=True))
+        log.debug("actual=%s", actual)
+        assert actual.to_pydict() == {
+            's': ['a', 'bb', 'ccc'],
+            '$row_id': [0, 1, 2]
+        }
 
 
 def test_filters(rpc, clean_bucket_name):
