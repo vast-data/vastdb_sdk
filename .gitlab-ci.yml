@@ -48,7 +48,6 @@ build:
 
 test_orion [branch]:
   stage: test
-  when: always
   trigger:
     project: dev/orion
     branch: $ORION_BRANCH
