@@ -1,5 +1,6 @@
 import pytest
-import os
+
+from tempfile import NamedTemporaryFile
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -24,10 +25,9 @@ def test_create_table_from_files(rpc, clean_bucket_name, s3):
     ]
     for i, ds in enumerate(datasets):
         table = pa.Table.from_pydict(ds)
-        pq.write_table(table, f'prq{i}')
-        with open(f'prq{i}', 'rb') as f:
+        with NamedTemporaryFile() as f:
+            pq.write_table(table, f.name)
             s3.put_object(Bucket=clean_bucket_name, Key=f'prq{i}', Body=f)
-        os.remove(f'prq{i}')
 
     same_schema_files = [f'/{clean_bucket_name}/prq{i}' for i in range(2)]
     contained_schema_files = [f'/{clean_bucket_name}/prq{i}' for i in range(4)]
