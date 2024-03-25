@@ -67,14 +67,26 @@ def test_tables(rpc, clean_bucket_name):
         ])
 
         rb = pa.record_batch(schema=columns_to_update, data=[
-            [0, 2],
+            [0, 2],  # update rows 0,2
             [1110, 3330]
         ])
+
         t.update(rb)
         actual = pa.Table.from_batches(t.select(columns=['a', 'b']))
         assert actual.to_pydict() == {
             'a': [1110, 222, 3330],
             'b': [0.5, 1.5, 2.5]
+        }
+
+        columns_to_delete = pa.schema([('$row_id', pa.uint64())])
+        rb = pa.record_batch(schema=columns_to_delete, data=[[0, 1]])  # delete rows 0,1
+
+        t.delete(rb)
+        actual = pa.Table.from_batches(t.select(columns=['a', 'b', 's']))
+        assert actual.to_pydict() == {
+            'a': [3330],
+            'b': [2.5],
+            's': ['ccc']
         }
 
 
