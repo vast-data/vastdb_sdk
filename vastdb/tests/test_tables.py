@@ -5,6 +5,7 @@ import pyarrow.parquet as pq
 
 from tempfile import NamedTemporaryFile
 from contextlib import contextmanager, closing
+from vastdb.v2 import INTERNAL_ROW_ID
 
 import logging
 
@@ -16,7 +17,7 @@ def prepare_data(rpc, clean_bucket_name, schema_name, table_name, arrow_table):
         s = tx.bucket(clean_bucket_name).create_schema(schema_name)
         t = s.create_table(table_name, arrow_table.schema)
         rb = t.insert(arrow_table)
-        log.debug("row_ids=%s" % rb.to_pydict()['$row_id'])
+        log.debug("row_ids=%s" % rb.to_pydict()[INTERNAL_ROW_ID])
         assert rb.num_rows == arrow_table.num_rows
         yield t
         t.drop()
@@ -58,11 +59,11 @@ def test_tables(rpc, clean_bucket_name):
         log.debug("actual=%s", actual)
         assert actual.to_pydict() == {
             's': ['a', 'bb', 'ccc'],
-            '$row_id': [0, 1, 2]
+            INTERNAL_ROW_ID: [0, 1, 2]
         }
 
         columns_to_update = pa.schema([
-            ('$row_id', pa.uint64()),
+            (INTERNAL_ROW_ID, pa.uint64()),
             ('a', pa.int16())
         ])
 
@@ -78,7 +79,7 @@ def test_tables(rpc, clean_bucket_name):
             'b': [0.5, 1.5, 2.5]
         }
 
-        columns_to_delete = pa.schema([('$row_id', pa.uint64())])
+        columns_to_delete = pa.schema([(INTERNAL_ROW_ID, pa.uint64())])
         rb = pa.record_batch(schema=columns_to_delete, data=[[0, 1]])  # delete rows 0,1
 
         t.delete(rb)
@@ -169,7 +170,7 @@ def test_parquet_export(rpc, clean_bucket_name):
         expected = pa.Table.from_batches([rb])
         rb = t.insert(rb)
         assert rb.to_pydict() == {
-            '$row_id': [0, 1]
+            INTERNAL_ROW_ID: [0, 1]
         }
 
         actual = pa.Table.from_batches(t.select())
