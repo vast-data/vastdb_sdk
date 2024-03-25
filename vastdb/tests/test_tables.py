@@ -1,10 +1,12 @@
+import duckdb
 import pyarrow as pa
 import pyarrow.compute as pc
-import logging
-
 import pyarrow.parquet as pq
+
 from tempfile import NamedTemporaryFile
 from contextlib import contextmanager, closing
+
+import logging
 
 log = logging.getLogger(__name__)
 
@@ -33,6 +35,9 @@ def test_tables(rpc, clean_bucket_name):
     ])
     with prepare_data(rpc, clean_bucket_name, 's', 't', expected) as t:
         actual = pa.Table.from_batches(t.select(columns=['a', 'b', 's']))
+        assert actual == expected
+
+        actual = pa.Table.from_batches(t.select())
         assert actual == expected
 
         actual = pa.Table.from_batches(t.select(columns=['a', 'b']))
@@ -94,6 +99,26 @@ def test_filters(rpc, clean_bucket_name):
         assert select(t['s'] >= 'bb') == expected.filter(pc.field('s') >= 'bb')
 
 
+def test_duckdb(rpc, clean_bucket_name):
+    columns = pa.schema([
+        ('a', pa.int32()),
+        ('b', pa.float64()),
+    ])
+    data = pa.table(schema=columns, data=[
+        [111, 222, 333],
+        [0.5, 1.5, 2.5],
+    ])
+    with prepare_data(rpc, clean_bucket_name, 's', 't', data) as t:
+        conn = duckdb.connect()
+        batches = t.select(columns=['a'], predicate=(t['b'] < 2))  # noqa: F841
+        actual = conn.execute('SELECT max(a) as "a_max" FROM batches').arrow()
+        expected = (data
+            .filter(pc.field('b') < 2)
+            .group_by([])
+            .aggregate([('a', 'max')]))
+        assert actual == expected
+
+
 def test_parquet_export(rpc, clean_bucket_name):
     with rpc.transaction() as tx:
         s = tx.bucket(clean_bucket_name).create_schema('s1')
@@ -114,10 +139,10 @@ def test_parquet_export(rpc, clean_bucket_name):
         expected = pa.Table.from_batches([rb])
         t.insert(rb)
 
-        actual = pa.Table.from_batches(t.select(columns=['a', 'b', 's']))
+        actual = pa.Table.from_batches(t.select())
         assert actual == expected
 
-        table_batches = t.select(columns=['a', 'b', 's'])
+        table_batches = t.select()
 
         with NamedTemporaryFile() as parquet_file:
             log.info("Writing table into parquet file: '%s'", parquet_file.name)
