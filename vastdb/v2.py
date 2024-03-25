@@ -297,9 +297,11 @@ class Table:
 
         return pa.RecordBatchReader.from_batches(query_data_request.response_schema.arrow_schema, batches_iterator())
 
-    def insert(self, rows: pa.RecordBatch) -> None:
+    def insert(self, rows: pa.RecordBatch) -> pa.RecordBatch:
         blob = serialize_record_batch(rows)
-        self.tx._rpc.api.insert_rows(self.bucket.name, self.schema.name, self.name, record_batch=blob, txid=self.tx.txid)
+        res = self.tx._rpc.api.insert_rows(self.bucket.name, self.schema.name, self.name, record_batch=blob, txid=self.tx.txid)
+        reader = pa.ipc.RecordBatchStreamReader(res.raw)
+        return reader.read_next_batch()
 
     def drop(self) -> None:
         self.tx._rpc.api.drop_table(self.bucket.name, self.schema.name, self.name, txid=self.tx.txid)

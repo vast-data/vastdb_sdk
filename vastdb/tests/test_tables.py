@@ -15,7 +15,9 @@ def prepare_data(rpc, clean_bucket_name, schema_name, table_name, arrow_table):
     with rpc.transaction() as tx:
         s = tx.bucket(clean_bucket_name).create_schema(schema_name)
         t = s.create_table(table_name, arrow_table.schema)
-        t.insert(arrow_table)
+        rb = t.insert(arrow_table)
+        log.debug("row_ids=%s" % rb.to_pydict()['$row_id'])
+        assert rb.num_rows == arrow_table.num_rows
         yield t
         t.drop()
         s.drop()
@@ -137,7 +139,10 @@ def test_parquet_export(rpc, clean_bucket_name):
             ['a', 'b'],
         ])
         expected = pa.Table.from_batches([rb])
-        t.insert(rb)
+        rb = t.insert(rb)
+        assert rb.to_pydict() == {
+            '$row_id': [0, 1]
+        }
 
         actual = pa.Table.from_batches(t.select())
         assert actual == expected
