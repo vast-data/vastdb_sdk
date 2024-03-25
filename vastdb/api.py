@@ -729,8 +729,8 @@ def generate_ip_range(ip_range_str):
     return ips
 
 class VastdbApi:
-    # we expect the vast version to be major.minor.<patch>.<protocol>
-    VAST_VERSION_REGEX = re.compile(r'vast ((\d+)(\.(\d+)){1,3})')
+    # we expect the vast version to be <major>.<minor>.<patch>.<protocol>
+    VAST_VERSION_REGEX = re.compile(r'^vast (\d+\.\d+\.\d+\.\d+)$')
 
     def __init__(self, endpoint, access_key, secret_key, username=None, password=None,
                  secure=False, auth_type=AuthType.SIGV4):
@@ -775,21 +775,27 @@ class VastdbApi:
         self.url = str(url)
         _logger.debug('url=%s aws_host=%s', self.url, self.aws_host)
 
-        # probe the cluster for a version
+        # probe the cluster for its version
         self.vast_version = None
-        try:
-            res = self.session.options(self.url)
-            server_header = res.headers.get("Server")
-            if server_header is None:
-                _logger.warning("OPTIONS respose doesn't contain 'Server' header. Can't determine vast version")
+        res = self.session.options(self.url)
+        server_header = res.headers.get("Server")
+        if server_header is None:
+            _logger.error("OPTIONS response doesn't contain 'Server' header")
+        else:
+            _logger.debug("Server header is '%s'", server_header)
+            if m := self.VAST_VERSION_REGEX.match(server_header):
+                self.vast_version, = m.groups()
+                return
             else:
-                _logger.debug("Server header is '%s'", server_header)
-                if m := self.VAST_VERSION_REGEX.match(server_header):
-                    self.vast_version = m.groups()[0]
-                else:
-                    _logger.warning("'Server' header '%s' doesn't match the expected pattern - can't determine vast version", server_header)
-        except Exception:
-            _logger.exception("Failed to probe vast version.")
+                _logger.error("'Server' header '%s' doesn't match the expected pattern", server_header)
+
+        msg = (
+            f'Please use `vastdb` <= 0.0.5.x with current VAST cluster version ("{server_header or "N/A"}"). '
+            'To use the latest SDK, please upgrade your cluster to the latest service pack. '
+            'Please contact customer.support@vastdata.com for more details.'
+        )
+        _logger.critical(msg)
+        raise NotImplementedError(msg)
 
     def update_mgmt_session(self, access_key: str, secret_key: str, auth_type=AuthType.SIGV4):
         if auth_type != AuthType.BASIC:

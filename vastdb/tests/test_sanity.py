@@ -1,9 +1,13 @@
-import logging
-
-import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from vastdb import api
 from itertools import cycle
+import logging
+import threading
+import contextlib
+
+import pytest
+
+from vastdb import api
+
 
 log = logging.getLogger(__name__)
 
@@ -14,13 +18,13 @@ def test_hello_world(rpc):
 def test_version_extraction():
     # A list of version and expected version parsed by API
     TEST_CASES = [
-            (None, None), # vast server without version in header
-            ("5", None),                                    # major only is not supported
-            ("5.2", "5.2"),                                 # major.minor
-            ("5.2.0", "5.2.0"),                             # major.minor.patch
-            ("5.2.0.0", "5.2.0.0"),                         # major.minor.patch.protocol
-            ("5.2.0.0 some other things", "5.2.0.0"),       # Test forward comptibility 1
-            ("5.2.0.0.20 some other things", "5.2.0.0"),    # Test forward comptibility 2
+            (None, None),                                   # vast server without version in header
+            ("5", None),                                    # major
+            ("5.2", None),                                  # major.minor
+            ("5.2.0", None),                                # major.minor.patch
+            ("5.2.0.10", "5.2.0.10"),                       # major.minor.patch.protocol
+            ("5.2.0.10 some other things", None),           # suffix
+            ("5.2.0.10.20", None),                          # extra version
     ]
 
     # Mock OPTIONS handle that cycles through the test cases response
@@ -55,9 +59,10 @@ def test_version_extraction():
     server_thread.start()
 
     try:
-        for test_case in TEST_CASES:
-            tester = api.VastdbApi(endpoint=f"http://localhost:{httpd.server_port}", access_key="abc", secret_key="abc")
-            assert tester.vast_version == test_case[1]
+        for _, expected in TEST_CASES:
+            with (pytest.raises(NotImplementedError) if expected is None else contextlib.nullcontext()):
+                res = api.VastdbApi(endpoint=f"http://localhost:{httpd.server_port}", access_key="abc", secret_key="abc")
+                assert res.vast_version == expected
     finally:
         # make sure we shut the server down no matter what
         httpd.shutdown()
