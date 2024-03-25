@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 import logging
 import os
+from typing import Union
 
 import boto3
 import botocore
@@ -307,8 +308,11 @@ class Table:
         blob = serialize_record_batch(rows)
         self.tx._rpc.api.update_rows(self.bucket.name, self.schema.name, self.name, record_batch=blob, txid=self.tx.txid)
 
-    def delete(self, rows: pa.RecordBatch) -> None:
-        blob = serialize_record_batch(rows)
+    def delete(self, rows: Union[pa.RecordBatch, pa.Table]) -> None:
+        delete_rows_rb = pa.record_batch(schema=pa.schema([(INTERNAL_ROW_ID, pa.uint64())]),
+                                         data=[rows.to_pydict()[INTERNAL_ROW_ID]])
+
+        blob = serialize_record_batch(delete_rows_rb)
         self.tx._rpc.api.delete_rows(self.bucket.name, self.schema.name, self.name, record_batch=blob, txid=self.tx.txid)
 
     def drop(self) -> None:

@@ -80,9 +80,11 @@ def test_tables(rpc, clean_bucket_name):
         }
 
         columns_to_delete = pa.schema([(INTERNAL_ROW_ID, pa.uint64())])
-        rb = pa.record_batch(schema=columns_to_delete, data=[[0, 1]])  # delete rows 0,1
-
+        rb = pa.record_batch(schema=columns_to_delete, data=[[0]])  # delete rows 0,1
         t.delete(rb)
+
+        selected_rows = pa.Table.from_batches(t.select(columns=['b'], predicate=(t['a'] == 222), internal_row_id=True))
+        t.delete(selected_rows)
         actual = pa.Table.from_batches(t.select(columns=['a', 'b', 's']))
         assert actual.to_pydict() == {
             'a': [3330],
