@@ -12,7 +12,7 @@ def pytest_addoption(parser):
     parser.addoption("--tabular-endpoint-url", help="Tabular server endpoint", default = "http://localhost:9090")
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")
 def rpc(request):
     return v2.connect(
         access=request.config.getoption("--tabular-access-key"),
@@ -21,12 +21,12 @@ def rpc(request):
     )
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")
 def test_bucket_name(request):
     return request.config.getoption("--tabular-bucket-name")
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="function")
 def clean_bucket_name(request, test_bucket_name, rpc):
     with rpc.transaction() as tx:
         b = tx.bucket(test_bucket_name)
@@ -37,7 +37,7 @@ def clean_bucket_name(request, test_bucket_name, rpc):
     return test_bucket_name
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")
 def s3(request):
     return boto3.client(
         's3',
