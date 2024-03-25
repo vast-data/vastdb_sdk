@@ -303,6 +303,10 @@ class Table:
         reader = pa.ipc.RecordBatchStreamReader(res.raw)
         return reader.read_next_batch()
 
+    def update(self, rows: pa.RecordBatch) -> None:
+        blob = serialize_record_batch(rows)
+        self.tx._rpc.api.update_rows(self.bucket.name, self.schema.name, self.name, record_batch=blob, txid=self.tx.txid)
+
     def drop(self) -> None:
         self.tx._rpc.api.drop_table(self.bucket.name, self.schema.name, self.name, txid=self.tx.txid)
         log.info("Dropped table: %s", self.name)

@@ -61,6 +61,22 @@ def test_tables(rpc, clean_bucket_name):
             '$row_id': [0, 1, 2]
         }
 
+        columns_to_update = pa.schema([
+            ('$row_id', pa.uint64()),
+            ('a', pa.int16())
+        ])
+
+        rb = pa.record_batch(schema=columns_to_update, data=[
+            [0, 2],
+            [1110, 3330]
+        ])
+        t.update(rb)
+        actual = pa.Table.from_batches(t.select(columns=['a', 'b']))
+        assert actual.to_pydict() == {
+            'a': [1110, 222, 3330],
+            'b': [0.5, 1.5, 2.5]
+        }
+
 
 def test_filters(rpc, clean_bucket_name):
     columns = pa.schema([
