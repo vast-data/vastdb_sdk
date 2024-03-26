@@ -126,6 +126,24 @@ class Bucket:
 
         return [Schema(name=name, bucket=self) for name, *_ in schemas]
 
+    def snapshots(self) -> ["Snapshot"]:
+        snapshots = []
+        next_key = 0
+        while True:
+            curr_snapshots, is_truncated, next_key = \
+                self.tx._rpc.api.list_snapshots(bucket=self.name, next_token=next_key)
+            if not curr_snapshots:
+                break
+            snapshots.extend(curr_snapshots)
+            if not is_truncated:
+                break
+
+        return [Snapshot(name=snapshot, bucket=self) for snapshot in snapshots]
+
+@dataclass
+class Snapshot:
+    name: str
+    bucket: Bucket
 
 @dataclass
 class Schema:
