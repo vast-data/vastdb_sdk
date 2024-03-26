@@ -304,8 +304,19 @@ class Table:
         reader = pa.ipc.RecordBatchStreamReader(res.raw)
         return reader.read_next_batch()
 
-    def update(self, rows: pa.RecordBatch) -> None:
-        blob = serialize_record_batch(rows)
+    def update(self, rows: Union[pa.RecordBatch, pa.Table], columns: list = None) -> None:
+        if columns:
+            update_fields = [(INTERNAL_ROW_ID, pa.uint64())]
+            update_values = [rows.to_pydict()[INTERNAL_ROW_ID]]
+            for col in columns:
+                update_fields.append(rows.field(col))
+                update_values.append(rows.to_pydict()[col])
+
+            update_rows_rb = pa.record_batch(schema=pa.schema(update_fields), data=update_values)
+        else:
+            update_rows_rb = rows
+
+        blob = serialize_record_batch(update_rows_rb)
         self.tx._rpc.api.update_rows(self.bucket.name, self.schema.name, self.name, record_batch=blob, txid=self.tx.txid)
 
     def delete(self, rows: Union[pa.RecordBatch, pa.Table]) -> None:
