@@ -298,19 +298,26 @@ class Table:
 
         return pa.RecordBatchReader.from_batches(query_data_request.response_schema.arrow_schema, batches_iterator())
 
+    def _combine_chunks(self, col):
+        if hasattr(col, "combine_chunks"):
+            return col.combine_chunks()
+        else:
+            return col
+
+
     def insert(self, rows: pa.RecordBatch) -> pa.RecordBatch:
         blob = serialize_record_batch(rows)
         res = self.tx._rpc.api.insert_rows(self.bucket.name, self.schema.name, self.name, record_batch=blob, txid=self.tx.txid)
-        reader = pa.ipc.RecordBatchStreamReader(res.raw)
-        return reader.read_next_batch()
+        (batch,) = pa.RecordBatchStreamReader(res.raw)
+        return batch
 
     def update(self, rows: Union[pa.RecordBatch, pa.Table], columns: list = None) -> None:
-        if columns:
+        if columns is not None:
             update_fields = [(INTERNAL_ROW_ID, pa.uint64())]
-            update_values = [rows.to_pydict()[INTERNAL_ROW_ID]]
+            update_values = [self._combine_chunks(rows[INTERNAL_ROW_ID])]
             for col in columns:
                 update_fields.append(rows.field(col))
-                update_values.append(rows.to_pydict()[col])
+                update_values.append(self._combine_chunks(rows[col]))
 
             update_rows_rb = pa.record_batch(schema=pa.schema(update_fields), data=update_values)
         else:
@@ -321,7 +328,7 @@ class Table:
 
     def delete(self, rows: Union[pa.RecordBatch, pa.Table]) -> None:
         delete_rows_rb = pa.record_batch(schema=pa.schema([(INTERNAL_ROW_ID, pa.uint64())]),
-                                         data=[rows.to_pydict()[INTERNAL_ROW_ID]])
+                                         data=[self._combine_chunks(rows[INTERNAL_ROW_ID])])
 
         blob = serialize_record_batch(delete_rows_rb)
         self.tx._rpc.api.delete_rows(self.bucket.name, self.schema.name, self.name, record_batch=blob, txid=self.tx.txid)

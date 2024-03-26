@@ -17,8 +17,9 @@ def prepare_data(rpc, clean_bucket_name, schema_name, table_name, arrow_table):
         s = tx.bucket(clean_bucket_name).create_schema(schema_name)
         t = s.create_table(table_name, arrow_table.schema)
         rb = t.insert(arrow_table)
-        log.debug("row_ids=%s" % rb.to_pydict()[INTERNAL_ROW_ID])
-        assert rb.num_rows == arrow_table.num_rows
+        row_ids = rb[INTERNAL_ROW_ID].to_pylist()
+        log.debug("row_ids=%s" % row_ids)
+        assert row_ids == list(range(arrow_table.num_rows))
         yield t
         t.drop()
         s.drop()
@@ -62,6 +63,31 @@ def test_tables(rpc, clean_bucket_name):
             INTERNAL_ROW_ID: [0, 1, 2]
         }
 
+        columns_to_delete = pa.schema([(INTERNAL_ROW_ID, pa.uint64())])
+        rb = pa.record_batch(schema=columns_to_delete, data=[[0]])  # delete rows 0,1
+        t.delete(rb)
+
+        selected_rows = pa.Table.from_batches(t.select(columns=['b'], predicate=(t['a'] == 222), internal_row_id=True))
+        t.delete(selected_rows)
+        actual = pa.Table.from_batches(t.select(columns=['a', 'b', 's']))
+        assert actual.to_pydict() == {
+            'a': [333],
+            'b': [2.5],
+            's': ['ccc']
+        }
+
+def test_update_table(rpc, clean_bucket_name):
+    columns = pa.schema([
+        ('a', pa.int64()),
+        ('b', pa.float32()),
+        ('s', pa.utf8()),
+    ])
+    expected = pa.table(schema=columns, data=[
+        [111, 222, 333],
+        [0.5, 1.5, 2.5],
+        ['a', 'bb', 'ccc'],
+    ])
+    with prepare_data(rpc, clean_bucket_name, 's', 't', expected) as t:
         columns_to_update = pa.schema([
             (INTERNAL_ROW_ID, pa.uint64()),
             ('a', pa.int64())
@@ -92,19 +118,18 @@ def test_tables(rpc, clean_bucket_name):
             'b': [0.5, 1.5, 2.5]
         }
 
-        columns_to_delete = pa.schema([(INTERNAL_ROW_ID, pa.uint64())])
-        rb = pa.record_batch(schema=columns_to_delete, data=[[0]])  # delete rows 0,1
-        t.delete(rb)
+        actual = pa.Table.from_batches(t.select(columns=['a', 'b'], predicate=(t['a'] != 2222), internal_row_id=True))
+        column_index = actual.column_names.index('a')
+        column_field = actual.field(column_index)
+        new_data = pc.divide(actual.column('a'), 10)
+        update_table = actual.set_column(column_index, column_field, new_data)
 
-        selected_rows = pa.Table.from_batches(t.select(columns=['b'], predicate=(t['a'] == 2222), internal_row_id=True))
-        t.delete(selected_rows)
-        actual = pa.Table.from_batches(t.select(columns=['a', 'b', 's']))
+        t.update(update_table.to_batches()[0], columns=['a'])
+        actual = pa.Table.from_batches(t.select(columns=['a', 'b']))
         assert actual.to_pydict() == {
-            'a': [3330],
-            'b': [2.5],
-            's': ['ccc']
+            'a': [111, 2222, 333],
+            'b': [0.5, 1.5, 2.5]
         }
-
 
 def test_filters(rpc, clean_bucket_name):
     columns = pa.schema([
