@@ -1109,7 +1109,7 @@ class VastdbApi:
 
         headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
         headers['Content-Length'] = str(len(alter_table_req))
-        url_params = {'tabular-new-table-name': new_name} if len(new_name) else {}
+        url_params = {'tabular-new-table-name': schema + "/" + new_name} if len(new_name) else {}
 
         res = self.session.put(self._api_prefix(bucket=bucket, schema=schema, table=name, command="table", url_params=url_params),
                                data=alter_table_req, headers=headers)
