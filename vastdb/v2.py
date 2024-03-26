@@ -7,6 +7,7 @@ import boto3
 import botocore
 import ibis
 import pyarrow as pa
+from typing import List
 
 from vastdb.api import VastdbApi, serialize_record_batch, build_query_data_request, parse_query_data_response, TABULAR_INVALID_ROW_ID
 
@@ -210,7 +211,6 @@ class QueryConfig:
     num_row_groups_per_sub_split: int = 8
     use_semi_sorted_projections: bool = True
 
-
 @dataclass
 class Table:
     name: str
@@ -243,6 +243,31 @@ class Table:
         cols = self.tx._rpc.api._list_table_columns(self.bucket.name, self.schema.name, self.name, txid=self.tx.txid)
         self.arrow_schema = pa.schema([(col[0], col[1]) for col in cols])
         return self.arrow_schema
+
+    def projection(self, name: str) -> "Projection":
+        projs = self.projections(projection_name=name)
+        if not projs:
+            raise NotFoundError(f"Projection '{name}' was not found under table: {self.name}")
+        assert len(projs) == 1, f"Expected to receive only a single projection, but got: {len(projs)}. projections: {projs}"
+        log.debug("Found projection: %s", projs[0])
+        return projs[0]
+
+    def projections(self, projection_name=None) -> ["Projection"]:
+        projections = []
+        next_key = 0
+        name_prefix = projection_name if projection_name else ""
+        exact_match = bool(projection_name)
+        while True:
+            bucket_name, schema_name, table_name, curr_projections, next_key, is_truncated, _ = \
+                self.tx._rpc.api.list_projections(
+                    bucket=self.bucket.name, schema=self.schema.name, table=self.name, next_key=next_key, txid=self.tx.txid,
+                    exact_match=exact_match, name_prefix=name_prefix)
+            if not curr_projections:
+                break
+            projections.extend(curr_projections)
+            if not is_truncated:
+                break
+        return [_parse_projection_info(projection, self) for projection in projections]
 
     def import_files(self, files_to_import: [str]) -> None:
         source_files = {}
@@ -377,6 +402,12 @@ class Table:
         log.info("Renamed column: %s to %s", current_column_name, new_column_name)
         self.arrow_schema = self.columns()
 
+    def create_projection(self, projection_name: str, sorted_columns: List[str], unsorted_columns: List[str]) -> "Projection":
+        columns = [(sorted_column, "Sorted") for sorted_column in sorted_columns] + [(unsorted_column, "Unorted") for unsorted_column in unsorted_columns]
+        self.tx._rpc.api.create_projection(self.bucket.name, self.schema.name, self.name, projection_name, columns=columns, txid=self.tx.txid)
+        log.info("Created projectin: %s", projection_name)
+        return self.projection(projection_name)
+
     def __getitem__(self, col_name):
         return self._ibis_table[col_name]
 
@@ -384,6 +415,61 @@ class Table:
 def _parse_table_info(table_info, schema: "Schema"):
     stats = TableStats(num_rows=table_info.num_rows, size=table_info.size_in_bytes)
     return Table(name=table_info.name, schema=schema, handle=int(table_info.handle), stats=stats)
+
+@dataclass
+class Projection:
+    name: str
+    table: Table
+    handle: int
+    stats: TableStats
+    properties: dict = None
+
+    @property
+    def bucket(self):
+        return self.table.schema.bucket
+
+    @property
+    def schema(self):
+        return self.table.schema
+
+    @property
+    def tx(self):
+        return self.table.schema.tx
+
+    def __repr__(self):
+        return f"{type(self).__name__}(name={self.name})"
+
+    def columns(self) -> pa.Schema:
+        columns = []
+        next_key = 0
+        while True:
+            curr_columns, next_key, is_truncated, count, _ = \
+                self.tx._rpc.api.list_projection_columns(
+                    self.bucket.name, self.schema.name, self.table.name, self.name, txid=self.table.tx.txid, next_key=next_key)
+            if not curr_columns:
+                break
+            columns.extend(curr_columns)
+            if not is_truncated:
+                break
+        self.arrow_schema = pa.schema([(col[0], col[1]) for col in columns])
+        return self.arrow_schema
+
+    def rename(self, new_name) -> None:
+        self.tx._rpc.api.alter_projection(self.bucket.name, self.schema.name,
+                                                self.table.name, self.name, txid=self.tx.txid, new_name=new_name)
+        log.info("Renamed projection from %s to %s ", self.name, new_name)
+        self.name = new_name
+
+    def drop(self) -> None:
+        self.tx._rpc.api.drop_projection(self.bucket.name, self.schema.name, self.table.name,
+                                         self.name, txid=self.tx.txid)
+        log.info("Dropped projection: %s", self.name)
+
+
+def _parse_projection_info(projection_info, table: "Table"):
+    log.info("Projection info %s", str(projection_info))
+    stats = TableStats(num_rows=projection_info.num_rows, size=projection_info.size_in_bytes)
+    return Projection(name=projection_info.name, table=table, stats=stats, handle=int(projection_info.handle))
 
 
 def _parse_bucket_and_object_names(path: str) -> (str, str):
