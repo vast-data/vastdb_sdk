@@ -2033,22 +2033,24 @@ class VastdbApi:
                                            self.password, self.port, self.secure, self.auth_type) for i in range(len(self.executor_hosts))]
 
             def insert_executor(self, split_id):
-
                 try:
                     _logger.info(f'insert_executor split_id={split_id} starting')
                     session = executor_sessions[split_id]
                     num_inserts = 0
+                    batches = []
                     while not killall:
                         try:
                             insert_rows_req = insert_queue.get(block=False)
                         except queue.Empty:
                             break
-                        session.insert_rows(bucket=bucket, schema=schema,
-                                            table=table, record_batch=insert_rows_req, txid=txid)
+                        batches.extend(session.insert_rows(
+                            bucket=bucket, schema=schema, table=table,
+                            record_batch=insert_rows_req, txid=txid))
                         num_inserts += 1
                     _logger.info(f'insert_executor split_id={split_id} num_inserts={num_inserts}')
                     if killall:
                         _logger.info('insert_executor killall=True')
+                    return batches  # row IDs created by this insert
 
                 except Exception as e:
                     _logger.exception('insert_executor hit exception')
@@ -2056,13 +2058,15 @@ class VastdbApi:
 
             num_splits = len(executor_sessions)
             killall = False
+            result = []
             with concurrent.futures.ThreadPoolExecutor(max_workers=num_splits) as executor:
                 futures = []
                 for i in range(num_splits):
                     futures.append(executor.submit(insert_executor, self, i))
                 for future in concurrent.futures.as_completed(futures):
-                    future.result() # trigger an exception if occurred in any thread
+                    result.extend(future.result()) # trigger an exception if occurred in any thread
 
+            return result
             # commit if needed
             if created_txid:
                 self.commit_transaction(txid)
@@ -2097,7 +2101,8 @@ class VastdbApi:
         headers['Content-Length'] = str(len(record_batch))
         res = self.session.post(self._api_prefix(bucket=bucket, schema=schema, table=table, command="rows"),
                                 data=record_batch, headers=headers, stream=True)
-        return self._check_res(res, "insert_rows", expected_retvals)
+        self._check_res(res, "insert_rows", expected_retvals)
+        return pa.ipc.RecordBatchStreamReader(res.raw)  # row IDs created by this insert
 
     def update_rows(self, bucket, schema, table, record_batch, txid=0, client_tags=[], expected_retvals=[]):
         """
