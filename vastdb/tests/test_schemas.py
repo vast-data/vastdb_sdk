@@ -37,3 +37,9 @@ def test_commits_and_rollbacks(rpc, clean_bucket_name):
     with rpc.transaction() as tx:
         b = tx.bucket(clean_bucket_name)
         assert b.schemas() != []
+
+def test_list_snapshots(rpc, clean_bucket_name):
+    with rpc.transaction() as tx:
+        b = tx.bucket(clean_bucket_name)
+        s = b.snapshots()
+        assert s == []
