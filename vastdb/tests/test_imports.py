@@ -1,6 +1,7 @@
 import pytest
 
 from tempfile import NamedTemporaryFile
+import logging
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -8,6 +9,40 @@ import pyarrow.parquet as pq
 from vastdb.errors import InvalidArgumentError
 from vastdb.errors import ImportFilesError
 from vastdb import util
+
+
+log = logging.getLogger(__name__)
+
+
+def test_parallel_imports(session, clean_bucket_name, s3):
+    num_rows = 1000
+    num_files = 53
+    ds = {'num': [i for i in range(num_rows)]}
+    files = []
+    table = pa.Table.from_pydict(ds)
+    with NamedTemporaryFile() as f:
+        pq.write_table(table, f.name)
+        s3.put_object(Bucket=clean_bucket_name, Key='prq0', Body=f)
+        files.append(f'/{clean_bucket_name}/prq0')
+
+    for i in range(1, num_files):
+        copy_source = {
+            'Bucket': clean_bucket_name,
+            'Key': 'prq0'
+        }
+        s3.copy(copy_source, clean_bucket_name, f'prq{i}')
+        files.append(f'/{clean_bucket_name}/prq{i}')
+
+    with session.transaction() as tx:
+        b = tx.bucket(clean_bucket_name)
+        s = b.create_schema('s1')
+        t = s.create_table('t1', pa.schema([('num', pa.int64())]))
+        log.info("Starting import of %d files", num_files)
+        t.import_files(files)
+        arrow_table = pa.Table.from_batches(t.select(columns=['num']))
+        assert arrow_table.num_rows == num_rows * num_files
+        arrow_table = pa.Table.from_batches(t.select(columns=['num'], predicate=t['num'] == 100))
+        assert arrow_table.num_rows == num_files
 
 
 def test_create_table_from_files(session, clean_bucket_name, s3):
