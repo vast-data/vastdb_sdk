@@ -100,6 +100,14 @@ S3 Tabular API
 _logger = logging.getLogger(__name__)
 
 
+def _flatten_args(op, op_type):
+    if isinstance(op, op_type):
+        for arg in op.args:
+            yield from _flatten_args(arg, op_type)
+    else:
+        yield op
+
+
 class AuthType(Enum):
     SIGV4 = "s3v4"
     SIGV2 = "s3"
@@ -167,16 +175,16 @@ class Predicate:
         return builder.EndVector()
 
     def serialize(self, builder: 'flatbuffers.builder.Builder'):
-        from ibis.expr.operations.generic import TableColumn
-        from ibis.expr.operations.generic import Literal
+        from ibis.expr.operations.generic import TableColumn, Literal
+        from ibis.expr.operations.logical import Greater, GreaterEqual, Less, LessEqual, Equals, NotEquals, And
 
         builder_map = {
-            ibis.expr.operations.logical.Greater: self.build_greater,
-            ibis.expr.operations.logical.GreaterEqual: self.build_greater_equal,
-            ibis.expr.operations.logical.Less: self.build_less,
-            ibis.expr.operations.logical.LessEqual: self.build_less_equal,
-            ibis.expr.operations.logical.Equals: self.build_equal,
-            ibis.expr.operations.logical.NotEquals: self.build_not_equal,
+            Greater: self.build_greater,
+            GreaterEqual: self.build_greater_equal,
+            Less: self.build_less,
+            LessEqual: self.build_less_equal,
+            Equals: self.build_equal,
+            NotEquals: self.build_not_equal,
         }
 
         positions_map = dict((f.name, index) for index, f in enumerate(self.schema)) # TODO: BFS
@@ -184,30 +192,32 @@ class Predicate:
         self.builder = builder
 
         offsets = []
+
         if self.expr is not None:
-            op = self.expr.op()
-            builder_func = builder_map.get(type(op))
-            if not builder_func:
-                raise NotImplementedError(op)
+            op_args = list(_flatten_args(self.expr.op(), And))
+            _logger.debug('args: %s', op_args)
+            for op in op_args:
+                builder_func = builder_map.get(type(op))
+                if not builder_func:
+                    raise NotImplementedError(op)
 
-            left, right = op.args
-            if not isinstance(left, TableColumn):
-                raise NotImplementedError(op)
-            if not isinstance(right, Literal):
-                raise NotImplementedError(op)
+                left, right = op.args
+                if not isinstance(left, TableColumn):
+                    raise NotImplementedError(op)
+                if not isinstance(right, Literal):
+                    raise NotImplementedError(op)
 
-            field_name = left.name
-            field = self.schema.field(field_name)
-            value = right.value
+                field_name = left.name
+                field = self.schema.field(field_name)
+                value = right.value
 
-            column_offset = self.build_column(position=positions_map[field_name])
-            literal_offset = self.build_literal(field=field, value=value)
+                column_offset = self.build_column(position=positions_map[field_name])
+                literal_offset = self.build_literal(field=field, value=value)
 
-            domain_offset = self.build_or([
-                 builder_func(column_offset, literal_offset)
-            ])
-            offsets.append(domain_offset)
-
+                domain_offset = self.build_or([
+                     builder_func(column_offset, literal_offset)
+                ])
+                offsets.append(domain_offset)
 
         return self.build_and(offsets)
 

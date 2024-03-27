@@ -191,6 +191,10 @@ def test_filters(rpc, clean_bucket_name):
         assert select(t['s'] <= 'bb') == expected.filter(pc.field('s') <= 'bb')
         assert select(t['s'] >= 'bb') == expected.filter(pc.field('s') >= 'bb')
 
+        assert select((t['a'] > 111) & (t['b'] > 0) & (t['s'] < 'ccc')) == expected.filter((pc.field('a') > 111) & (pc.field('b') > 0) & (pc.field('s') < 'ccc'))
+        assert select((t['a'] > 111) & (t['b'] < 2.5)) == expected.filter((pc.field('a') > 111) & (pc.field('b') < 2.5))
+        assert select((t['a'] > 111) & (t['a'] < 333)) == expected.filter((pc.field('a') > 111) & (pc.field('a') < 333))
+
 
 def test_duckdb(rpc, clean_bucket_name):
     columns = pa.schema([
