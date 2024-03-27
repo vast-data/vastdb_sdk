@@ -21,6 +21,7 @@ import itertools
 from aws_requests_auth.aws_auth import AWSRequestsAuth
 import urllib3
 import re
+import vastdb.errors as errors
 
 import vast_flatbuf.org.apache.arrow.computeir.flatbuf.BinaryLiteral as fb_binary_lit
 import vast_flatbuf.org.apache.arrow.computeir.flatbuf.BooleanLiteral as fb_bool_lit
@@ -838,13 +839,32 @@ class VastdbApi:
 
     def _check_res(self, res, cmd="", expected_retvals=[]):
         try:
-            res.raise_for_status()
-            if res.status_code != 200:
+            if errors.HttpErrors(res.status_code) != errors.HttpErrors.SUCCESS:
                 if res.status_code not in expected_retvals:
-                    raise ValueError(f"Expected status code mismatch. status_code={res.status_code}")
+                    if errors.HttpErrors(res.status_code) == errors.HttpErrors.BAD_REQUEST:
+                        raise errors.BadRequest(f"cmd={cmd} returned with bad request")
+                    elif errors.HttpErrors(res.status_code) == errors.HttpErrors.FOBIDDEN:
+                        raise errors.AccessDeniedError(f"cmd={cmd} returned with forbidden")
+                    elif errors.HttpErrors(res.status_code) == errors.HttpErrors.NOT_FOUND:
+                        raise errors.NotFoundError(f"cmd={cmd} returned with not found")
+                    elif errors.HttpErrors(res.status_code) == errors.HttpErrors.METHOD_NOT_ALLOW:
+                        raise errors.MethodNotAllowed(f"cmd={cmd} returned with method not allow")
+                    elif errors.HttpErrors(res.status_code) == errors.HttpErrors.REQUEST_TIMEOUT:
+                        raise errors.RequestTimeout(f"cmd={cmd} returned with request timeout")
+                    elif errors.HttpErrors(res.status_code) == errors.HttpErrors.CONFLICT:
+                        raise errors.Conflict(f"cmd={cmd} returned with conflict")
+                    elif errors.HttpErrors(res.status_code) == errors.HttpErrors.INTERNAL_SERVER_ERROR:
+                        raise errors.InternalServerError(f"cmd={cmd} returned with internal server error")
+                    elif errors.HttpErrors(res.status_code) == errors.HttpErrors.NOT_IMPLEMENTED:
+                        raise errors.NotImplemented(f"cmd={cmd} returned with not implemented")
+                    elif errors.HttpErrors(res.status_code) == errors.HttpErrors.SERVICE_UNAVAILABLE:
+                        raise errors.ServiceUnavailable(f"cmd={cmd} returned with service unavailable")
+                    else:
+                        raise ValueError(f"Expected status code mismatch. status_code={res.status_code}")
             else:
                 if expected_retvals:
                     raise ValueError(f"Expected {expected_retvals} but status_code={res.status_code}")
+            res.raise_for_status()
             return res
         except requests.HTTPError as e:
             if res.status_code in expected_retvals:

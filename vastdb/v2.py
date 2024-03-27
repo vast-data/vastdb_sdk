@@ -8,28 +8,13 @@ import botocore
 import ibis
 import pyarrow as pa
 from typing import List
+import vastdb.errors as errors
 
 from vastdb.api import VastdbApi, serialize_record_batch, build_query_data_request, parse_query_data_response, TABULAR_INVALID_ROW_ID
 
 
 log = logging.getLogger(__name__)
 INTERNAL_ROW_ID = "$row_id"
-
-
-class VastException(Exception):
-    pass
-
-
-class NotFoundError(VastException):
-    pass
-
-
-class AccessDeniedError(VastException):
-    pass
-
-
-class InvalidArgumentError(VastException):
-    pass
 
 
 class RPC:
@@ -86,9 +71,9 @@ class Transaction:
             return Bucket(name, self)
         except botocore.exceptions.ClientError as e:
             if e.response['Error']['Code'] == 403:
-                raise AccessDeniedError(f"Access is denied to bucket: {name}") from e
+                raise errors.AccessDeniedError(f"Access is denied to bucket: {name}") from e
             else:
-                raise NotFoundError(f"Bucket {name} does not exist") from e
+                raise errors.NotFoundError(f"Bucket {name} does not exist") from e
 
 
 @dataclass
@@ -105,7 +90,7 @@ class Bucket:
         schema = self.schemas(path)
         log.debug("schema: %s", schema)
         if not schema:
-            raise NotFoundError(f"Schema '{path}' was not found in bucket: {self.name}")
+            raise errors.NotFoundError(f"Schema '{path}' was not found in bucket: {self.name}")
         assert len(schema) == 1, f"Expected to receive only a single schema, but got: {len(schema)}. ({schema})"
         log.debug("Found schema: %s", schema[0].name)
         return schema[0]
@@ -163,7 +148,7 @@ class Schema:
     def table(self, name: str) -> "Table":
         t = self.tables(table_name=name)
         if not t:
-            raise NotFoundError(f"Table '{name}' was not found under schema: {self.name}")
+            raise errors.NotFoundError(f"Table '{name}' was not found under schema: {self.name}")
         assert len(t) == 1, f"Expected to receive only a single table, but got: {len(t)}. tables: {t}"
         log.debug("Found table: %s", t[0])
         return t[0]
@@ -474,7 +459,7 @@ def _parse_projection_info(projection_info, table: "Table"):
 
 def _parse_bucket_and_object_names(path: str) -> (str, str):
     if not path.startswith('/'):
-        raise InvalidArgumentError(f"Path {path} must start with a '/'")
+        raise errors.InvalidArgumentError(f"Path {path} must start with a '/'")
     components = path.split(os.path.sep)
     bucket_name = components[1]
     object_path = os.path.sep.join(components[2:])

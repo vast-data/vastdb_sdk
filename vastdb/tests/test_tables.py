@@ -2,12 +2,15 @@ import duckdb
 import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
+import pytest
 
 from tempfile import NamedTemporaryFile
 from contextlib import contextmanager, closing
 from vastdb.v2 import INTERNAL_ROW_ID
 
 import logging
+import vastdb.errors as errors
+
 
 log = logging.getLogger(__name__)
 
@@ -225,3 +228,24 @@ def test_parquet_export(rpc, clean_bucket_name):
                     parquet_writer.write_batch(batch)
 
             assert expected == pq.read_table(parquet_file.name)
+
+def test_errors(rpc, clean_bucket_name):
+    with pytest.raises(errors.NotFoundError):
+        with rpc.transaction() as tx:
+            tx.bucket(clean_bucket_name).schema('s1')
+
+    with pytest.raises(errors.NotFoundError):
+        with rpc.transaction() as tx:
+            tx.bucket("bla")
+
+    with pytest.raises(errors.Conflict):
+        with rpc.transaction() as tx:
+            b = tx.bucket(clean_bucket_name)
+            s = b.create_schema('s1')
+            columns = pa.schema([
+                ('a', pa.int16()),
+                ('b', pa.float32()),
+                ('s', pa.utf8()),
+            ])
+            s.create_table('t1', columns)
+            s.drop() # cannot drop schema without dropping its tables first
