@@ -1,9 +1,14 @@
 from . import errors, schema
-from .internal_commands import serialize_record_batch, build_query_data_request, parse_query_data_response, TABULAR_INVALID_ROW_ID
-
+from .internal_commands import serialize_record_batch, build_query_data_request, parse_query_data_response, \
+    TABULAR_INVALID_ROW_ID, VastdbApi
 
 import pyarrow as pa
 import ibis
+
+import concurrent.futures
+import queue
+from threading import Event
+from math import ceil
 
 from dataclasses import dataclass, field
 from typing import List, Union
@@ -13,8 +18,8 @@ import os
 log = logging.getLogger(__name__)
 
 
-
 INTERNAL_ROW_ID = "$row_id"
+
 
 @dataclass
 class TableStats:
@@ -31,6 +36,12 @@ class QueryConfig:
     num_row_groups_per_sub_split: int = 8
     use_semi_sorted_projections: bool = True
     rows_per_split: int = 4000000
+
+
+@dataclass
+class ImportConfig:
+    import_concurrency: int = 2
+
 
 @dataclass
 class Table:
@@ -90,32 +101,77 @@ class Table:
                 break
         return [_parse_projection_info(projection, self) for projection in projections]
 
-    def import_files(self, files_to_import: [str]) -> None:
+    def import_files(self, files_to_import: [str], config: ImportConfig = None) -> None:
         source_files = {}
         for f in files_to_import:
             bucket_name, object_path = _parse_bucket_and_object_names(f)
             source_files[(bucket_name, object_path)] = b''
 
-        self._execute_import(source_files)
+        self._execute_import(source_files, config=config)
 
-    def import_partitioned_files(self, files_and_partitions: {str: pa.RecordBatch}) -> None:
+    def import_partitioned_files(self, files_and_partitions: {str: pa.RecordBatch}, config: ImportConfig = None) -> None:
         source_files = {}
         for f, record_batch in files_and_partitions.items():
             bucket_name, object_path = _parse_bucket_and_object_names(f)
             serialized_batch = _serialize_record_batch(record_batch)
             source_files = {(bucket_name, object_path): serialized_batch.to_pybytes()}
 
-        self._execute_import(source_files)
+        self._execute_import(source_files, config=config)
 
-    def _execute_import(self, source_files):
-        self.tx._rpc.api.import_data(
-            self.bucket.name, self.schema.name, self.name, source_files, txid=self.tx.txid)
+    def _execute_import(self, source_files, config):
+        config = config or ImportConfig()
+        assert config.import_concurrency > 0  # TODO: Do we want to validate concurrency isn't too high?
+        max_batch_size = 10  # Enforced in server side.
+        endpoints = [self.tx._rpc.api.url for _ in range(config.import_concurrency)]  # TODO: use valid endpoints...
+        files_queue = queue.Queue()
+
+        for source_file in source_files.items():
+            files_queue.put(source_file)
+
+        stop_event = Event()
+        num_files_in_batch = min(ceil(len(source_files) / len(endpoints)), max_batch_size)
+
+        def import_worker(q, session):
+            try:
+                while not q.empty():
+                    if stop_event.is_set():
+                        log.debug("stop_event is set, exiting")
+                        break
+                    files_batch = {}
+                    try:
+                        for _ in range(num_files_in_batch):
+                            files_batch.update({q.get(block=False)})
+                    except queue.Empty:
+                        pass
+                    if files_batch:
+                        log.debug("Starting import batch of %s files", len(files_batch))
+                        session.import_data(
+                            self.bucket.name, self.schema.name, self.name, files_batch, txid=self.tx.txid)
+            except (Exception, KeyboardInterrupt) as e:
+                stop_event.set()
+                log.error("Got exception inside import_worker. exception: %s", e)
+                raise
+
+        futures = []
+        with concurrent.futures.ThreadPoolExecutor(
+                max_workers=config.import_concurrency, thread_name_prefix='import_thread') as pool:
+            try:
+                for endpoint in endpoints:
+                    session = VastdbApi(endpoint, self.tx._rpc.api.access_key, self.tx._rpc.api.secret_key)
+                    futures.append(pool.submit(import_worker, files_queue, session))
+
+                log.debug("Waiting for import workers to finish")
+                for future in concurrent.futures.as_completed(futures):
+                    future.result()
+            finally:
+                stop_event.set()
+                # ThreadPoolExecutor will be joined at the end of the context
 
     def select(self, columns: [str] = None,
                predicate: ibis.expr.types.BooleanColumn = None,
-               config: "QueryConfig" = None,
+               config: QueryConfig = None,
                *,
-               internal_row_id = False) -> pa.RecordBatchReader:
+               internal_row_id: bool = False) -> pa.RecordBatchReader:
         if config is None:
             config = QueryConfig()
 
@@ -138,9 +194,9 @@ class Table:
             predicate=predicate,
             field_names=columns)
 
-
         splits = [(i, config.num_splits, config.num_row_groups_per_sub_split) for i in range(config.num_splits)]
         response_row_id = False
+
         def batches_iterator(for_split):
             while not all(row_id == TABULAR_INVALID_ROW_ID for row_id in start_row_ids.values()):
                 response = self.tx._rpc.api.query_data(
@@ -179,7 +235,6 @@ class Table:
             return col.combine_chunks()
         else:
             return col
-
 
     def insert(self, rows: pa.RecordBatch) -> pa.RecordBatch:
         blob = serialize_record_batch(rows)

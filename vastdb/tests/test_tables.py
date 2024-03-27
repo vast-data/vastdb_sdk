@@ -11,7 +11,7 @@ from requests.exceptions import HTTPError
 import logging
 
 from vastdb.table import INTERNAL_ROW_ID, QueryConfig
-from vastdb.errors import NotFoundError,Conflict
+from vastdb.errors import NotFoundError, Conflict
 
 
 log = logging.getLogger(__name__)
@@ -152,6 +152,7 @@ def test_select_with_multisplits(session, clean_bucket_name):
     with prepare_data(session, clean_bucket_name, 's', 't', expected) as t:
         actual = pa.Table.from_batches(t.select(columns=['a'], config=config))
         assert actual == expected
+
 
 def test_filters(session, clean_bucket_name):
     columns = pa.schema([

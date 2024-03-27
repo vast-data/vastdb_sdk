@@ -1,6 +1,7 @@
 import logging
 from enum import Enum
 
+
 class HttpErrors(Enum):
     SUCCESS = 200
     BAD_REQUEST = 400
@@ -13,7 +14,9 @@ class HttpErrors(Enum):
     NOT_IMPLEMENTED = 501
     SERVICE_UNAVAILABLE = 503
 
+
 log = logging.getLogger(__name__)
+
 
 class VastException(Exception):
     pass
@@ -58,7 +61,8 @@ class NotImplemented(VastException):
 class ServiceUnavailable(VastException):
     pass
 
-class ImportFilesError(Exception):
+
+class ImportFilesError(VastException):
     def __init__(self, message, error_dict):
         super().__init__(message)
         self.error_dict = error_dict
