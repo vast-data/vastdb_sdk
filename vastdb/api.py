@@ -843,7 +843,7 @@ class VastdbApi:
                     error_code = root.find('Code').text
                     error_message = root.find('Message').text
                     if error_code:
-                        _logger.warn("s3 error code=%s description=%s", error_code, error_message)
+                        _logger.warning("s3 error code=%s description=%s", error_code, error_message)
                 if res.status_code not in expected_retvals:
                     if errors.HttpErrors(res.status_code) == errors.HttpErrors.BAD_REQUEST:
                         raise errors.BadRequest(f"cmd={cmd} returned with bad request")
@@ -2399,7 +2399,7 @@ def _iter_query_data_response_columns(fileobj, stream_ids=None):
         if stream_id == TABULAR_QUERY_DATA_FAILED_STREAM_ID:
             # read the terminating end chunk from socket
             res = fileobj.read()
-            _logger.warn("stream_id=%d res=%s (failed)", stream_id, res)
+            _logger.warning("stream_id=%d res=%s (failed)", stream_id, res)
             raise IOError(f"Query data stream failed res={res}")
 
         next_row_id_bytes = fileobj.read(8)
