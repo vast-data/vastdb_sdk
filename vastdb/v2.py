@@ -289,7 +289,7 @@ class Table:
         self.stats = TableStats(num_rows=num_rows, size=size_in_bytes)
         if self.stats.num_rows > config.rows_per_split:
             config.num_splits = self.stats.num_rows // config.rows_per_split
-        log.info(f"num_rows={self.stats.num_rows} rows_per_splits={config.rows_per_split} num_splits={config.num_splits} ")
+        log.debug(f"num_rows={self.stats.num_rows} rows_per_splits={config.rows_per_split} num_splits={config.num_splits} ")
 
         query_schema = self.arrow_schema
         if internal_row_id:
