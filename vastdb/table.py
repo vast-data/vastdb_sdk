@@ -1,185 +1,20 @@
+from . import errors, schema
+from .internal_commands import serialize_record_batch, build_query_data_request, parse_query_data_response, TABULAR_INVALID_ROW_ID
+
+
+import pyarrow as pa
+import ibis
+
 from dataclasses import dataclass, field
+from typing import List, Union
 import logging
 import os
-from typing import Union
-
-import boto3
-import botocore
-import ibis
-import pyarrow as pa
-from typing import List
-import vastdb.errors as errors
-
-from vastdb.api import VastdbApi, serialize_record_batch, build_query_data_request, parse_query_data_response, TABULAR_INVALID_ROW_ID
-
 
 log = logging.getLogger(__name__)
+
+
+
 INTERNAL_ROW_ID = "$row_id"
-
-
-class RPC:
-    def __init__(self, access=None, secret=None, endpoint=None):
-        if access is None:
-            access = os.environ['AWS_ACCESS_KEY_ID']
-        if secret is None:
-            secret = os.environ['AWS_SECRET_ACCESS_KEY']
-        if endpoint is None:
-            endpoint = os.environ['AWS_S3_ENDPOINT_URL']
-
-        self.api = VastdbApi(endpoint, access, secret)
-        self.s3 = boto3.client('s3',
-            aws_access_key_id=access,
-            aws_secret_access_key=secret,
-            endpoint_url=endpoint)
-
-    def __repr__(self):
-        return f'RPC(endpoint={self.api.url}, access={self.api.access_key})'
-
-    def transaction(self):
-        return Transaction(self)
-
-
-def connect(*args, **kw):
-    return RPC(*args, **kw)
-
-
-@dataclass
-class Transaction:
-    _rpc: RPC
-    txid: int = None
-
-    def __enter__(self):
-        response = self._rpc.api.begin_transaction()
-        self.txid = int(response.headers['tabular-txid'])
-        log.debug("opened txid=%016x", self.txid)
-        return self
-
-    def __exit__(self, *args):
-        if args == (None, None, None):
-            log.debug("committing txid=%016x", self.txid)
-            self._rpc.api.commit_transaction(self.txid)
-        else:
-            log.exception("rolling back txid=%016x", self.txid)
-            self._rpc.api.rollback_transaction(self.txid)
-
-    def __repr__(self):
-        return f'Transaction(id=0x{self.txid:016x})'
-
-    def bucket(self, name: str) -> "Bucket":
-        try:
-            self._rpc.s3.head_bucket(Bucket=name)
-            return Bucket(name, self)
-        except botocore.exceptions.ClientError as e:
-            if e.response['Error']['Code'] == 403:
-                raise errors.AccessDeniedError(f"Access is denied to bucket: {name}") from e
-            else:
-                raise errors.NotFoundError(f"Bucket {name} does not exist") from e
-
-
-@dataclass
-class Bucket:
-    name: str
-    tx: Transaction
-
-    def create_schema(self, path: str) -> "Schema":
-        self.tx._rpc.api.create_schema(self.name, path, txid=self.tx.txid)
-        log.info("Created schema: %s", path)
-        return self.schema(path)
-
-    def schema(self, path: str) -> "Schema":
-        schema = self.schemas(path)
-        log.debug("schema: %s", schema)
-        if not schema:
-            raise errors.NotFoundError(f"Schema '{path}' was not found in bucket: {self.name}")
-        assert len(schema) == 1, f"Expected to receive only a single schema, but got: {len(schema)}. ({schema})"
-        log.debug("Found schema: %s", schema[0].name)
-        return schema[0]
-
-    def schemas(self, schema: str = None) -> ["Schema"]:
-        schemas = []
-        next_key = 0
-        exact_match = bool(schema)
-        log.debug("list schemas param: schema=%s, exact_match=%s", schema, exact_match)
-        while True:
-            bucket_name, curr_schemas, next_key, is_truncated, _ = \
-                self.tx._rpc.api.list_schemas(bucket=self.name, next_key=next_key, txid=self.tx.txid,
-                                               name_prefix=schema, exact_match=exact_match)
-            if not curr_schemas:
-                break
-            schemas.extend(curr_schemas)
-            if not is_truncated:
-                break
-
-        return [Schema(name=name, bucket=self) for name, *_ in schemas]
-
-    def snapshots(self) -> ["Snapshot"]:
-        snapshots = []
-        next_key = 0
-        while True:
-            curr_snapshots, is_truncated, next_key = \
-                self.tx._rpc.api.list_snapshots(bucket=self.name, next_token=next_key)
-            if not curr_snapshots:
-                break
-            snapshots.extend(curr_snapshots)
-            if not is_truncated:
-                break
-
-        return [Snapshot(name=snapshot, bucket=self) for snapshot in snapshots]
-
-@dataclass
-class Snapshot:
-    name: str
-    bucket: Bucket
-
-@dataclass
-class Schema:
-    name: str
-    bucket: Bucket
-
-    @property
-    def tx(self):
-        return self.bucket.tx
-
-    def create_table(self, table_name: str, columns: pa.Schema) -> "Table":
-        self.tx._rpc.api.create_table(self.bucket.name, self.name, table_name, columns, txid=self.tx.txid)
-        log.info("Created table: %s", table_name)
-        return self.table(table_name)
-
-    def table(self, name: str) -> "Table":
-        t = self.tables(table_name=name)
-        if not t:
-            raise errors.NotFoundError(f"Table '{name}' was not found under schema: {self.name}")
-        assert len(t) == 1, f"Expected to receive only a single table, but got: {len(t)}. tables: {t}"
-        log.debug("Found table: %s", t[0])
-        return t[0]
-
-    def tables(self, table_name=None) -> ["Table"]:
-        tables = []
-        next_key = 0
-        name_prefix = table_name if table_name else ""
-        exact_match = bool(table_name)
-        while True:
-            bucket_name, schema_name, curr_tables, next_key, is_truncated, _ = \
-                self.tx._rpc.api.list_tables(
-                    bucket=self.bucket.name, schema=self.name, next_key=next_key, txid=self.tx.txid,
-                    exact_match=exact_match, name_prefix=name_prefix, include_list_stats=exact_match)
-            if not curr_tables:
-                break
-            tables.extend(curr_tables)
-            if not is_truncated:
-                break
-
-        return [_parse_table_info(table, self) for table in tables]
-
-    def drop(self) -> None:
-        self.tx._rpc.api.drop_schema(self.bucket.name, self.name, txid=self.tx.txid)
-        log.info("Dropped schema: %s", self.name)
-
-    def rename(self, new_name) -> None:
-        self.tx._rpc.api.alter_schema(self.bucket.name, self.name, txid=self.tx.txid, new_name=new_name)
-        log.info("Renamed schema: %s to %s", self.name, new_name)
-        self.name = new_name
-
 
 @dataclass
 class TableStats:
@@ -200,7 +35,7 @@ class QueryConfig:
 @dataclass
 class Table:
     name: str
-    schema: Schema
+    schema: "schema.Schema"
     handle: int
     stats: TableStats
     properties: dict = None
@@ -410,10 +245,6 @@ class Table:
         return self._ibis_table[col_name]
 
 
-def _parse_table_info(table_info, schema: "Schema"):
-    stats = TableStats(num_rows=table_info.num_rows, size=table_info.size_in_bytes)
-    return Table(name=table_info.name, schema=schema, handle=int(table_info.handle), stats=stats)
-
 @dataclass
 class Projection:
     name: str
@@ -484,13 +315,3 @@ def _serialize_record_batch(record_batch: pa.RecordBatch) -> pa.lib.Buffer:
     with pa.ipc.new_stream(sink, record_batch.schema) as writer:
         writer.write(record_batch)
     return sink.getvalue()
-
-
-def _parse_endpoint(endpoint):
-    if ":" in endpoint:
-        endpoint, port = endpoint.split(":")
-        port = int(port)
-    else:
-        port = 80
-    log.debug("endpoint: %s, port: %d", endpoint, port)
-    return endpoint, port

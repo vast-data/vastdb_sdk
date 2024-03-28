@@ -1,8 +1,8 @@
 import pytest
 
 
-def test_schemas(rpc, clean_bucket_name):
-    with rpc.transaction() as tx:
+def test_schemas(session, clean_bucket_name):
+    with session.transaction() as tx:
         b = tx.bucket(clean_bucket_name)
         assert b.schemas() == []
 
@@ -19,8 +19,8 @@ def test_schemas(rpc, clean_bucket_name):
         assert b.schemas() == []
 
 
-def test_commits_and_rollbacks(rpc, clean_bucket_name):
-    with rpc.transaction() as tx:
+def test_commits_and_rollbacks(session, clean_bucket_name):
+    with session.transaction() as tx:
         b = tx.bucket(clean_bucket_name)
         assert b.schemas() == []
         b.create_schema("s3")
@@ -28,18 +28,18 @@ def test_commits_and_rollbacks(rpc, clean_bucket_name):
         # implicit commit
 
     with pytest.raises(ZeroDivisionError):
-        with rpc.transaction() as tx:
+        with session.transaction() as tx:
             b = tx.bucket(clean_bucket_name)
             b.schema("s3").drop()
             assert b.schemas() == []
             1/0  # rollback schema dropping
 
-    with rpc.transaction() as tx:
+    with session.transaction() as tx:
         b = tx.bucket(clean_bucket_name)
         assert b.schemas() != []
 
-def test_list_snapshots(rpc, clean_bucket_name):
-    with rpc.transaction() as tx:
+def test_list_snapshots(session, clean_bucket_name):
+    with session.transaction() as tx:
         b = tx.bucket(clean_bucket_name)
         s = b.snapshots()
         assert s == []

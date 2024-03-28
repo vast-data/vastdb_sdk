@@ -4,22 +4,22 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
-from vastdb.errors import NotFoundError,Conflict
 from tempfile import NamedTemporaryFile
 from contextlib import contextmanager, closing
-from vastdb.v2 import INTERNAL_ROW_ID, QueryConfig
 
 from requests.exceptions import HTTPError
 import logging
-import vastdb.errors as errors
+
+from vastdb.table import INTERNAL_ROW_ID, QueryConfig
+from vastdb.errors import NotFoundError,Conflict
 
 
 log = logging.getLogger(__name__)
 
 
 @contextmanager
-def prepare_data(rpc, clean_bucket_name, schema_name, table_name, arrow_table):
-    with rpc.transaction() as tx:
+def prepare_data(session, clean_bucket_name, schema_name, table_name, arrow_table):
+    with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).create_schema(schema_name)
         t = s.create_table(table_name, arrow_table.schema)
         rb = t.insert(arrow_table)
@@ -32,7 +32,7 @@ def prepare_data(rpc, clean_bucket_name, schema_name, table_name, arrow_table):
 
 log = logging.getLogger(__name__)
 
-def test_tables(rpc, clean_bucket_name):
+def test_tables(session, clean_bucket_name):
     columns = pa.schema([
         ('a', pa.int64()),
         ('b', pa.float32()),
@@ -43,7 +43,7 @@ def test_tables(rpc, clean_bucket_name):
         [0.5, 1.5, 2.5],
         ['a', 'bb', 'ccc'],
     ])
-    with prepare_data(rpc, clean_bucket_name, 's', 't', expected) as t:
+    with prepare_data(session, clean_bucket_name, 's', 't', expected) as t:
         actual = pa.Table.from_batches(t.select(columns=['a', 'b', 's']))
         assert actual == expected
 
@@ -82,7 +82,7 @@ def test_tables(rpc, clean_bucket_name):
             's': ['ccc']
         }
 
-def test_update_table(rpc, clean_bucket_name):
+def test_update_table(session, clean_bucket_name):
     columns = pa.schema([
         ('a', pa.int64()),
         ('b', pa.float32()),
@@ -93,7 +93,7 @@ def test_update_table(rpc, clean_bucket_name):
         [0.5, 1.5, 2.5],
         ['a', 'bb', 'ccc'],
     ])
-    with prepare_data(rpc, clean_bucket_name, 's', 't', expected) as t:
+    with prepare_data(session, clean_bucket_name, 's', 't', expected) as t:
         columns_to_update = pa.schema([
             (INTERNAL_ROW_ID, pa.uint64()),
             ('a', pa.int64())
@@ -137,7 +137,7 @@ def test_update_table(rpc, clean_bucket_name):
             'b': [0.5, 1.5, 2.5]
         }
 
-def test_select_with_multisplits(rpc, clean_bucket_name):
+def test_select_with_multisplits(session, clean_bucket_name):
     columns = pa.schema([
         ('a', pa.int32())
     ])
@@ -149,11 +149,11 @@ def test_select_with_multisplits(rpc, clean_bucket_name):
     config = QueryConfig()
     config.rows_per_split = 1000
 
-    with prepare_data(rpc, clean_bucket_name, 's', 't', expected) as t:
+    with prepare_data(session, clean_bucket_name, 's', 't', expected) as t:
         actual = pa.Table.from_batches(t.select(columns=['a'], config=config))
         assert actual == expected
 
-def test_filters(rpc, clean_bucket_name):
+def test_filters(session, clean_bucket_name):
     columns = pa.schema([
         ('a', pa.int32()),
         ('b', pa.float64()),
@@ -164,7 +164,7 @@ def test_filters(rpc, clean_bucket_name):
         [0.5, 1.5, 2.5],
         ['a', 'bb', 'ccc'],
     ])
-    with prepare_data(rpc, clean_bucket_name, 's', 't', expected) as t:
+    with prepare_data(session, clean_bucket_name, 's', 't', expected) as t:
         def select(predicate):
             return pa.Table.from_batches(t.select(predicate=predicate))
 
@@ -196,7 +196,7 @@ def test_filters(rpc, clean_bucket_name):
         assert select((t['a'] > 111) & (t['a'] < 333)) == expected.filter((pc.field('a') > 111) & (pc.field('a') < 333))
 
 
-def test_duckdb(rpc, clean_bucket_name):
+def test_duckdb(session, clean_bucket_name):
     columns = pa.schema([
         ('a', pa.int32()),
         ('b', pa.float64()),
@@ -205,7 +205,7 @@ def test_duckdb(rpc, clean_bucket_name):
         [111, 222, 333],
         [0.5, 1.5, 2.5],
     ])
-    with prepare_data(rpc, clean_bucket_name, 's', 't', data) as t:
+    with prepare_data(session, clean_bucket_name, 's', 't', data) as t:
         conn = duckdb.connect()
         batches = t.select(columns=['a'], predicate=(t['b'] < 2))  # noqa: F841
         actual = conn.execute('SELECT max(a) as "a_max" FROM batches').arrow()
@@ -216,8 +216,8 @@ def test_duckdb(rpc, clean_bucket_name):
         assert actual == expected
 
 
-def test_parquet_export(rpc, clean_bucket_name):
-    with rpc.transaction() as tx:
+def test_parquet_export(session, clean_bucket_name):
+    with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).create_schema('s1')
         columns = pa.schema([
             ('a', pa.int16()),
@@ -252,17 +252,17 @@ def test_parquet_export(rpc, clean_bucket_name):
 
             assert expected == pq.read_table(parquet_file.name)
 
-def test_errors(rpc, clean_bucket_name):
-    with pytest.raises(errors.NotFoundError):
-        with rpc.transaction() as tx:
+def test_errors(session, clean_bucket_name):
+    with pytest.raises(NotFoundError):
+        with session.transaction() as tx:
             tx.bucket(clean_bucket_name).schema('s1')
 
-    with pytest.raises(errors.NotFoundError):
-        with rpc.transaction() as tx:
+    with pytest.raises(NotFoundError):
+        with session.transaction() as tx:
             tx.bucket("bla")
 
-    with pytest.raises(errors.Conflict):
-        with rpc.transaction() as tx:
+    with pytest.raises(Conflict):
+        with session.transaction() as tx:
             b = tx.bucket(clean_bucket_name)
             s = b.create_schema('s1')
             columns = pa.schema([
@@ -273,12 +273,12 @@ def test_errors(rpc, clean_bucket_name):
             s.create_table('t1', columns)
             s.drop() # cannot drop schema without dropping its tables first
 
-def test_rename_schema(rpc, clean_bucket_name):
+def test_rename_schema(session, clean_bucket_name):
 
-    with rpc.transaction() as tx:
+    with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).create_schema('s')
 
-    with rpc.transaction() as tx, rpc.transaction() as tx2:
+    with session.transaction() as tx, session.transaction() as tx2:
         b = tx.bucket(clean_bucket_name)
         # assert that there is only one schema in this bucket - pre rename
         assert [s.name for s in b.schemas()] == ['s']
@@ -298,7 +298,7 @@ def test_rename_schema(rpc, clean_bucket_name):
             tx2.bucket(clean_bucket_name).schema('ss')
 
     # assert that new transactions see the updated schema name
-    with rpc.transaction() as tx:
+    with session.transaction() as tx:
         b = tx.bucket(clean_bucket_name)
         with pytest.raises(NotFoundError):
             b.schema('s')
@@ -308,17 +308,17 @@ def test_rename_schema(rpc, clean_bucket_name):
         s.drop()
 
 
-def test_rename_table(rpc, clean_bucket_name):
+def test_rename_table(session, clean_bucket_name):
     columns = pa.schema([
             ('a', pa.int16()),
             ('b', pa.float32()),
             ('s', pa.utf8()),
         ])
-    with rpc.transaction() as tx:
+    with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).create_schema('s')
         t = s.create_table('t', columns)
 
-    with rpc.transaction() as tx, rpc.transaction() as tx2:
+    with session.transaction() as tx, session.transaction() as tx2:
         s = tx.bucket(clean_bucket_name).schema('s')
         t = s.table('t')
         t.rename('t2')
@@ -334,7 +334,7 @@ def test_rename_table(rpc, clean_bucket_name):
             tx2.bucket(clean_bucket_name).schema('s').table('t2')
         tx2.bucket(clean_bucket_name).schema('s').table('t')
 
-    with rpc.transaction() as tx:
+    with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).schema('s')
         #assert that new transactions see the change
         with pytest.raises(NotFoundError):
@@ -343,7 +343,7 @@ def test_rename_table(rpc, clean_bucket_name):
         t.drop()
         s.drop()
 
-def test_add_column(rpc, clean_bucket_name):
+def test_add_column(session, clean_bucket_name):
     columns = pa.schema([
             ('a', pa.int16()),
             ('b', pa.float32()),
@@ -352,11 +352,11 @@ def test_add_column(rpc, clean_bucket_name):
     new_column = pa.field('aa', pa.int16())
     new_schema = columns.append(new_column)
 
-    with rpc.transaction() as tx:
+    with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).create_schema('s')
         s.create_table('t', columns)
 
-    with rpc.transaction() as tx, rpc.transaction() as tx2:
+    with session.transaction() as tx, session.transaction() as tx2:
         t = tx.bucket(clean_bucket_name).schema('s').table('t')
         assert t.arrow_schema == columns
 
@@ -369,7 +369,7 @@ def test_add_column(rpc, clean_bucket_name):
         assert tx2.bucket(clean_bucket_name).schema('s').table('t').arrow_schema == columns
 
 
-    with rpc.transaction() as tx:
+    with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).schema('s')
         t = s.table('t')
         #assert that new transactions see the change
@@ -377,7 +377,7 @@ def test_add_column(rpc, clean_bucket_name):
         t.drop()
         s.drop()
 
-def test_drop_column(rpc, clean_bucket_name):
+def test_drop_column(session, clean_bucket_name):
     columns = pa.schema([
             ('a', pa.int16()),
             ('b', pa.float32()),
@@ -387,11 +387,11 @@ def test_drop_column(rpc, clean_bucket_name):
     new_schema = columns.remove(field_idx)
     column_to_drop = columns.field(field_idx)
 
-    with rpc.transaction() as tx:
+    with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).create_schema('s')
         s.create_table('t', columns)
 
-    with rpc.transaction() as tx, rpc.transaction() as tx2:
+    with session.transaction() as tx, session.transaction() as tx2:
         t = tx.bucket(clean_bucket_name).schema('s').table('t')
         assert t.arrow_schema == columns
 
@@ -404,7 +404,7 @@ def test_drop_column(rpc, clean_bucket_name):
         assert tx2.bucket(clean_bucket_name).schema('s').table('t').arrow_schema == columns
 
 
-    with rpc.transaction() as tx:
+    with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).schema('s')
         t = s.table('t')
         #assert that new transactions see the change
@@ -412,7 +412,7 @@ def test_drop_column(rpc, clean_bucket_name):
         t.drop()
         s.drop()
 
-def test_rename_column(rpc, clean_bucket_name):
+def test_rename_column(session, clean_bucket_name):
     columns = pa.schema([
             ('a', pa.int16()),
             ('b', pa.float32()),
@@ -426,11 +426,11 @@ def test_rename_column(rpc, clean_bucket_name):
 
     new_schema = prepare_rename_column(columns,'a','aaa')
 
-    with rpc.transaction() as tx:
+    with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).create_schema('s')
         s.create_table('t', columns)
 
-    with rpc.transaction() as tx, rpc.transaction() as tx2:
+    with session.transaction() as tx, session.transaction() as tx2:
         t = tx.bucket(clean_bucket_name).schema('s').table('t')
         assert t.arrow_schema == columns
 
@@ -443,7 +443,7 @@ def test_rename_column(rpc, clean_bucket_name):
         assert tx2.bucket(clean_bucket_name).schema('s').table('t').arrow_schema == columns
 
     #assert that new transactions see the change
-    with rpc.transaction() as tx:
+    with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).schema('s')
         t = s.table('t')
 
@@ -453,21 +453,21 @@ def test_rename_column(rpc, clean_bucket_name):
     new_schema_tx1 = prepare_rename_column(new_schema, 'b', 'bb')
     new_schema_tx2 = prepare_rename_column(new_schema, 'b', 'bbb')
     with pytest.raises(Conflict):
-        with rpc.transaction() as tx1, rpc.transaction() as tx2:
+        with session.transaction() as tx1, session.transaction() as tx2:
             t1 = tx1.bucket(clean_bucket_name).schema('s').table('t')
             t2 = tx2.bucket(clean_bucket_name).schema('s').table('t')
             t1.rename_column('b', 'bb')
             with pytest.raises(HTTPError, match = '409 Client Error: Conflict'):
                 t2.rename_column('b', 'bbb')
 
-    with rpc.transaction() as tx:
+    with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).schema('s')
         t = s.table('t')
         # validate that the rename conflicted and rolled back
         assert (t.arrow_schema != new_schema_tx1) and \
                 (t.arrow_schema != new_schema_tx2)
 
-    with rpc.transaction() as tx:
+    with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).schema('s')
         t = s.table('t')
         t.drop()

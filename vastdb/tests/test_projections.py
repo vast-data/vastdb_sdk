@@ -3,8 +3,8 @@ import logging
 
 log = logging.getLogger(__name__)
 
-def test_basic_projections(rpc, clean_bucket_name):
-    with rpc.transaction() as tx:
+def test_basic_projections(session, clean_bucket_name):
+    with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).create_schema('s1')
         columns = pa.schema([
             ('a', pa.int8()),

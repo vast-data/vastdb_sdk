@@ -10,7 +10,7 @@ from vastdb.errors import ImportFilesError
 from vastdb import util
 
 
-def test_create_table_from_files(rpc, clean_bucket_name, s3):
+def test_create_table_from_files(session, clean_bucket_name, s3):
     datasets = [
         {'num': [0],
          'varch': ['z']},
@@ -34,7 +34,7 @@ def test_create_table_from_files(rpc, clean_bucket_name, s3):
     contained_schema_files = [f'/{clean_bucket_name}/prq{i}' for i in range(4)]
     different_schema_files = [f'/{clean_bucket_name}/prq{i}' for i in range(5)]
 
-    with rpc.transaction() as tx:
+    with session.transaction() as tx:
         b = tx.bucket(clean_bucket_name)
         s = b.create_schema('s1')
         t = util.create_table_from_files(s, 't1', contained_schema_files)
@@ -51,7 +51,7 @@ def test_create_table_from_files(rpc, clean_bucket_name, s3):
         util.create_table_from_files(s, 't3', same_schema_files, schema_merge_func=util.strict_schema_merge)
 
 
-def test_import_name_mismatch_error(rpc, clean_bucket_name, s3):
+def test_import_name_mismatch_error(session, clean_bucket_name, s3):
     ds = {'varch': ['a', 'b', 'c'],
           'invalid_column_name': [1, 2, 3]}
     prq_name = 'name_mismatch.parquet'
@@ -60,7 +60,7 @@ def test_import_name_mismatch_error(rpc, clean_bucket_name, s3):
         pq.write_table(table, f.name)
         s3.put_object(Bucket=clean_bucket_name, Key=prq_name, Body=f)
 
-    with rpc.transaction() as tx:
+    with session.transaction() as tx:
         b = tx.bucket(clean_bucket_name)
         s = b.create_schema('s1')
         t = s.create_table('t1', pa.schema([('varch', pa.string()), ('num', pa.int64())]))
@@ -71,7 +71,7 @@ def test_import_name_mismatch_error(rpc, clean_bucket_name, s3):
         assert 'invalid_column_name' in exc.value.error_dict['err_msg']
 
 
-def test_import_type_mismatch_error(rpc, clean_bucket_name, s3):
+def test_import_type_mismatch_error(session, clean_bucket_name, s3):
     ds = {'varch': ['a', 'b', 'c'],
           'num_type_mismatch': [1, 2, 3]}
     prq_name = 'type_mismatch.parquet'
@@ -80,7 +80,7 @@ def test_import_type_mismatch_error(rpc, clean_bucket_name, s3):
         pq.write_table(table, f.name)
         s3.put_object(Bucket=clean_bucket_name, Key=prq_name, Body=f)
 
-    with rpc.transaction() as tx:
+    with session.transaction() as tx:
         b = tx.bucket(clean_bucket_name)
         s = b.create_schema('s1')
         t = s.create_table('t1', pa.schema([('varch', pa.string()), ('num_type_mismatch', pa.bool_())]))

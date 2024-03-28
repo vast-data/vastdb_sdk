@@ -6,13 +6,13 @@ import contextlib
 
 import pytest
 
-from vastdb import api
+import vastdb
 
 
 log = logging.getLogger(__name__)
 
-def test_hello_world(rpc):
-    with rpc.transaction() as tx:
+def test_hello_world(session):
+    with session.transaction() as tx:
         assert tx.txid is not None
 
 def test_version_extraction():
@@ -61,8 +61,8 @@ def test_version_extraction():
     try:
         for _, expected in TEST_CASES:
             with (pytest.raises(NotImplementedError) if expected is None else contextlib.nullcontext()):
-                res = api.VastdbApi(endpoint=f"http://localhost:{httpd.server_port}", access_key="abc", secret_key="abc")
-                assert res.vast_version == expected
+                s = vastdb.connect(endpoint=f"http://localhost:{httpd.server_port}", access="abc", secret="abc")
+                assert s.api.vast_version == expected
     finally:
         # make sure we shut the server down no matter what
         httpd.shutdown()

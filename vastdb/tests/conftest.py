@@ -1,8 +1,8 @@
+import vastdb
+
 import pytest
 import boto3
 import os
-
-from vastdb import v2
 
 
 def pytest_addoption(parser):
@@ -13,8 +13,8 @@ def pytest_addoption(parser):
 
 
 @pytest.fixture(scope="session")
-def rpc(request):
-    return v2.connect(
+def session(request):
+    return vastdb.connect(
         access=request.config.getoption("--tabular-access-key"),
         secret=request.config.getoption("--tabular-secret-key"),
         endpoint=request.config.getoption("--tabular-endpoint-url"),
@@ -27,8 +27,8 @@ def test_bucket_name(request):
 
 
 @pytest.fixture(scope="function")
-def clean_bucket_name(request, test_bucket_name, rpc):
-    with rpc.transaction() as tx:
+def clean_bucket_name(request, test_bucket_name, session):
+    with session.transaction() as tx:
         b = tx.bucket(test_bucket_name)
         for s in b.schemas():
             for t in s.tables():
