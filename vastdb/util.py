@@ -4,8 +4,8 @@ from typing import Callable
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from vastdb.v2 import InvalidArgumentError, Table, Schema
-
+from vastdb.v2 import Table, Schema
+from vastdb.errors import InvalidArgumentError
 
 log = logging.getLogger(__name__)
 

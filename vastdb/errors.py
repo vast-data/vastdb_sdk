@@ -57,3 +57,8 @@ class NotImplemented(VastException):
 
 class ServiceUnavailable(VastException):
     pass
+
+class ImportFilesError(Exception):
+    def __init__(self, message, error_dict):
+        super().__init__(message)
+        self.error_dict = error_dict

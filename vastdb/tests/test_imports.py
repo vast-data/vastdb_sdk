@@ -5,8 +5,8 @@ from tempfile import NamedTemporaryFile
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from vastdb.v2 import InvalidArgumentError
-from vastdb.api import ImportFilesError
+from vastdb.errors import InvalidArgumentError
+from vastdb.errors import ImportFilesError
 from vastdb import util
 
 

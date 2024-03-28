@@ -23,6 +23,7 @@ import urllib3
 import re
 import vastdb.errors as errors
 import xml.etree.ElementTree as ET
+from vastdb.errors import ImportFilesError
 
 import vast_flatbuf.org.apache.arrow.computeir.flatbuf.BinaryLiteral as fb_binary_lit
 import vast_flatbuf.org.apache.arrow.computeir.flatbuf.BooleanLiteral as fb_bool_lit
@@ -103,12 +104,6 @@ class AuthType(Enum):
     SIGV4 = "s3v4"
     SIGV2 = "s3"
     BASIC = "basic"
-
-
-class ImportFilesError(Exception):
-    def __init__(self, message, error_dict):
-        super().__init__(message)
-        self.error_dict = error_dict
 
 
 def get_unit_to_flatbuff_time_unit(type):
