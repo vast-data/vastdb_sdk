@@ -232,7 +232,7 @@ class Table:
     def projection(self, name: str) -> "Projection":
         projs = self.projections(projection_name=name)
         if not projs:
-            raise NotFoundError(f"Projection '{name}' was not found under table: {self.name}")
+            raise errors.NotFoundError(f"Projection '{name}' was not found under table: {self.name}")
         assert len(projs) == 1, f"Expected to receive only a single projection, but got: {len(projs)}. projections: {projs}"
         log.debug("Found projection: %s", projs[0])
         return projs[0]

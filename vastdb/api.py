@@ -22,6 +22,7 @@ from aws_requests_auth.aws_auth import AWSRequestsAuth
 import urllib3
 import re
 import vastdb.errors as errors
+import xml.etree.ElementTree as ET
 
 import vast_flatbuf.org.apache.arrow.computeir.flatbuf.BinaryLiteral as fb_binary_lit
 import vast_flatbuf.org.apache.arrow.computeir.flatbuf.BooleanLiteral as fb_bool_lit
@@ -840,6 +841,14 @@ class VastdbApi:
     def _check_res(self, res, cmd="", expected_retvals=[]):
         try:
             if errors.HttpErrors(res.status_code) != errors.HttpErrors.SUCCESS:
+                # if the response have an error lets log the s3 error string:
+                xml_response = res.text
+                if xml_response:
+                    root = ET.fromstring(xml_response)
+                    error_code = root.find('Code').text
+                    error_message = root.find('Message').text
+                    if error_code:
+                        _logger.warn("s3 error code=%s description=%s", error_code, error_message)
                 if res.status_code not in expected_retvals:
                     if errors.HttpErrors(res.status_code) == errors.HttpErrors.BAD_REQUEST:
                         raise errors.BadRequest(f"cmd={cmd} returned with bad request")
