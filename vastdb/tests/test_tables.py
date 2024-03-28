@@ -6,7 +6,7 @@ import pytest
 
 from tempfile import NamedTemporaryFile
 from contextlib import contextmanager, closing
-from vastdb.v2 import INTERNAL_ROW_ID
+from vastdb.v2 import INTERNAL_ROW_ID, QueryConfig
 
 import logging
 import vastdb.errors as errors
@@ -133,6 +133,22 @@ def test_update_table(rpc, clean_bucket_name):
             'a': [111, 2222, 333],
             'b': [0.5, 1.5, 2.5]
         }
+
+def test_select_with_multisplits(rpc, clean_bucket_name):
+    columns = pa.schema([
+        ('a', pa.int32())
+    ])
+
+    data = [ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    data = data * 1000
+    expected = pa.table(schema=columns, data=[data])
+
+    config = QueryConfig()
+    config.rows_per_split = 1000
+
+    with prepare_data(rpc, clean_bucket_name, 's', 't', expected) as t:
+        actual = pa.Table.from_batches(t.select(columns=['a'], config=config))
+        assert actual == expected
 
 def test_filters(rpc, clean_bucket_name):
     columns = pa.schema([

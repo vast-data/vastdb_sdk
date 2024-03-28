@@ -195,6 +195,7 @@ class QueryConfig:
     limit_rows_per_sub_split: int = 128 * 1024
     num_row_groups_per_sub_split: int = 8
     use_semi_sorted_projections: bool = True
+    rows_per_split: int = 4000000
 
 @dataclass
 class Table:
@@ -283,6 +284,13 @@ class Table:
         if config is None:
             config = QueryConfig()
 
+        num_rows, size_in_bytes, _ = self.tx._rpc.api.get_table_stats(
+            bucket=self.bucket.name, schema=self.schema.name, name=self.name, txid=self.tx.txid)
+        self.stats = TableStats(num_rows=num_rows, size=size_in_bytes)
+        if self.stats.num_rows > config.rows_per_split:
+            config.num_splits = self.stats.num_rows // config.rows_per_split
+        log.info(f"num_rows={self.stats.num_rows} rows_per_splits={config.rows_per_split} num_splits={config.num_splits} ")
+
         query_schema = self.arrow_schema
         if internal_row_id:
             queried_fields = [pa.field(INTERNAL_ROW_ID, pa.uint64())]
@@ -295,18 +303,17 @@ class Table:
             predicate=predicate,
             field_names=columns)
 
-        start_row_ids = {i: 0 for i in range(config.num_sub_splits)}
-        assert config.num_splits == 1  # TODO()
-        split = (0, 1, config.num_row_groups_per_sub_split)
+
+        splits = [(i, config.num_splits, config.num_row_groups_per_sub_split) for i in range(config.num_splits)]
         response_row_id = False
-        def batches_iterator():
+        def batches_iterator(for_split):
             while not all(row_id == TABULAR_INVALID_ROW_ID for row_id in start_row_ids.values()):
                 response = self.tx._rpc.api.query_data(
                     bucket=self.bucket.name,
                     schema=self.schema.name,
                     table=self.name,
                     params=query_data_request.serialized,
-                    split=split,
+                    split=for_split,
                     num_sub_splits=config.num_sub_splits,
                     response_row_id=response_row_id,
                     txid=self.tx.txid,
@@ -324,7 +331,13 @@ class Table:
                         if len(batch) > 0:
                             yield batch
 
-        return pa.RecordBatchReader.from_batches(query_data_request.response_schema.arrow_schema, batches_iterator())
+        record_batches = []
+        for split in splits:
+            start_row_ids = {i: 0 for i in range(config.num_sub_splits)}
+            curr_record_batch = pa.RecordBatchReader.from_batches(query_data_request.response_schema.arrow_schema, batches_iterator(split))
+            record_batches.extend(curr_record_batch)
+
+        return pa.RecordBatchReader.from_batches(query_data_request.response_schema.arrow_schema, record_batches)
 
     def _combine_chunks(self, col):
         if hasattr(col, "combine_chunks"):
