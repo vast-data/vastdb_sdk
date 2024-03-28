@@ -162,7 +162,7 @@ class Schema:
             bucket_name, schema_name, curr_tables, next_key, is_truncated, _ = \
                 self.tx._rpc.api.list_tables(
                     bucket=self.bucket.name, schema=self.name, next_key=next_key, txid=self.tx.txid,
-                    exact_match=exact_match, name_prefix=name_prefix)
+                    exact_match=exact_match, name_prefix=name_prefix, include_list_stats=exact_match)
             if not curr_tables:
                 break
             tables.extend(curr_tables)
