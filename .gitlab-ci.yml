@@ -3,7 +3,7 @@ variables:
   ORION_PREFIX: $DOCKER_REGISTRY/dev/orion
   PYSDK_BUILDER_IMAGE: $ORION_PREFIX:vastdb-python-sdk-builder-latest
   PYSDK_IMAGE_PREFIX: $ORION_PREFIX:vastdb-python-sdk-pipe-$CI_PIPELINE_ID
-  ORION_BRANCH: BUILD/roman.zeyde/pysdk-ci-branch
+  ORION_BRANCH: BUILD/roman.zeyde/skip-unrelated-jobs-on-pipeline
 
 
 pre_build:
