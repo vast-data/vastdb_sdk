@@ -1,5 +1,5 @@
 from . import errors, schema
-from .internal_commands import serialize_record_batch, build_query_data_request, parse_query_data_response, \
+from .internal_commands import build_query_data_request, parse_query_data_response, \
     TABULAR_INVALID_ROW_ID, VastdbApi
 
 import pyarrow as pa
@@ -19,6 +19,10 @@ log = logging.getLogger(__name__)
 
 
 INTERNAL_ROW_ID = "$row_id"
+MAX_ROWS_PER_BATCH = 512 * 1024
+# for insert we need a smaller limit due to response amplification
+# for example insert of 512k uint8 result in 512k*8bytes response since row_ids are uint64
+MAX_INSERT_ROWS_PER_PATCH = 512 * 1024
 
 
 @dataclass
@@ -237,10 +241,15 @@ class Table:
             return col
 
     def insert(self, rows: pa.RecordBatch) -> pa.RecordBatch:
-        blob = serialize_record_batch(rows)
-        res = self.tx._rpc.api.insert_rows(self.bucket.name, self.schema.name, self.name, record_batch=blob, txid=self.tx.txid)
-        (batch,) = pa.RecordBatchStreamReader(res.raw)
-        return batch
+        serialized_slices = self.tx._rpc.api._record_batch_slices(rows, MAX_INSERT_ROWS_PER_PATCH)
+        row_ids = []
+        for slice in serialized_slices:
+            res = self.tx._rpc.api.insert_rows(self.bucket.name, self.schema.name, self.name, record_batch=slice,
+                                               txid=self.tx.txid)
+            (batch,) = pa.RecordBatchStreamReader(res.raw)
+            row_ids.append(batch[INTERNAL_ROW_ID])
+
+        return pa.chunked_array(row_ids)
 
     def update(self, rows: Union[pa.RecordBatch, pa.Table], columns: list = None) -> None:
         if columns is not None:
@@ -254,15 +263,19 @@ class Table:
         else:
             update_rows_rb = rows
 
-        blob = serialize_record_batch(update_rows_rb)
-        self.tx._rpc.api.update_rows(self.bucket.name, self.schema.name, self.name, record_batch=blob, txid=self.tx.txid)
+        serialized_slices = self.tx._rpc.api._record_batch_slices(update_rows_rb, MAX_ROWS_PER_BATCH)
+        for slice in serialized_slices:
+            self.tx._rpc.api.update_rows(self.bucket.name, self.schema.name, self.name, record_batch=slice,
+                                         txid=self.tx.txid)
 
     def delete(self, rows: Union[pa.RecordBatch, pa.Table]) -> None:
         delete_rows_rb = pa.record_batch(schema=pa.schema([(INTERNAL_ROW_ID, pa.uint64())]),
                                          data=[self._combine_chunks(rows[INTERNAL_ROW_ID])])
 
-        blob = serialize_record_batch(delete_rows_rb)
-        self.tx._rpc.api.delete_rows(self.bucket.name, self.schema.name, self.name, record_batch=blob, txid=self.tx.txid)
+        serialized_slices = self.tx._rpc.api._record_batch_slices(delete_rows_rb, MAX_ROWS_PER_BATCH)
+        for slice in serialized_slices:
+            self.tx._rpc.api.delete_rows(self.bucket.name, self.schema.name, self.name, record_batch=slice,
+                                         txid=self.tx.txid)
 
     def drop(self) -> None:
         self.tx._rpc.api.drop_table(self.bucket.name, self.schema.name, self.name, txid=self.tx.txid)

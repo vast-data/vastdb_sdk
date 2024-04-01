@@ -22,8 +22,8 @@ def prepare_data(session, clean_bucket_name, schema_name, table_name, arrow_tabl
     with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).create_schema(schema_name)
         t = s.create_table(table_name, arrow_table.schema)
-        rb = t.insert(arrow_table)
-        row_ids = rb[INTERNAL_ROW_ID].to_pylist()
+        row_ids_array = t.insert(arrow_table)
+        row_ids = row_ids_array.to_pylist()
         log.debug("row_ids=%s" % row_ids)
         assert row_ids == list(range(arrow_table.num_rows))
         yield t
@@ -236,10 +236,7 @@ def test_parquet_export(session, clean_bucket_name):
         ])
         expected = pa.Table.from_batches([rb])
         rb = t.insert(rb)
-        assert rb.to_pydict() == {
-            INTERNAL_ROW_ID: [0, 1]
-        }
-
+        assert rb.to_pylist() == [0, 1]
         actual = pa.Table.from_batches(t.select())
         assert actual == expected
 
