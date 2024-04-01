@@ -45,7 +45,39 @@ class GetTableStatsResponse(object):
             return bool(self._tab.Get(flatbuffers.number_types.BoolFlags, o + self._tab.Pos))
         return False
 
-def Start(builder): builder.StartObject(3)
+    # GetTableStatsResponse
+    def AddressType(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(10))
+        if o != 0:
+            return self._tab.String(o + self._tab.Pos)
+        return None
+
+    # GetTableStatsResponse
+    def Vips(self, j):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(12))
+        if o != 0:
+            x = self._tab.Vector(o)
+            x += flatbuffers.number_types.UOffsetTFlags.py_type(j) * 4
+            x = self._tab.Indirect(x)
+            from vast_flatbuf.tabular.VipRange import VipRange
+            obj = VipRange()
+            obj.Init(self._tab.Bytes, x)
+            return obj
+        return None
+
+    # GetTableStatsResponse
+    def VipsLength(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(12))
+        if o != 0:
+            return self._tab.VectorLen(o)
+        return 0
+
+    # GetTableStatsResponse
+    def VipsIsNone(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(12))
+        return o == 0
+
+def Start(builder): builder.StartObject(5)
 def GetTableStatsResponseStart(builder):
     """This method is deprecated. Please switch to Start."""
     return Start(builder)
@@ -61,6 +93,18 @@ def AddIsExternalRowidAlloc(builder, isExternalRowidAlloc): builder.PrependBoolS
 def GetTableStatsResponseAddIsExternalRowidAlloc(builder, isExternalRowidAlloc):
     """This method is deprecated. Please switch to AddIsExternalRowidAlloc."""
     return AddIsExternalRowidAlloc(builder, isExternalRowidAlloc)
+def AddAddressType(builder, addressType): builder.PrependUOffsetTRelativeSlot(3, flatbuffers.number_types.UOffsetTFlags.py_type(addressType), 0)
+def GetTableStatsResponseAddAddressType(builder, addressType):
+    """This method is deprecated. Please switch to AddAddressType."""
+    return AddAddressType(builder, addressType)
+def AddVips(builder, vips): builder.PrependUOffsetTRelativeSlot(4, flatbuffers.number_types.UOffsetTFlags.py_type(vips), 0)
+def GetTableStatsResponseAddVips(builder, vips):
+    """This method is deprecated. Please switch to AddVips."""
+    return AddVips(builder, vips)
+def StartVipsVector(builder, numElems): return builder.StartVector(4, numElems, 4)
+def GetTableStatsResponseStartVipsVector(builder, numElems):
+    """This method is deprecated. Please switch to Start."""
+    return StartVipsVector(builder, numElems)
 def End(builder): return builder.EndObject()
 def GetTableStatsResponseEnd(builder):
     """This method is deprecated. Please switch to End."""
