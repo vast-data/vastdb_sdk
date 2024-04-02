@@ -161,9 +161,9 @@ def test_filters(session, clean_bucket_name):
         ('s', pa.utf8()),
     ])
     expected = pa.table(schema=columns, data=[
-        [111, 222, 333],
-        [0.5, 1.5, 2.5],
-        ['a', 'bb', 'ccc'],
+        [111, 222, 333, 444],
+        [0.5, 1.5, 2.5, 3.5],
+        ['a', 'bb', 'ccc', None],
     ])
     with prepare_data(session, clean_bucket_name, 's', 't', expected) as t:
         def select(predicate):
@@ -201,6 +201,10 @@ def test_filters(session, clean_bucket_name):
         with pytest.raises(NotImplementedError):
             assert select((t['a'] > 111) | (t['b'] > 0) | (t['s'] < 'ccc')) == expected.filter((pc.field('a') > 111) | (pc.field('b') > 0) | (pc.field('s') < 'ccc'))
         assert select((t['a'] > 111) | (t['a'] < 333) | (t['a'] == 777) ) == expected.filter((pc.field('a') > 111) | (pc.field('a') < 333) | (pc.field('a') == 777))
+
+        assert select(t['s'].isnull()) == expected.filter(pc.field('s').is_null())
+        assert select((t['s'].isnull()) | (t['s'] == 'bb'))  == expected.filter((pc.field('s').is_null()) | (pc.field('s') == 'bb'))
+        assert select((t['s'].isnull()) & (t['b'] == 3.5))  == expected.filter((pc.field('s').is_null()) & (pc.field('b') == 3.5))
 
 
 def test_duckdb(session, clean_bucket_name):

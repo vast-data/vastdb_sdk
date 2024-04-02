@@ -176,7 +176,7 @@ class Predicate:
         return builder.EndVector()
 
     def serialize(self, builder: 'flatbuffers.builder.Builder'):
-        from ibis.expr.operations.generic import TableColumn, Literal
+        from ibis.expr.operations.generic import TableColumn, Literal, IsNull
         from ibis.expr.operations.logical import Greater, GreaterEqual, Less, LessEqual, Equals, NotEquals, And, Or
 
         builder_map = {
@@ -186,6 +186,7 @@ class Predicate:
             LessEqual: self.build_less_equal,
             Equals: self.build_equal,
             NotEquals: self.build_not_equal,
+            IsNull: self.build_is_null,
         }
 
         positions_map = dict((f.name, index) for index, f in enumerate(self.schema)) # TODO: BFS
@@ -207,26 +208,31 @@ class Predicate:
                     _logger.debug('inner_op %s', inner_op)
                     builder_func = builder_map.get(type(inner_op))
                     if not builder_func:
-                        raise NotImplementedError(inner_op)
+                        raise NotImplementedError(inner_op.name)
 
-                    left, right = inner_op.args
-                    if not isinstance(left, TableColumn):
-                        raise NotImplementedError(inner_op)
-                    if not isinstance(right, Literal):
-                        raise NotImplementedError(inner_op)
+                    if builder_func == self.build_is_null:
+                        column, = inner_op.args
+                        literal = None
+                    else:
+                        column, literal = inner_op.args
+                        if not isinstance(literal, Literal):
+                            raise NotImplementedError(inner_op.name)
 
-                    field_name = left.name
+                    if not isinstance(column, TableColumn):
+                        raise NotImplementedError(inner_op.name)
+
+                    field_name = column.name
                     if prev_field_name is None:
                         prev_field_name = field_name
                     elif prev_field_name != field_name:
-                        raise NotImplementedError(or_args)
+                        raise NotImplementedError(op.name)
 
-                    field = self.schema.field(field_name)
-                    value = right.value
+                    args_offsets = [self.build_column(position=positions_map[field_name])]
+                    if literal:
+                        field = self.schema.field(field_name)
+                        args_offsets.append(self.build_literal(field=field, value=literal.value))
 
-                    column_offset = self.build_column(position=positions_map[field_name])
-                    literal_offset = self.build_literal(field=field, value=value)
-                    inner_offsets.append(builder_func(column_offset, literal_offset))
+                    inner_offsets.append(builder_func(*args_offsets))
 
                 domain_offset = self.build_or(inner_offsets)
                 offsets.append(domain_offset)
