@@ -1943,7 +1943,7 @@ class VastdbApi:
             for chunk in response.iter_content(chunk_size=chunk_size):
                 chunk_dict = json.loads(chunk)
                 _logger.debug("import data chunk=%s, result: %s", chunk_dict, chunk_dict['res'])
-                if chunk_dict['res'] != 'Success' and chunk_dict['res'] != 'TabularInProgress':
+                if chunk_dict['res'] != 'Success' and chunk_dict['res'] != 'TabularInProgress' and chunk_dict['res'] != 'TabularAlreadyImported':
                     raise ImportFilesError(
                         f"Encountered an error during import_data. status: {chunk_dict['res']}, "
                         f"error message: {chunk_dict['err_msg'] or 'Unexpected error'} during import of "
