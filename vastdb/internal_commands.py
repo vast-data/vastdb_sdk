@@ -1460,9 +1460,11 @@ class VastdbApi:
         for sub_split_id, start_row_id in sub_split_start_row_ids:
             headers[f'tabular-start-row-id-{sub_split_id}'] = f"{sub_split_id},{start_row_id}"
 
-        url_params = {'name': projection} if projection else {}
+        url_params = {}
         if query_imports_table:
             url_params['sub-table'] = IMPORTED_OBJECTS_TABLE_NAME
+        elif projection:
+            url_params['name'] = projection
 
         res = self.session.get(self._api_prefix(bucket=bucket, schema=schema, table=table, command="data", url_params=url_params),
                                data=params, headers=headers, stream=True)
