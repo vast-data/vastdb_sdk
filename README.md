@@ -63,7 +63,7 @@ with session.transaction() as tx:
     ])
     table.insert(arrow_table)
 
-    result = table.select()  # SELECT * FROM t
+    result = pyarrow.Table.from_batches(table.select())  # SELECT * FROM t
     assert result == arrow_table
 
     # the transaction is automatically committed when exiting the context
@@ -97,7 +97,7 @@ It is possible to efficiently create a table from a Parquet file (without copyin
 
     schema = tx.bucket('bucket-name').schema('schema-name')
     table = util.create_table_from_files(
-        schema=s, table_name='imported-table',
+        schema=schema, table_name='imported-table',
         parquet_files=['/bucket-name/staging/file.parquet'])
 ```
 
@@ -108,7 +108,7 @@ We can import multiple files concurrently into a table (by utilizing multiple CN
 ```python
     schema = tx.bucket('bucket-name').schema('schema-name')
     table = util.create_table_from_files(
-        schema=s, table_name='large-imported-table',
+        schema=schema, table_name='large-imported-table',
         parquet_files=[f'/bucket-name/staging/file{i}.parquet' for i in range(10)])
 ```
 
@@ -120,7 +120,7 @@ We can import multiple files concurrently into a table (by utilizing multiple CN
 
 ```python
 batches = table.select()
-with closing(pyarrow.parquet.ParquetWriter('/path/to/file.parquet', batches.schema)) as writer:
+with contextlib.closing(pyarrow.parquet.ParquetWriter('/path/to/file.parquet', batches.schema)) as writer:
     for batch in table_batches:
         writer.write_batch(batch)
 ```
