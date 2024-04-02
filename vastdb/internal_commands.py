@@ -1420,28 +1420,9 @@ class VastdbApi:
                                data=params, headers=headers, stream=True)
         return self._check_res(res, "query_data", expected_retvals)
 
-    def query_data(self, bucket, schema, table, params, split=(0, 1, 8), num_sub_splits=1, response_row_id=False,
-                   txid=0, client_tags=[], expected_retvals=[], limit_rows=0, schedule_id=None, retry_count=0,
-                   search_path=None, sub_split_start_row_ids=[], tenant_guid=None, projection='', enable_sorted_projections=True,
-                   request_format='string', response_format='string', query_imports_table=False):
-        """
-        GET /mybucket/myschema/mytable?data HTTP/1.1
-        Content-Length: ContentLength
-        tabular-txid: TransactionId
-        tabular-client-tag: ClientTag
-        tabular-split: "split_id,total_splits,num_row_groups_per_split"
-        tabular-num-of-subsplits: "total"
-        tabular-request-format: "string"
-        tabular-response-format: "string" #arrow/trino
-        tabular-schedule-id: "schedule-id"
-
-        Request Body (flatbuf)
-        projections_chunk [expressions]
-        predicate_chunk "formatted_data", (required)
-
-        To query the internal vastdb-imported-objects table, set query_imports_table=True
-        """
-        # add query option select-only and read-only
+    def _build_query_data_headers(self, txid, client_tags, params, split, num_sub_splits, request_format, response_format,
+                                  enable_sorted_projections, limit_rows, schedule_id, retry_count, search_path, tenant_guid,
+                                  sub_split_start_row_ids):
         headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
         headers['Content-Length'] = str(len(params))
         headers['tabular-split'] = ','.join(map(str, split))
@@ -1466,6 +1447,9 @@ class VastdbApi:
         for sub_split_id, start_row_id in sub_split_start_row_ids:
             headers[f'tabular-start-row-id-{sub_split_id}'] = f"{sub_split_id},{start_row_id}"
 
+        return headers
+
+    def _build_query_data_url_params(self, projection, query_imports_table):
         if query_imports_table and projection:
             raise ValueError("Can't query both imports and projection table")
 
@@ -1474,6 +1458,65 @@ class VastdbApi:
             url_params['sub-table'] = IMPORTED_OBJECTS_TABLE_NAME
         elif projection:
             url_params['name'] = projection
+        return url_params
+
+    def legacy_query_data(self, bucket, schema, table, params, split=(0, 1, 8), num_sub_splits=1, response_row_id=False,
+                      txid=0, client_tags=[], expected_retvals=[], limit_rows=0, schedule_id=None, retry_count=0,
+                      search_path=None, sub_split_start_row_ids=[], tenant_guid=None, projection='', enable_sorted_projections=True,
+                      request_format='string', response_format='string', query_imports_table=False):
+        """
+        POST /mybucket/myschema/mytable?query-data=LegacyQueryData HTTP/1.1
+        Content-Length: ContentLength
+        tabular-txid: TransactionId
+        tabular-client-tag: ClientTag
+        tabular-split: "split_id,total_splits,num_row_groups_per_split"
+        tabular-num-of-subsplits: "total"
+        tabular-request-format: "string"
+        tabular-response-format: "string" #arrow/trino
+        tabular-schedule-id: "schedule-id"
+
+        Request Body (flatbuf)
+        projections_chunk [expressions]
+        predicate_chunk "formatted_data", (required)
+
+        """
+        headers = self._build_query_data_headers(txid, client_tags, params, split, num_sub_splits, request_format, response_format,
+                                                  enable_sorted_projections, limit_rows, schedule_id, retry_count, search_path, tenant_guid,
+                                                  sub_split_start_row_ids)
+        url_params = self._build_query_data_url_params(projection, query_imports_table)
+
+        res = self.session.post(self._api_prefix(bucket=bucket, schema=schema, table=table, command="query-data=LegacyQueryData",
+                                                  url_params=url_params), data=params, headers=headers, stream=True)
+        return self._check_res(res, "legacy_query_data", expected_retvals)
+
+    def query_data(self, bucket, schema, table, params, split=(0, 1, 8), num_sub_splits=1, response_row_id=False,
+                   txid=0, client_tags=[], expected_retvals=[], limit_rows=0, schedule_id=None, retry_count=0,
+                   search_path=None, sub_split_start_row_ids=[], tenant_guid=None, projection='', enable_sorted_projections=True,
+                   request_format='string', response_format='string', query_imports_table=False):
+        """
+        GET /mybucket/myschema/mytable?data HTTP/1.1
+        Content-Length: ContentLength
+        tabular-txid: TransactionId
+        tabular-client-tag: ClientTag
+        tabular-split: "split_id,total_splits,num_row_groups_per_split"
+        tabular-num-of-subsplits: "total"
+        tabular-request-format: "string"
+        tabular-response-format: "string" #arrow/trino
+        tabular-schedule-id: "schedule-id"
+
+        Request Body (flatbuf)
+        projections_chunk [expressions]
+        predicate_chunk "formatted_data", (required)
+
+        To query the internal vastdb-imported-objects table, set query_imports_table=True
+        """
+        # add query option select-only and read-only
+
+        headers = self._build_query_data_headers(txid, client_tags, params, split, num_sub_splits, request_format, response_format,
+                                                 enable_sorted_projections, limit_rows, schedule_id, retry_count, search_path, tenant_guid,
+                                                 sub_split_start_row_ids)
+
+        url_params = self._build_query_data_url_params(projection, query_imports_table)
 
         res = self.session.get(self._api_prefix(bucket=bucket, schema=schema, table=table, command="data", url_params=url_params),
                                data=params, headers=headers, stream=True)
