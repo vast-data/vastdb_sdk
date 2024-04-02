@@ -1053,12 +1053,13 @@ class VastdbApi:
         tabular-txid: <integer> TransactionId
         tabular-client-tag: <string> ClientTag
 
-        The body of the POST request contains table column properties as json
-        {
-            "format": "string",
-            "column_names": {"name1":"type1", "name2":"type2", ...},
-            "table_properties": {"key1":"val1", "key2":"val2", ...}
-        }
+        The body of the POST request contains table column properties as arrow schema
+        which include field_name, field_type and properties
+
+        In order to create vastdb-imported-objects table that tracks all imported files and avoid duplicate imports,
+        just set create_imports_table=True
+        The request will look like:
+        POST /bucket/schema/table?table&sub-table=vastdb-imported-objects HTTP/1.1
         """
         headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
 
@@ -1152,6 +1153,8 @@ class VastdbApi:
         DELETE /mybucket/schema_path/mytable?table HTTP/1.1
         tabular-txid: TransactionId
         tabular-client-tag: ClientTag
+
+        To remove the internal vastdb-imported-objects table just set remove_imports_table=True
         """
         headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
         url_params = {'sub-table': IMPORTED_OBJECTS_TABLE_NAME} if remove_imports_table else {}
@@ -1289,6 +1292,8 @@ class VastdbApi:
         x-tabluar-name-prefix: TableNamePrefix
         tabular-max-keys: 1000
         tabular-next-key: NextColumnId
+
+        To list the columns of the internal vastdb-imported-objects table, set list_import_table=True
         """
         max_keys = max_keys or self.default_max_list_columns_page_size
         client_tags = client_tags or []
@@ -1434,6 +1439,7 @@ class VastdbApi:
         projections_chunk [expressions]
         predicate_chunk "formatted_data", (required)
 
+        To query the internal vastdb-imported-objects table, set query_imports_table=True
         """
         # add query option select-only and read-only
         headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
@@ -1459,6 +1465,9 @@ class VastdbApi:
 
         for sub_split_id, start_row_id in sub_split_start_row_ids:
             headers[f'tabular-start-row-id-{sub_split_id}'] = f"{sub_split_id},{start_row_id}"
+
+        if query_imports_table and projection:
+            raise ValueError("Can't query both imports and projection table")
 
         url_params = {}
         if query_imports_table:
