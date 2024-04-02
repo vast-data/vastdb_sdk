@@ -91,6 +91,7 @@ TABULAR_QUERY_DATA_COMPLETED_STREAM_ID = 0xFFFFFFFF - 1
 TABULAR_QUERY_DATA_FAILED_STREAM_ID = 0xFFFFFFFF - 2
 TABULAR_INVALID_ROW_ID = 0xFFFFFFFFFFFF # (1<<48)-1
 ESTORE_INVALID_EHANDLE = UINT64_MAX
+IMPORTED_OBJECTS_TABLE_NAME = "vastdb-imported-objects"
 
 """
 S3 Tabular API
@@ -1042,7 +1043,8 @@ class VastdbApi:
             return snapshots, is_truncated, marker
 
 
-    def create_table(self, bucket, schema, name, arrow_schema, txid=0, client_tags=[], expected_retvals=[], topic_partitions=0):
+    def create_table(self, bucket, schema, name, arrow_schema, txid=0, client_tags=[], expected_retvals=[],
+                     topic_partitions=0, create_imports_table=False):
         """
         Create a table, use the following request
         POST /bucket/schema/table?table HTTP/1.1
@@ -1063,6 +1065,8 @@ class VastdbApi:
         serialized_schema = arrow_schema.serialize()
         headers['Content-Length'] = str(len(serialized_schema))
         url_params = {'topic_partitions': str(topic_partitions)} if topic_partitions else {}
+        if create_imports_table:
+            url_params['sub-table'] = IMPORTED_OBJECTS_TABLE_NAME
 
         res = self.session.post(self._api_prefix(bucket=bucket, schema=schema, table=name, command="table", url_params=url_params),
                                 data=serialized_schema, headers=headers)
@@ -1143,15 +1147,17 @@ class VastdbApi:
 
         return self._check_res(res, "alter_table", expected_retvals)
 
-    def drop_table(self, bucket, schema, name, txid=0, client_tags=[], expected_retvals=[]):
+    def drop_table(self, bucket, schema, name, txid=0, client_tags=[], expected_retvals=[], remove_imports_table=False):
         """
         DELETE /mybucket/schema_path/mytable?table HTTP/1.1
         tabular-txid: TransactionId
         tabular-client-tag: ClientTag
         """
         headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
+        url_params = {'sub-table': IMPORTED_OBJECTS_TABLE_NAME} if remove_imports_table else {}
 
-        res = self.session.delete(self._api_prefix(bucket=bucket, schema=schema, table=name, command="table"), headers=headers)
+        res = self.session.delete(self._api_prefix(bucket=bucket, schema=schema, table=name, command="table", url_params=url_params),
+                                  headers=headers)
         return self._check_res(res, "drop_table", expected_retvals)
 
     def list_tables(self, bucket, schema, txid=0, client_tags=[], max_keys=1000, next_key=0, name_prefix="",
@@ -1275,7 +1281,7 @@ class VastdbApi:
 
     def list_columns(self, bucket, schema, table, *, txid=0, client_tags=None, max_keys=None, next_key=0,
                      count_only=False, name_prefix="", exact_match=False,
-                     expected_retvals=None, bc_list_internals=False):
+                     expected_retvals=None, bc_list_internals=False, list_imports_table=False):
         """
         GET /mybucket/myschema/mytable?columns HTTP/1.1
         tabular-txid: TransactionId
@@ -1300,7 +1306,9 @@ class VastdbApi:
         else:
             headers['tabular-name-prefix'] = name_prefix
 
-        res = self.session.get(self._api_prefix(bucket=bucket, schema=schema, table=table, command="column"),
+        url_params = {'sub-table': IMPORTED_OBJECTS_TABLE_NAME} if list_imports_table else {}
+        res = self.session.get(self._api_prefix(bucket=bucket, schema=schema, table=table, command="column",
+                                                url_params=url_params),
                                headers=headers, stream=True)
         self._check_res(res, "list_columns", expected_retvals)
         if res.status_code == 200:
@@ -1410,7 +1418,7 @@ class VastdbApi:
     def query_data(self, bucket, schema, table, params, split=(0, 1, 8), num_sub_splits=1, response_row_id=False,
                    txid=0, client_tags=[], expected_retvals=[], limit_rows=0, schedule_id=None, retry_count=0,
                    search_path=None, sub_split_start_row_ids=[], tenant_guid=None, projection='', enable_sorted_projections=True,
-                   request_format='string', response_format='string'):
+                   request_format='string', response_format='string', query_imports_table=False):
         """
         GET /mybucket/myschema/mytable?data HTTP/1.1
         Content-Length: ContentLength
@@ -1453,6 +1461,8 @@ class VastdbApi:
             headers[f'tabular-start-row-id-{sub_split_id}'] = f"{sub_split_id},{start_row_id}"
 
         url_params = {'name': projection} if projection else {}
+        if query_imports_table:
+            url_params['sub-table'] = IMPORTED_OBJECTS_TABLE_NAME
 
         res = self.session.get(self._api_prefix(bucket=bucket, schema=schema, table=table, command="data", url_params=url_params),
                                data=params, headers=headers, stream=True)
