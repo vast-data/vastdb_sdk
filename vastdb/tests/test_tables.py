@@ -206,6 +206,8 @@ def test_filters(session, clean_bucket_name):
         assert select((t['s'].isnull()) | (t['s'] == 'bb'))  == expected.filter((pc.field('s').is_null()) | (pc.field('s') == 'bb'))
         assert select((t['s'].isnull()) & (t['b'] == 3.5))  == expected.filter((pc.field('s').is_null()) & (pc.field('b') == 3.5))
 
+        assert select(~t['s'].isnull()) == expected.filter(~pc.field('s').is_null())
+
 
 def test_duckdb(session, clean_bucket_name):
     columns = pa.schema([

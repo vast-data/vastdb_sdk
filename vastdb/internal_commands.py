@@ -177,7 +177,7 @@ class Predicate:
 
     def serialize(self, builder: 'flatbuffers.builder.Builder'):
         from ibis.expr.operations.generic import TableColumn, Literal, IsNull
-        from ibis.expr.operations.logical import Greater, GreaterEqual, Less, LessEqual, Equals, NotEquals, And, Or
+        from ibis.expr.operations.logical import Greater, GreaterEqual, Less, LessEqual, Equals, NotEquals, And, Or, Not
 
         builder_map = {
             Greater: self.build_greater,
@@ -187,6 +187,7 @@ class Predicate:
             Equals: self.build_equal,
             NotEquals: self.build_not_equal,
             IsNull: self.build_is_null,
+            Not: self.build_is_not_null,
         }
 
         positions_map = dict((f.name, index) for index, f in enumerate(self.schema)) # TODO: BFS
@@ -212,6 +213,13 @@ class Predicate:
 
                     if builder_func == self.build_is_null:
                         column, = inner_op.args
+                        literal = None
+                    elif builder_func == self.build_is_not_null:
+                        not_arg, = inner_op.args
+                        # currently we only support not is_null, checking we really got is_null under the not:
+                        if not builder_map.get(type(not_arg)) == self.build_is_null:
+                            raise NotImplementedError(not_arg.args[0].name)
+                        column, = not_arg.args
                         literal = None
                     else:
                         column, literal = inner_op.args
