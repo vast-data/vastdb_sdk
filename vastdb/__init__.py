@@ -1,4 +1,6 @@
+"""VAST Database Python SDK."""
+
 from . import session
 
-def connect(*args, **kw):
-    return session.Session(*args, **kw)
+connect = session.Session
+connect.__name__ = 'connect'
