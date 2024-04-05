@@ -2066,10 +2066,11 @@ class VastdbApi:
                 for future in concurrent.futures.as_completed(futures):
                     result.extend(future.result()) # trigger an exception if occurred in any thread
 
-            return result
             # commit if needed
             if created_txid:
                 self.commit_transaction(txid)
+
+            return result
 
         except Exception as e:
             _logger.exception('exception occurred')
