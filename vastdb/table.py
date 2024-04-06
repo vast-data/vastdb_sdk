@@ -76,8 +76,16 @@ class Table:
         return f"{type(self).__name__}(name={self.name})"
 
     def columns(self) -> pa.Schema:
-        cols = self.tx._rpc.api._list_table_columns(self.bucket.name, self.schema.name, self.name, txid=self.tx.txid)
-        self.arrow_schema = pa.schema([(col[0], col[1]) for col in cols])
+        fields = []
+        next_key = 0
+        while True:
+            cur_columns, next_key, is_truncated, _count = self.tx._rpc.api.list_columns(
+                bucket=self.bucket.name, schema=self.schema.name, table=self.name, next_key=next_key, txid=self.tx.txid)
+            fields.extend(cur_columns)
+            if not is_truncated:
+                break
+
+        self.arrow_schema = pa.schema(fields)
         return self.arrow_schema
 
     def projection(self, name: str) -> "Projection":
