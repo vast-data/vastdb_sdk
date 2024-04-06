@@ -1632,7 +1632,7 @@ class VastdbApi:
                 serialized_slice_batch = serialize_record_batch(slice_batch)
                 sizeof_serialized_slice_batch = len(serialized_slice_batch)
 
-                if sizeof_serialized_slice_batch <= max_slice_size_in_bytes or rows_per_slice < 10000:
+                if sizeof_serialized_slice_batch <= max_slice_size_in_bytes:
                     serialized_slices.append(serialized_slice_batch)
                 else:
                     _logger.info(f'Using rows_per_slice {rows_per_slice} slice {i} size {sizeof_serialized_slice_batch} exceeds {max_slice_size_in_bytes} bytes, trying smaller rows_per_slice')
