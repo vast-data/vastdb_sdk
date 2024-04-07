@@ -24,12 +24,12 @@ MAX_ROWS_PER_BATCH = 512 * 1024
 # for example insert of 512k uint8 result in 512k*8bytes response since row_ids are uint64
 MAX_INSERT_ROWS_PER_PATCH = 512 * 1024
 
-
 @dataclass
 class TableStats:
     num_rows: int
-    size: int
-
+    size_in_bytes: int
+    is_external_rowid_alloc: bool = False
+    endpoints: List[str] = None
 
 @dataclass
 class QueryConfig:
@@ -187,9 +187,9 @@ class Table:
         if config is None:
             config = QueryConfig()
 
-        num_rows, size_in_bytes, _ = self.tx._rpc.api.get_table_stats(
+        num_rows, size_in_bytes, *_ = self.tx._rpc.api.get_table_stats(
             bucket=self.bucket.name, schema=self.schema.name, name=self.name, txid=self.tx.txid)
-        self.stats = TableStats(num_rows=num_rows, size=size_in_bytes)
+        self.stats = TableStats(num_rows=num_rows, size_in_bytes=size_in_bytes)
         if self.stats.num_rows > config.rows_per_split:
             config.num_splits = self.stats.num_rows // config.rows_per_split
         log.debug(f"num_rows={self.stats.num_rows} rows_per_splits={config.rows_per_split} num_splits={config.num_splits} ")
@@ -373,7 +373,7 @@ class Projection:
 
 def _parse_projection_info(projection_info, table: "Table"):
     log.info("Projection info %s", str(projection_info))
-    stats = TableStats(num_rows=projection_info.num_rows, size=projection_info.size_in_bytes)
+    stats = TableStats(num_rows=projection_info.num_rows, size_in_bytes=projection_info.size_in_bytes)
     return Projection(name=projection_info.name, table=table, stats=stats, handle=int(projection_info.handle))
 
 

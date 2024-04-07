@@ -21,6 +21,7 @@ import re
 import vastdb.errors as errors
 import xml.etree.ElementTree as ET
 from vastdb.errors import ImportFilesError
+from ipaddress import IPv4Address, IPv6Address
 
 import vast_flatbuf.org.apache.arrow.computeir.flatbuf.BinaryLiteral as fb_binary_lit
 import vast_flatbuf.org.apache.arrow.computeir.flatbuf.BooleanLiteral as fb_bool_lit
@@ -754,6 +755,9 @@ def serialize_record_batch(batch):
         writer.write(batch)
     return sink.getvalue()
 
+# Results that returns from tablestats
+TableStatsResult = namedtuple("TableStatsResult",["num_rows", "size_in_bytes", "is_external_rowid_alloc", "endpoints"])
+
 class VastdbApi:
     # we expect the vast version to be <major>.<minor>.<patch>.<protocol>
     VAST_VERSION_REGEX = re.compile(r'^vast (\d+\.\d+\.\d+\.\d+)$')
@@ -1118,7 +1122,22 @@ class VastdbApi:
             num_rows = stats.NumRows()
             size_in_bytes = stats.SizeInBytes()
             is_external_rowid_alloc = stats.IsExternalRowidAlloc()
-            return num_rows, size_in_bytes, is_external_rowid_alloc
+            endpoints = []
+            if stats.VipsLength() == 0:
+                endpoints.append(self.url)
+            else:
+                ip_cls = IPv6Address if (stats.AddressType() == "ipv6") else IPv4Address
+                vips = [stats.Vips(i) for i in range(stats.VipsLength())]
+                ips = []
+                # extract the vips into list of IPs
+                for vip in vips:
+                    start_ip = int(ip_cls(vip.StartAddress().decode()))
+                    ips.extend(ip_cls(start_ip + i) for i  in range(vip.AddressCount()))
+                for ip in ips:
+                    prefix = "http" if not self.secure else "https"
+                    endpoints.append(f"{prefix}://{str(ip)}:{self.port}")
+            return TableStatsResult(num_rows, size_in_bytes, is_external_rowid_alloc, endpoints)
+
         return self._check_res(res, "get_table_stats", expected_retvals)
 
     def alter_table(self, bucket, schema, name, txid=0, client_tags=[], table_properties="",

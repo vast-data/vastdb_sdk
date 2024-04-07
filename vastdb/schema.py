@@ -73,5 +73,5 @@ class Schema:
 
 
 def _parse_table_info(table_info, schema: "schema.Schema"):
-    stats = table.TableStats(num_rows=table_info.num_rows, size=table_info.size_in_bytes)
+    stats = table.TableStats(num_rows=table_info.num_rows, size_in_bytes=table_info.size_in_bytes)
     return table.Table(name=table_info.name, schema=schema, handle=int(table_info.handle), stats=stats)
