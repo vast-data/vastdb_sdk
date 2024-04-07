@@ -161,9 +161,9 @@ def test_filters(session, clean_bucket_name):
         ('s', pa.utf8()),
     ])
     expected = pa.table(schema=columns, data=[
-        [111, 222, 333, 444],
-        [0.5, 1.5, 2.5, 3.5],
-        ['a', 'bb', 'ccc', None],
+        [111, 222, 333, 444, 555],
+        [0.5, 1.5, 2.5, 3.5, 4.5],
+        ['a', 'bb', 'ccc', None, 'xyz'],
     ])
     with prepare_data(session, clean_bucket_name, 's', 't', expected) as t:
         def select(predicate):
@@ -207,6 +207,8 @@ def test_filters(session, clean_bucket_name):
         assert select((t['s'].isnull()) & (t['b'] == 3.5))  == expected.filter((pc.field('s').is_null()) & (pc.field('b') == 3.5))
 
         assert select(~t['s'].isnull()) == expected.filter(~pc.field('s').is_null())
+        assert select(t['s'].contains('b')) == expected.filter(pc.field('s') == 'bb')
+        assert select(t['s'].contains('y')) == expected.filter(pc.field('s') == 'xyz')
 
 
 def test_duckdb(session, clean_bucket_name):

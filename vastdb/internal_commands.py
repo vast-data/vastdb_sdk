@@ -175,6 +175,7 @@ class Predicate:
     def serialize(self, builder: 'flatbuffers.builder.Builder'):
         from ibis.expr.operations.generic import TableColumn, Literal, IsNull
         from ibis.expr.operations.logical import Greater, GreaterEqual, Less, LessEqual, Equals, NotEquals, And, Or, Not
+        from ibis.expr.operations.strings import StringContains
 
         builder_map = {
             Greater: self.build_greater,
@@ -185,6 +186,7 @@ class Predicate:
             NotEquals: self.build_not_equal,
             IsNull: self.build_is_null,
             Not: self.build_is_not_null,
+            StringContains: self.build_match_substring,
         }
 
         positions_map = dict((f.name, index) for index, f in enumerate(self.schema)) # TODO: BFS
@@ -524,6 +526,9 @@ class Predicate:
 
     def build_is_not_null(self, column: int):
         return self.build_function('is_valid', column)
+
+    def build_match_substring(self, column: int, literal: int):
+        return self.build_function('match_substring', column, literal)
 
 
 class FieldNode:
