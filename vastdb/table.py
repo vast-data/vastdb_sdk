@@ -40,12 +40,49 @@ class QueryConfig:
     num_row_groups_per_sub_split: int = 8
     use_semi_sorted_projections: bool = True
     rows_per_split: int = 4000000
+    query_id: str = ""
 
 
 @dataclass
 class ImportConfig:
     import_concurrency: int = 2
 
+class SelectSplitState():
+    def __init__(self, query_data_request, table : "Table", split_id : int, config: QueryConfig) -> None:
+        self.split_id = split_id
+        self.subsplits_state = {i: 0 for i in range(config.num_sub_splits)}
+        self.config = config
+        self.query_data_request = query_data_request
+        self.table = table
+
+    def batches(self, api : VastdbApi):
+        while not self.done:
+            response = api.query_data(
+                            bucket=self.table.bucket.name,
+                            schema=self.table.schema.name,
+                            table=self.table.name,
+                            params=self.query_data_request.serialized,
+                            split=(self.split_id, self.config.num_splits, self.config.num_row_groups_per_sub_split),
+                            num_sub_splits=self.config.num_sub_splits,
+                            response_row_id=False,
+                            txid=self.table.tx.txid,
+                            limit_rows=self.config.limit_rows_per_sub_split,
+                            sub_split_start_row_ids=self.subsplits_state.items(),
+                            enable_sorted_projections=self.config.use_semi_sorted_projections)
+            pages_iter = parse_query_data_response(
+                conn=response.raw,
+                schema=self.query_data_request.response_schema,
+                start_row_ids=self.subsplits_state)
+
+            for page in pages_iter:
+                for batch in page.to_batches():
+                    if len(batch) > 0:
+                        yield batch
+
+
+    @property
+    def done(self):
+        return all(row_id == TABULAR_INVALID_ROW_ID for row_id in self.subsplits_state.values())
 
 @dataclass
 class Table:
@@ -178,6 +215,10 @@ class Table:
             finally:
                 stop_event.set()
                 # ThreadPoolExecutor will be joined at the end of the context
+    def refresh_stats(self):
+        stats_tuple = self.tx._rpc.api.get_table_stats(
+            bucket=self.bucket.name, schema=self.schema.name, name=self.name, txid=self.tx.txid)
+        self.stats = TableStats(**stats_tuple._asdict())
 
     def select(self, columns: [str] = None,
                predicate: ibis.expr.types.BooleanColumn = None,
@@ -187,10 +228,9 @@ class Table:
         if config is None:
             config = QueryConfig()
 
-        num_rows, size_in_bytes, *_ = self.tx._rpc.api.get_table_stats(
-            bucket=self.bucket.name, schema=self.schema.name, name=self.name, txid=self.tx.txid)
-        self.stats = TableStats(num_rows=num_rows, size_in_bytes=size_in_bytes)
-        if self.stats.num_rows > config.rows_per_split:
+        self.refresh_stats()
+
+        if self.stats.num_rows > config.rows_per_split and config.num_splits is None:
             config.num_splits = self.stats.num_rows // config.rows_per_split
         log.debug(f"num_rows={self.stats.num_rows} rows_per_splits={config.rows_per_split} num_splits={config.num_splits} ")
 
@@ -206,41 +246,88 @@ class Table:
             predicate=predicate,
             field_names=columns)
 
-        splits = [(i, config.num_splits, config.num_row_groups_per_sub_split) for i in range(config.num_splits)]
-        response_row_id = False
+        splits_queue = queue.Queue()
 
-        def batches_iterator(for_split):
-            while not all(row_id == TABULAR_INVALID_ROW_ID for row_id in start_row_ids.values()):
-                response = self.tx._rpc.api.query_data(
-                    bucket=self.bucket.name,
-                    schema=self.schema.name,
-                    table=self.name,
-                    params=query_data_request.serialized,
-                    split=for_split,
-                    num_sub_splits=config.num_sub_splits,
-                    response_row_id=response_row_id,
-                    txid=self.tx.txid,
-                    limit_rows=config.limit_rows_per_sub_split,
-                    sub_split_start_row_ids=start_row_ids.items(),
-                    enable_sorted_projections=config.use_semi_sorted_projections)
+        for split in range(config.num_splits):
+            splits_queue.put(split)
 
-                pages_iter = parse_query_data_response(
-                    conn=response.raw,
-                    schema=query_data_request.response_schema,
-                    start_row_ids=start_row_ids)
+        # this queue shouldn't be large it is marely a pipe through which the results
+        # are sent to the main thread. Most of the pages actually held in the
+        # threads that fetch the pages.
+        record_batches_queue = queue.Queue(maxsize=2)
+        stop_event = Event()
+        class StoppedException(Exception):
+            pass
 
-                for page in pages_iter:
-                    for batch in page.to_batches():
-                        if len(batch) > 0:
+        def check_stop():
+            if stop_event.is_set():
+                raise StoppedException
+
+        def single_endpoint_worker(endpoint : str):
+            try:
+                host_api = VastdbApi(endpoint=endpoint, access_key=self.tx._rpc.api.access_key, secret_key=self.tx._rpc.api.secret_key)
+                while True:
+                    check_stop()
+                    try:
+                        split = splits_queue.get_nowait()
+                    except queue.Empty:
+                        log.debug("splits queue is empty")
+                        break
+
+                    split_state = SelectSplitState(query_data_request=query_data_request,
+                                                   table=self,
+                                                   split_id=split,
+                                                   config=config)
+
+                    for batch in split_state.batches(host_api):
+                        check_stop()
+                        record_batches_queue.put(batch)
+            except StoppedException:
+                log.debug("stop signal.", exc_info=True)
+                return
+            finally:
+                # signal that this thread has ended
+                log.debug("exiting")
+                record_batches_queue.put(None)
+
+        # Take a snapshot of enpoints
+        endpoints = list(self.stats.endpoints) if config.data_endpoints is None else list(config.data_endpoints)
+
+        def batches_iterator():
+            def propagate_first_exception(futures : List[concurrent.futures.Future], block = False):
+                done, not_done = concurrent.futures.wait(futures, None if block else 0, concurrent.futures.FIRST_EXCEPTION)
+                for future in done:
+                    future.result()
+                return not_done
+
+            threads_prefix = "query-data"
+            # This is mainly for testing, it helps to identify running threads in runtime.
+            if config.query_id:
+                threads_prefix = threads_prefix + "-" + config.query_id
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=len(endpoints), thread_name_prefix=threads_prefix) as tp: # TODO: concurrency == enpoints is just a heuristic
+                futures = [tp.submit(single_endpoint_worker, endpoint) for endpoint in endpoints]
+                tasks_running = len(futures)
+                try:
+                    while tasks_running > 0:
+                        futures = propagate_first_exception(futures, block=False)
+
+                        batch = record_batches_queue.get()
+                        if batch is not None:
                             yield batch
+                        else:
+                            tasks_running -= 1
+                            log.debug("one worker thread finished, remaining: %d", tasks_running)
 
-        record_batches = []
-        for split in splits:
-            start_row_ids = {i: 0 for i in range(config.num_sub_splits)}
-            curr_record_batch = pa.RecordBatchReader.from_batches(query_data_request.response_schema.arrow_schema, batches_iterator(split))
-            record_batches.extend(curr_record_batch)
+                    # all host threads ended - wait for all futures to complete
+                    propagate_first_exception(futures, block=True)
+                finally:
+                    stop_event.set()
+                    while tasks_running > 0:
+                        if record_batches_queue.get() is None:
+                            tasks_running -= 1
 
-        return pa.RecordBatchReader.from_batches(query_data_request.response_schema.arrow_schema, record_batches)
+        return pa.RecordBatchReader.from_batches(query_data_request.response_schema.arrow_schema, batches_iterator())
 
     def _combine_chunks(self, col):
         if hasattr(col, "combine_chunks"):

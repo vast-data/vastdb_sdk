@@ -1,5 +1,7 @@
 import duckdb
 import pytest
+import threading
+import random
 import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
@@ -484,3 +486,77 @@ def test_rename_column(session, clean_bucket_name):
         t = s.table('t')
         t.drop()
         s.drop()
+
+def test_select_stop(session, clean_bucket_name):
+    columns = pa.schema([
+            ('a', pa.uint8()),
+        ])
+
+    rb = pa.record_batch(schema=columns, data=[
+            list(range(256)),
+    ])
+
+    num_rows = 0
+    with session.transaction() as tx:
+        b = tx.bucket(clean_bucket_name)
+        s = b.create_schema('s')
+        t = s.create_table('t', columns)
+        t.insert(rb)
+
+    num_rows = 2**8
+
+    ROWS_PER_GROUP = 2**16
+    qc = QueryConfig(num_sub_splits=2, num_splits=4, num_row_groups_per_sub_split=1)
+    with session.transaction() as tx:
+        t = tx.bucket(clean_bucket_name).schema('s').table('t')
+        t.refresh_stats()
+        qc.data_endpoints = list(t.stats.endpoints) * 2
+
+    # Duplicate the table until it is large enough to generate enough batches
+    while num_rows < (qc.num_sub_splits * qc.num_splits) * ROWS_PER_GROUP:
+        with session.transaction() as tx_read, session.transaction() as tx_write:
+            t_read = tx_read.bucket(clean_bucket_name).schema('s').table('t')
+            t_write = tx_write.bucket(clean_bucket_name).schema('s').table('t')
+            for batch in t_read.select(['a'],config=qc):
+                t_write.insert(batch)
+        num_rows = num_rows * 2
+        log.info("Num rows: %d", num_rows)
+
+    # Validate the number of batches and the number of rows
+    read_rows = 0
+    read_batches = 0
+    with session.transaction() as tx:
+        t = tx.bucket(clean_bucket_name).schema('s').table('t')
+        for batch in t.select(['a'], config=qc):
+            read_batches += 1
+            read_rows += len(batch)
+    assert read_rows == num_rows
+    # If this assert triggers it just means that the test assumptions about how
+    # the tabular server splits the batches is not true anymore and we need to
+    # rewrite the test.
+    assert read_batches == qc.num_splits*qc.num_sub_splits
+    qc.query_id = str(random.randint(0,2**32))
+    log.info("query id is: %s", qc.query_id)
+    def active_threads():
+        log.debug("%s",[t.getName() for t in threading.enumerate() if t.is_alive()])
+        return sum([1 if t.is_alive() and qc.query_id in t.getName() else 0 for t in threading.enumerate()])
+
+    assert active_threads() == 0
+
+    with session.transaction() as tx:
+        t = tx.bucket(clean_bucket_name).schema('s').table('t')
+        batches = iter(t.select(['a'], config=qc))
+        next(batches)
+        log.info("Active threads: %d", active_threads())
+        try:
+            assert active_threads() > 0
+        finally:
+            # If we dont delete the iterator, the threads will hang in a
+            # zombie state.
+            del batches
+
+    # Check that all threads were killed
+    log.info("Active threads: %d", active_threads())
+
+    # validate that all query threads were killed.
+    assert active_threads() == 0
