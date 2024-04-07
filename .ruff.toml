@@ -14,7 +14,9 @@ ignore = [
 ]
 
 [lint.per-file-ignores]
+"vastdb/bench/**" = ["D"]
 "vastdb/tests/**" = ["D"]
+"conftest.py" = ["D"]
 
 # TODO: add relevant docstrings
 "vastdb/errors.py" = ["D"]

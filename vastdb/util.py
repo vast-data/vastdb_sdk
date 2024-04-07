@@ -6,13 +6,14 @@ import pyarrow.parquet as pq
 
 from .errors import InvalidArgument
 from .schema import Schema
-from .table import Table
+from .table import Table, ImportConfig
 
 log = logging.getLogger(__name__)
 
 
 def create_table_from_files(
-        schema: Schema, table_name: str, parquet_files: [str], schema_merge_func: Callable = None) -> Table:
+        schema: Schema, table_name: str, parquet_files: [str], schema_merge_func: Callable = None,
+        config: ImportConfig = None) -> Table:
     if not schema_merge_func:
         schema_merge_func = default_schema_merge
     else:
@@ -32,7 +33,7 @@ def create_table_from_files(
     table = schema.create_table(table_name, current_schema)
 
     log.info("Starting import of %d files to table: %s", len(parquet_files), table)
-    table.import_files(parquet_files)
+    table.import_files(parquet_files, config=config)
     log.info("Finished import of %d files to table: %s", len(parquet_files), table)
     return table
 
