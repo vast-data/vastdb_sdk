@@ -17,12 +17,8 @@ ignore = [
 "vastdb/tests/**" = ["D"]
 
 # TODO: add relevant docstrings
-"vastdb/bucket.py" = ["D"]
 "vastdb/errors.py" = ["D"]
 "vastdb/internal_commands.py" = ["D"]
-"vastdb/schema.py" = ["D"]
-"vastdb/session.py" = ["D"]
 "vastdb/table.py" = ["D"]
-"vastdb/transaction.py" = ["D"]
 "vastdb/util.py" = ["D"]
 "setup.py" = ["D"]

@@ -1,5 +1,10 @@
-from . import errors, schema, transaction
+"""VAST Database bucket.
 
+VAST S3 buckets can be used to create Database schemas and tables.
+It is possible to list and access VAST snapshots generated over a bucket.
+"""
+
+from . import errors, schema, transaction
 
 from dataclasses import dataclass
 import logging
@@ -9,21 +14,27 @@ log = logging.getLogger(__name__)
 
 @dataclass
 class Snapshot:
+    """VAST bucket-level snapshot."""
+
     name: str
     bucket: "Bucket"
 
 
 @dataclass
 class Bucket:
+    """VAST bucket."""
+
     name: str
     tx: "transaction.Transaction"
 
     def create_schema(self, path: str) -> "schema.Schema":
+        """Create a new schema (a container of tables) under this bucket."""
         self.tx._rpc.api.create_schema(self.name, path, txid=self.tx.txid)
         log.info("Created schema: %s", path)
         return self.schema(path)
 
     def schema(self, path: str) -> "schema.Schema":
+        """Get a specific schema (a container of tables) under this bucket."""
         s = self.schemas(path)
         log.debug("schema: %s", s)
         if not s:
@@ -33,6 +44,7 @@ class Bucket:
         return s[0]
 
     def schemas(self, name: str = None) -> ["schema.Schema"]:
+        """List bucket's schemas."""
         schemas = []
         next_key = 0
         exact_match = bool(name)
@@ -50,6 +62,7 @@ class Bucket:
         return [schema.Schema(name=name, bucket=self) for name, *_ in schemas]
 
     def snapshots(self) -> [Snapshot]:
+        """List bucket's snapshots."""
         snapshots = []
         next_key = 0
         while True:

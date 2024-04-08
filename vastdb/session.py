@@ -34,6 +34,7 @@ class Session:
             endpoint_url=endpoint)
 
     def __repr__(self):
+        """Don't show the secret key."""
         return f'{self.__class__.__name__}(endpoint={self.api.url}, access={self.api.access_key})'
 
     def transaction(self):
