@@ -5,6 +5,8 @@ import random
 import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
+import decimal
+import datetime as dt
 
 from tempfile import NamedTemporaryFile
 from contextlib import contextmanager, closing
@@ -156,17 +158,61 @@ def test_select_with_multisplits(session, clean_bucket_name):
         assert actual == expected
 
 
+def test_types(session, clean_bucket_name):
+    columns = pa.schema([
+        ('tb', pa.bool_()),
+        ('a1', pa.int8()),
+        ('a2', pa.int16()),
+        ('a4', pa.int64()),
+        ('b', pa.float32()),
+        ('s', pa.string()),
+        ('d', pa.decimal128(7, 3)),
+        ('bin', pa.binary()),
+        ('date', pa.date32()),
+        ('ts' ,pa.timestamp('s')),
+    ])
+
+    expected = pa.table(schema=columns, data=[
+        [True, True, False],
+        [1 , 2, 4],
+        [1999, 2000, 2001],
+        [11122221, 222111122, 333333],
+        [0.5, 1.5, 2.5],
+        ["a", "v", "s"],
+        [decimal.Decimal('110.52'), decimal.Decimal('231.15'), decimal.Decimal('3332.44')],
+        [b"\x01\x02", b"\x01\x05", b"\x01\x07"],
+        [dt.datetime.now().date(), dt.datetime.now().date(), dt.datetime.now().date()],
+        [dt.datetime.fromtimestamp(10000), dt.datetime.fromtimestamp(100), dt.datetime.fromtimestamp(0)]
+    ])
+    with prepare_data(session, clean_bucket_name, 's', 't', expected) as t:
+        def select(predicate):
+            return pa.Table.from_batches(t.select(predicate=predicate))
+
+        assert select(None) == expected
+        assert select(t['tb'] == False) == expected.filter(pc.field('tb') == False)  # noqa: E712
+        assert select(t['a1'] == 2) == expected.filter(pc.field('a1') == 2)
+        assert select(t['a2'] == 2000) == expected.filter(pc.field('a2') == 2000)
+        assert select(t['a4'] == 222111122) == expected.filter(pc.field('a4') == 222111122)
+        assert select(t['b'] == 1.5) == expected.filter(pc.field('b') == 1.5)
+        assert select(t['s'] == "v") == expected.filter(pc.field('s') == "v")
+        assert select(t['d'] == 231.15) == expected.filter(pc.field('d') == 231.15)
+        assert select(t['bin'] == b"\x01\x02") == expected.filter(pc.field('bin') == b"\x01\x02")
+        assert select(t['date'] == dt.datetime.now().date()) == expected.filter(pc.field('date') == dt.datetime.now().date())
+
+
 def test_filters(session, clean_bucket_name):
     columns = pa.schema([
         ('a', pa.int32()),
         ('b', pa.float64()),
         ('s', pa.utf8()),
     ])
+
     expected = pa.table(schema=columns, data=[
         [111, 222, 333, 444, 555],
         [0.5, 1.5, 2.5, 3.5, 4.5],
         ['a', 'bb', 'ccc', None, 'xyz'],
     ])
+
     with prepare_data(session, clean_bucket_name, 's', 't', expected) as t:
         def select(predicate):
             return pa.Table.from_batches(t.select(predicate=predicate))

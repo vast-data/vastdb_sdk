@@ -330,7 +330,7 @@ class Predicate:
         fb_expression.AddImpl(self.builder, offset_call)
         return fb_expression.End(self.builder)
 
-    def build_literal(self, field: pa.Field, value: str):
+    def build_literal(self, field: pa.Field, value):
         if field.type.equals(pa.int64()):
             literal_type = fb_int64_lit
             literal_impl = LiteralImpl.Int64Literal
@@ -414,8 +414,7 @@ class Predicate:
             field_type = fb_date.End(self.builder)
 
             start_date = datetime.fromtimestamp(0).date()
-            date_value = datetime.strptime(value, '%Y-%m-%d').date()
-            date_delta = date_value - start_date
+            date_delta = value - start_date
             value = date_delta.days
         elif isinstance(field.type, pa.TimestampType):
             literal_type = fb_timestamp_lit
@@ -474,7 +473,7 @@ class Predicate:
             fb_binary.Start(self.builder)
             field_type = fb_binary.End(self.builder)
 
-            value = self.builder.CreateByteVector(value.encode())
+            value = self.builder.CreateByteVector(value)
         else:
             raise ValueError(f'unsupported predicate for type={field.type}, value={value}')
 
