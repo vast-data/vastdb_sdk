@@ -169,7 +169,14 @@ def test_types(session, clean_bucket_name):
         ('d', pa.decimal128(7, 3)),
         ('bin', pa.binary()),
         ('date', pa.date32()),
-        ('ts' ,pa.timestamp('s')),
+        ('t0', pa.time32('s')),
+        ('t3', pa.time32('ms')),
+        ('t6', pa.time64('us')),
+        ('t9', pa.time64('ns')),
+        ('ts0' ,pa.timestamp('s')),
+        ('ts3' ,pa.timestamp('ms')),
+        ('ts6' ,pa.timestamp('us')),
+        ('ts9' ,pa.timestamp('ns')),
     ])
 
     expected = pa.table(schema=columns, data=[
@@ -181,9 +188,17 @@ def test_types(session, clean_bucket_name):
         ["a", "v", "s"],
         [decimal.Decimal('110.52'), decimal.Decimal('231.15'), decimal.Decimal('3332.44')],
         [b"\x01\x02", b"\x01\x05", b"\x01\x07"],
-        [dt.datetime.now().date(), dt.datetime.now().date(), dt.datetime.now().date()],
-        [dt.datetime.fromtimestamp(10000), dt.datetime.fromtimestamp(100), dt.datetime.fromtimestamp(0)]
+        [dt.date(2024, 4, 10), dt.date(2024, 4, 11), dt.date(2024, 4, 12)],
+        [dt.time(12, 34, 56), dt.time(12, 34, 57), dt.time(12, 34, 58)],
+        [dt.time(12, 34, 56, 789000), dt.time(12, 34, 57, 789000), dt.time(12, 34, 58, 789000)],
+        [dt.time(12, 34, 56, 789789), dt.time(12, 34, 57, 789789), dt.time(12, 34, 58, 789789)],
+        [dt.time(12, 34, 56, 789789), dt.time(12, 34, 57, 789789), dt.time(12, 34, 58, 789789)],
+        [dt.datetime(2024, 4, 10, 12, 34, 56), dt.datetime(2025, 4, 10, 12, 34, 56), dt.datetime(2026, 4, 10, 12, 34, 56)],
+        [dt.datetime(2024, 4, 10, 12, 34, 56, 789000), dt.datetime(2025, 4, 10, 12, 34, 56, 789000), dt.datetime(2026, 4, 10, 12, 34, 56, 789000)],
+        [dt.datetime(2024, 4, 10, 12, 34, 56, 789789), dt.datetime(2025, 4, 10, 12, 34, 56, 789789), dt.datetime(2026, 4, 10, 12, 34, 56, 789789)],
+        [dt.datetime(2024, 4, 10, 12, 34, 56, 789789), dt.datetime(2025, 4, 10, 12, 34, 56, 789789), dt.datetime(2026, 4, 10, 12, 34, 56, 789789)],
     ])
+
     with prepare_data(session, clean_bucket_name, 's', 't', expected) as t:
         def select(predicate):
             return pa.Table.from_batches(t.select(predicate=predicate))
@@ -197,7 +212,33 @@ def test_types(session, clean_bucket_name):
         assert select(t['s'] == "v") == expected.filter(pc.field('s') == "v")
         assert select(t['d'] == 231.15) == expected.filter(pc.field('d') == 231.15)
         assert select(t['bin'] == b"\x01\x02") == expected.filter(pc.field('bin') == b"\x01\x02")
-        assert select(t['date'] == dt.datetime.now().date()) == expected.filter(pc.field('date') == dt.datetime.now().date())
+
+        date_literal = dt.date(2024, 4, 10)
+        assert select(t['date'] == date_literal) == expected.filter(pc.field('date') == date_literal)
+
+        time_literal = dt.time(12, 34, 56)
+        assert select(t['t0'] == time_literal) == expected.filter(pc.field('t0') == time_literal)
+
+        time_literal = dt.time(12, 34, 56, 789000)
+        assert select(t['t3'] == time_literal) == expected.filter(pc.field('t3') == time_literal)
+
+        time_literal = dt.time(12, 34, 56, 789789)
+        assert select(t['t6'] == time_literal) == expected.filter(pc.field('t6') == time_literal)
+
+        time_literal = dt.time(12, 34, 56, 789789)
+        assert select(t['t9'] == time_literal) == expected.filter(pc.field('t9') == time_literal)
+
+        ts_literal = dt.datetime(2024, 4, 10, 12, 34, 56)
+        assert select(t['ts0'] == ts_literal) == expected.filter(pc.field('ts0') == ts_literal)
+
+        ts_literal = dt.datetime(2024, 4, 10, 12, 34, 56, 789000)
+        assert select(t['ts3'] == ts_literal) == expected.filter(pc.field('ts3') == ts_literal)
+
+        ts_literal = dt.datetime(2024, 4, 10, 12, 34, 56, 789789)
+        assert select(t['ts6'] == ts_literal) == expected.filter(pc.field('ts6') == ts_literal)
+
+        ts_literal = dt.datetime(2024, 4, 10, 12, 34, 56, 789789)
+        assert select(t['ts9'] == ts_literal) == expected.filter(pc.field('ts9') == ts_literal)
 
 
 def test_filters(session, clean_bucket_name):

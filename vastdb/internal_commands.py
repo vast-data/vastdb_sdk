@@ -2,7 +2,6 @@ import logging
 import struct
 import urllib.parse
 from collections import defaultdict, namedtuple
-from datetime import datetime
 from enum import Enum
 from typing import Union, Optional, Iterator
 import ibis
@@ -122,13 +121,6 @@ def get_unit_to_flatbuff_time_unit(type):
     return unit_to_flatbuff_time_unit[type]
 
 class Predicate:
-    unit_to_epoch = {
-        'ns': 1_000_000,
-        'us': 1_000,
-        'ms': 1,
-        's': 0.001
-    }
-
     def __init__(self, schema: 'pa.Schema', expr: ibis.expr.types.BooleanColumn):
         self.schema = schema
         self.expr = expr
@@ -403,7 +395,7 @@ class Predicate:
             field_type = fb_utf8.End(self.builder)
 
             value = self.builder.CreateString(value)
-        elif field.type.equals(pa.date32()):  # pa.date64()
+        elif field.type.equals(pa.date32()):  # pa.date64() is not supported
             literal_type = fb_date32_lit
             literal_impl = LiteralImpl.DateLiteral
 
@@ -411,37 +403,49 @@ class Predicate:
             fb_date.Start(self.builder)
             fb_date.AddUnit(self.builder, DateUnit.DAY)
             field_type = fb_date.End(self.builder)
-
-            start_date = datetime.fromtimestamp(0).date()
-            date_delta = value - start_date
-            value = date_delta.days
+            value, = pa.array([value], field.type).cast(pa.int32()).to_pylist()
         elif isinstance(field.type, pa.TimestampType):
             literal_type = fb_timestamp_lit
             literal_impl = LiteralImpl.TimestampLiteral
 
+            if field.type.equals(pa.timestamp('s')):
+                unit = TimeUnit.SECOND
+            if field.type.equals(pa.timestamp('ms')):
+                unit = TimeUnit.MILLISECOND
+            if field.type.equals(pa.timestamp('us')):
+                unit = TimeUnit.MICROSECOND
+            if field.type.equals(pa.timestamp('ns')):
+                unit = TimeUnit.NANOSECOND
+
             field_type_type = Type.Timestamp
             fb_timestamp.Start(self.builder)
-            fb_timestamp.AddUnit(self.builder, get_unit_to_flatbuff_time_unit(field.type.unit))
+            fb_timestamp.AddUnit(self.builder, unit)
             field_type = fb_timestamp.End(self.builder)
-
-            value = int(int(value) * self.unit_to_epoch[field.type.unit])
-        elif field.type.equals(pa.time32('s')) or field.type.equals(pa.time32('ms')) or field.type.equals(pa.time64('us')) or field.type.equals(pa.time64('ns')):
-
+            value, = pa.array([value], field.type).cast(pa.int64()).to_pylist()
+        elif isinstance(field.type, (pa.Time32Type, pa.Time64Type)):
             literal_type = fb_time_lit
             literal_impl = LiteralImpl.TimeLiteral
 
-            field_type_str = str(field.type)
-            start = field_type_str.index('[')
-            end = field_type_str.index(']')
-            unit = field_type_str[start + 1:end]
+            if field.type.equals(pa.time32('s')):
+                target_type = pa.int32()
+                unit = TimeUnit.SECOND
+            if field.type.equals(pa.time32('ms')):
+                target_type = pa.int32()
+                unit = TimeUnit.MILLISECOND
+            if field.type.equals(pa.time64('us')):
+                target_type = pa.int64()
+                unit = TimeUnit.MICROSECOND
+            if field.type.equals(pa.time64('ns')):
+                target_type = pa.int64()
+                unit = TimeUnit.NANOSECOND
 
             field_type_type = Type.Time
             fb_time.Start(self.builder)
             fb_time.AddBitWidth(self.builder, field.type.bit_width)
-            fb_time.AddUnit(self.builder, get_unit_to_flatbuff_time_unit(unit))
+            fb_time.AddUnit(self.builder, unit)
             field_type = fb_time.End(self.builder)
 
-            value = int(value) * self.unit_to_epoch[unit]
+            value, = pa.array([value], field.type).cast(target_type).to_pylist()
         elif field.type.equals(pa.bool_()):
             literal_type = fb_bool_lit
             literal_impl = LiteralImpl.BooleanLiteral
@@ -2042,7 +2046,7 @@ def get_field_type(builder: flatbuffers.Builder, field: pa.Field):
         fb_utf8.Start(builder)
         field_type = fb_utf8.End(builder)
 
-    elif field.type.equals(pa.date32()):  # pa.date64()
+    elif field.type.equals(pa.date32()):  # pa.date64() is not supported
         field_type_type = Type.Date
         fb_date.Start(builder)
         fb_date.AddUnit(builder, DateUnit.DAY)
