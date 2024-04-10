@@ -33,13 +33,13 @@ Also, see [our release notes](CHANGELOG.md).
 Creating schemas and tables + basic inserts and selects:
 
 ```python
-import pyarrow
+import pyarrow as pa
 import vastdb
 
-session = vastdb.Session(
+session = vastdb.connect(
     endpoint='http://vip-pool.v123-xy.VastENG.lab',
-    access_key=AWS_ACCESS_KEY_ID,
-    secret_key=AWS_SECRET_ACCESS_KEY)
+    access=AWS_ACCESS_KEY_ID,
+    secret=AWS_SECRET_ACCESS_KEY)
 
 with session.transaction() as tx:
     bucket = tx.bucket("bucket-name")
@@ -47,7 +47,7 @@ with session.transaction() as tx:
     schema = bucket.create_schema("schema-name")
     print(bucket.schemas())
 
-    columns = pyarrow.schema([
+    columns = pa.schema([
         ('c1', pa.int16()),
         ('c2', pa.float32()),
         ('c3', pa.utf8()),
@@ -56,14 +56,14 @@ with session.transaction() as tx:
     print(schema.tables())
     print(table.columns())
 
-    arrow_table = pyarrow.table(schema=columns, data=[
+    arrow_table = pa.table(schema=columns, data=[
         [111, 222, 333],
         [0.5, 1.5, 2.5],
         ['a', 'bb', 'ccc'],
     ])
     table.insert(arrow_table)
 
-    result = pyarrow.Table.from_batches(table.select())  # SELECT * FROM t
+    result = pa.Table.from_batches(table.select())  # SELECT * FROM t
     assert result == arrow_table
 
     # the transaction is automatically committed when exiting the context
@@ -92,7 +92,7 @@ It is possible to efficiently create a table from a Parquet file (without copyin
 
 ```python
     with tempfile.NamedTemporaryFile() as f:
-        pyarrow.parquet.write_table(arrow_table, f.name)
+        pa.parquet.write_table(arrow_table, f.name)
         s3.put_object(Bucket='bucket-name', Key='staging/file.parquet', Body=f)
 
     schema = tx.bucket('bucket-name').schema('schema-name')
@@ -120,7 +120,7 @@ We can import multiple files concurrently into a table (by utilizing multiple CN
 
 ```python
 batches = table.select()
-with contextlib.closing(pyarrow.parquet.ParquetWriter('/path/to/file.parquet', batches.schema)) as writer:
+with contextlib.closing(pa.parquet.ParquetWriter('/path/to/file.parquet', batches.schema)) as writer:
     for batch in table_batches:
         writer.write_batch(batch)
 ```
@@ -161,7 +161,7 @@ print(bucket.list_snapshots())
 [VAST Catalog](https://vastdata.com/blog/vast-catalog-treat-your-file-system-like-a-database) can be queried as a regular table:
 
 ```python
-table = pyarrow.Table.from_batches(tx.catalog.select(['element_type']))
+table = pa.Table.from_batches(tx.catalog.select(['element_type']))
 df = table.to_pandas()
 
 total_elements = len(df)
