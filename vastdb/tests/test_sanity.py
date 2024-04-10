@@ -5,15 +5,30 @@ import threading
 import contextlib
 
 import pytest
+import requests
 
 import vastdb
 
 
 log = logging.getLogger(__name__)
 
+
 def test_hello_world(session):
     with session.transaction() as tx:
         assert tx.txid is not None
+
+
+def test_bad_credentials(session):
+    bad_session = vastdb.connect(access='BAD', secret='BAD', endpoint=session.api.url)
+    with pytest.raises(vastdb.errors.Forbidden):
+        with bad_session.transaction():
+            pass
+
+
+def test_bad_endpoint(session):
+    with pytest.raises(requests.exceptions.ConnectionError):
+        vastdb.connect(access='BAD', secret='BAD', endpoint='http://invalid-host-name-for-tests:12345')
+
 
 def test_version_extraction():
     # A list of version and expected version parsed by API

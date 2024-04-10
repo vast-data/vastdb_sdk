@@ -38,7 +38,7 @@ class Bucket:
         s = self.schemas(path)
         log.debug("schema: %s", s)
         if not s:
-            raise errors.NotFoundError(f"Schema '{path}' was not found in bucket: {self.name}")
+            raise errors.MissingSchema(self.name, path)
         assert len(s) == 1, f"Expected to receive only a single schema, but got: {len(s)}. ({s})"
         log.debug("Found schema: %s", s[0].name)
         return s[0]

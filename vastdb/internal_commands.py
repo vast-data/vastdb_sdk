@@ -18,9 +18,8 @@ import itertools
 from aws_requests_auth.aws_auth import AWSRequestsAuth
 import urllib3
 import re
-import vastdb.errors as errors
-import xml.etree.ElementTree as ET
-from vastdb.errors import ImportFilesError
+
+from . import errors
 from ipaddress import IPv4Address, IPv6Address
 
 import vast_flatbuf.org.apache.arrow.computeir.flatbuf.BinaryLiteral as fb_binary_lit
@@ -869,48 +868,9 @@ class VastdbApi:
         return common_headers
 
     def _check_res(self, res, cmd="", expected_retvals=[]):
-        try:
-            if errors.HttpErrors(res.status_code) != errors.HttpErrors.SUCCESS:
-                # if the response have an error lets log the s3 error string:
-                xml_response = res.text
-                if xml_response:
-                    root = ET.fromstring(xml_response)
-                    error_code = root.find('Code').text
-                    error_message = root.find('Message').text
-                    if error_code:
-                        _logger.warning("s3 error code=%s description=%s", error_code, error_message)
-                if res.status_code not in expected_retvals:
-                    if errors.HttpErrors(res.status_code) == errors.HttpErrors.BAD_REQUEST:
-                        raise errors.BadRequest(f"cmd={cmd} returned with bad request")
-                    elif errors.HttpErrors(res.status_code) == errors.HttpErrors.FOBIDDEN:
-                        raise errors.AccessDeniedError(f"cmd={cmd} returned with forbidden")
-                    elif errors.HttpErrors(res.status_code) == errors.HttpErrors.NOT_FOUND:
-                        raise errors.NotFoundError(f"cmd={cmd} returned with not found")
-                    elif errors.HttpErrors(res.status_code) == errors.HttpErrors.METHOD_NOT_ALLOW:
-                        raise errors.MethodNotAllowed(f"cmd={cmd} returned with method not allow")
-                    elif errors.HttpErrors(res.status_code) == errors.HttpErrors.REQUEST_TIMEOUT:
-                        raise errors.RequestTimeout(f"cmd={cmd} returned with request timeout")
-                    elif errors.HttpErrors(res.status_code) == errors.HttpErrors.CONFLICT:
-                        raise errors.Conflict(f"cmd={cmd} returned with conflict")
-                    elif errors.HttpErrors(res.status_code) == errors.HttpErrors.INTERNAL_SERVER_ERROR:
-                        raise errors.InternalServerError(f"cmd={cmd} returned with internal server error")
-                    elif errors.HttpErrors(res.status_code) == errors.HttpErrors.NOT_IMPLEMENTED:
-                        raise errors.NotImplemented(f"cmd={cmd} returned with not implemented")
-                    elif errors.HttpErrors(res.status_code) == errors.HttpErrors.SERVICE_UNAVAILABLE:
-                        raise errors.ServiceUnavailable(f"cmd={cmd} returned with service unavailable")
-                    else:
-                        raise ValueError(f"Expected status code mismatch. status_code={res.status_code}")
-            else:
-                if expected_retvals:
-                    raise ValueError(f"Expected {expected_retvals} but status_code={res.status_code}")
-            res.raise_for_status()
-            return res
-        except requests.HTTPError as e:
-            if res.status_code in expected_retvals:
-                _logger.info("%s has failed as expected res=%s", cmd, res)
-                return res
-            else:
-                raise e
+        if exc := errors.from_response(res):
+            raise exc
+        return res
 
     def create_schema(self, bucket, name, txid=0, client_tags=[], schema_properties="", expected_retvals=[]):
         """
@@ -1604,7 +1564,7 @@ class VastdbApi:
                 chunk_dict = json.loads(chunk)
                 _logger.debug("import data chunk=%s, result: %s", chunk_dict, chunk_dict['res'])
                 if chunk_dict['res'] != 'Success' and chunk_dict['res'] != 'TabularInProgress' and chunk_dict['res'] != 'TabularAlreadyImported':
-                    raise ImportFilesError(
+                    raise errors.ImportFilesError(
                         f"Encountered an error during import_data. status: {chunk_dict['res']}, "
                         f"error message: {chunk_dict['err_msg'] or 'Unexpected error'} during import of "
                         f"object name: {chunk_dict['object_name']}", chunk_dict)

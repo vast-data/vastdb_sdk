@@ -14,8 +14,8 @@ from contextlib import contextmanager, closing
 from requests.exceptions import HTTPError
 import logging
 
-from vastdb.table import INTERNAL_ROW_ID, QueryConfig
-from vastdb.errors import NotFoundError, Conflict
+from ..table import INTERNAL_ROW_ID, QueryConfig
+from .. import errors
 
 
 log = logging.getLogger(__name__)
@@ -313,15 +313,15 @@ def test_parquet_export(session, clean_bucket_name):
             assert expected == pq.read_table(parquet_file.name)
 
 def test_errors(session, clean_bucket_name):
-    with pytest.raises(NotFoundError):
+    with pytest.raises(errors.MissingSchema):
         with session.transaction() as tx:
             tx.bucket(clean_bucket_name).schema('s1')
 
-    with pytest.raises(NotFoundError):
+    with pytest.raises(errors.MissingBucket):
         with session.transaction() as tx:
             tx.bucket("bla")
 
-    with pytest.raises(Conflict):
+    with pytest.raises(errors.Conflict):
         with session.transaction() as tx:
             b = tx.bucket(clean_bucket_name)
             s = b.create_schema('s1')
@@ -349,18 +349,18 @@ def test_rename_schema(session, clean_bucket_name):
         # assert the table was renamed in the transaction context
         # where it was renamed
         assert s.name == 'ss'
-        with pytest.raises(NotFoundError):
+        with pytest.raises(errors.MissingSchema):
             tx.bucket(clean_bucket_name).schema('s')
 
         # assert that other transactions are isolated
         tx2.bucket(clean_bucket_name).schema('s')
-        with pytest.raises(NotFoundError):
+        with pytest.raises(errors.MissingSchema):
             tx2.bucket(clean_bucket_name).schema('ss')
 
     # assert that new transactions see the updated schema name
     with session.transaction() as tx:
         b = tx.bucket(clean_bucket_name)
-        with pytest.raises(NotFoundError):
+        with pytest.raises(errors.MissingSchema):
             b.schema('s')
         s = b.schema('ss')
         # assert that we still have only one schema and it is the one that was renamed
@@ -385,19 +385,19 @@ def test_rename_table(session, clean_bucket_name):
         # assert that the new table name is seen in the context
         # in which it was renamed
         assert t.name == 't2'
-        with pytest.raises(NotFoundError):
+        with pytest.raises(errors.MissingTable):
             s.table('t')
         t = s.table('t2')
 
         #assert that other transactions are isolated
-        with pytest.raises(NotFoundError):
+        with pytest.raises(errors.MissingTable):
             tx2.bucket(clean_bucket_name).schema('s').table('t2')
         tx2.bucket(clean_bucket_name).schema('s').table('t')
 
     with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).schema('s')
         #assert that new transactions see the change
-        with pytest.raises(NotFoundError):
+        with pytest.raises(errors.MissingTable):
             s.table('t')
         t = s.table('t2')
         t.drop()
@@ -512,7 +512,7 @@ def test_rename_column(session, clean_bucket_name):
     # simultaneos renames of the same column
     new_schema_tx1 = prepare_rename_column(new_schema, 'b', 'bb')
     new_schema_tx2 = prepare_rename_column(new_schema, 'b', 'bbb')
-    with pytest.raises(Conflict):
+    with pytest.raises(errors.Conflict):
         with session.transaction() as tx1, session.transaction() as tx2:
             t1 = tx1.bucket(clean_bucket_name).schema('s').table('t')
             t2 = tx2.bucket(clean_bucket_name).schema('s').table('t')

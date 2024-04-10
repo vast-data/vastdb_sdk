@@ -36,7 +36,7 @@ class Schema:
         """Get a specific table under this schema."""
         t = self.tables(table_name=name)
         if not t:
-            raise errors.NotFoundError(f"Table '{name}' was not found under schema: {self.name}")
+            raise errors.MissingTable(self.bucket.name, self.name, name)
         assert len(t) == 1, f"Expected to receive only a single table, but got: {len(t)}. tables: {t}"
         log.debug("Found table: %s", t[0])
         return t[0]

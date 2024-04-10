@@ -30,13 +30,13 @@ class Transaction:
         log.debug("opened txid=%016x", self.txid)
         return self
 
-    def __exit__(self, *args):
+    def __exit__(self, exc_type, exc_value, exc_traceback):
         """On success, the transaction is committed. Otherwise, it is rolled back."""
-        if args == (None, None, None):
+        if (exc_type, exc_value, exc_traceback) == (None, None, None):
             log.debug("committing txid=%016x", self.txid)
             self._rpc.api.commit_transaction(self.txid)
         else:
-            log.exception("rolling back txid=%016x", self.txid)
+            log.exception("rolling back txid=%016x due to:", self.txid)
             self._rpc.api.rollback_transaction(self.txid)
 
     def __repr__(self):
@@ -44,15 +44,12 @@ class Transaction:
         return f'Transaction(id=0x{self.txid:016x})'
 
     def bucket(self, name: str) -> "bucket.Bucket":
-        """Return a VAST Bucket, if exists.
-
-        Otherwise, an error is raised.
-        """
+        """Return a VAST Bucket, if exists."""
         try:
             self._rpc.s3.head_bucket(Bucket=name)
-            return bucket.Bucket(name, self)
         except botocore.exceptions.ClientError as e:
-            if e.response['Error']['Code'] == 403:
-                raise errors.AccessDeniedError(f"Access is denied to bucket: {name}") from e
-            else:
-                raise errors.NotFoundError(f"Bucket {name} does not exist") from e
+            log.warning("res: %s", e.response)
+            if e.response['Error']['Code'] == '404':
+                raise errors.MissingBucket(name)
+            raise
+        return bucket.Bucket(name, self)

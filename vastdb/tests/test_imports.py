@@ -6,8 +6,7 @@ import logging
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from vastdb.errors import InvalidArgumentError
-from vastdb.errors import ImportFilesError
+from vastdb.errors import InvalidArgument, ImportFilesError
 from vastdb import util
 
 
@@ -76,10 +75,10 @@ def test_create_table_from_files(session, clean_bucket_name, s3):
         assert len(t.arrow_schema) == 3
         assert t.arrow_schema == pa.schema([('num', pa.int64()), ('bool', pa.bool_()), ('varch', pa.string())])
 
-        with pytest.raises(InvalidArgumentError):
+        with pytest.raises(InvalidArgument):
             util.create_table_from_files(s, 't2', different_schema_files)
 
-        with pytest.raises(InvalidArgumentError):
+        with pytest.raises(InvalidArgument):
             util.create_table_from_files(s, 't2', contained_schema_files, schema_merge_func=util.strict_schema_merge)
 
         util.create_table_from_files(s, 't2', different_schema_files, schema_merge_func=util.union_schema_merge)

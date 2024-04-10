@@ -128,7 +128,7 @@ class Table:
     def projection(self, name: str) -> "Projection":
         projs = self.projections(projection_name=name)
         if not projs:
-            raise errors.NotFoundError(f"Projection '{name}' was not found under table: {self.name}")
+            raise errors.MissingProjection(self.bucket.name, self.schema.name, self.name, name)
         assert len(projs) == 1, f"Expected to receive only a single projection, but got: {len(projs)}. projections: {projs}"
         log.debug("Found projection: %s", projs[0])
         return projs[0]
@@ -401,7 +401,7 @@ class Table:
     def create_projection(self, projection_name: str, sorted_columns: List[str], unsorted_columns: List[str]) -> "Projection":
         columns = [(sorted_column, "Sorted") for sorted_column in sorted_columns] + [(unsorted_column, "Unorted") for unsorted_column in unsorted_columns]
         self.tx._rpc.api.create_projection(self.bucket.name, self.schema.name, self.name, projection_name, columns=columns, txid=self.tx.txid)
-        log.info("Created projectin: %s", projection_name)
+        log.info("Created projection: %s", projection_name)
         return self.projection(projection_name)
 
     def __getitem__(self, col_name):
