@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.1.0] (2024-03-11)
+[0.1.0]: https://github.com/vast-data/vastdb_sdk/compare/v0.0.5.3...v0.1.0
+
+### Added
+- Transactions are implemented using [context managers](https://docs.python.org/3/library/stdtypes.html#typecontextmanager)
+- Database entities are derived from a specific transaction
+- Predicate pushdown is using [ibis](https://ibis-project.org/)-like expressions
+- Public SDK [test suite](vastdb/tests/)
+- Internal CI with Python 3.9 - 3.12
+- Using [`ruff`](https://github.com/astral-sh/ruff) for linting and code formatting
+- Improved [`README.md`](README.md) with new API examples
+
+### Removed
+
+- Old SDK classes and methods are deprecated
+
 ## [0.0.5.3] (2024-03-24)
 [0.0.5.3]: https://github.com/vast-data/vastdb_sdk/compare/v0.0.5.2...v0.0.5.3
 
