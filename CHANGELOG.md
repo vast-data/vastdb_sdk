@@ -4,7 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [0.1.0] (2024-03-11)
+## [0.1.1] (2024-04-15)
+[0.1.1]: https://github.com/vast-data/vastdb_sdk/compare/v0.1.0...v0.1.1
+
+### Added
+ - Support date & timestamp predicate pushdown [#25]
+
+### Fixed
+ - Add missing `requirements.txt` file to released tarball [#47]
+
+## [0.1.0] (2024-04-11)
 [0.1.0]: https://github.com/vast-data/vastdb_sdk/compare/v0.0.5.3...v0.1.0
 
 ### Added
@@ -76,9 +85,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
 [#16]: https://github.com/vast-data/vastdb_sdk/pull/16
+[#25]: https://github.com/vast-data/vastdb_sdk/pull/25
 [#29]: https://github.com/vast-data/vastdb_sdk/pull/29
 [#30]: https://github.com/vast-data/vastdb_sdk/pull/30
 [#31]: https://github.com/vast-data/vastdb_sdk/pull/31
 [#33]: https://github.com/vast-data/vastdb_sdk/pull/33
 [#42]: https://github.com/vast-data/vastdb_sdk/pull/42
 [#43]: https://github.com/vast-data/vastdb_sdk/pull/43
+[#47]: https://github.com/vast-data/vastdb_sdk/pull/47
