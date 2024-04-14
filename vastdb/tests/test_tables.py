@@ -9,32 +9,17 @@ import decimal
 import datetime as dt
 
 from tempfile import NamedTemporaryFile
-from contextlib import contextmanager, closing
+from contextlib import closing
 
 from requests.exceptions import HTTPError
 import logging
 
+from .util import prepare_data
 from ..table import INTERNAL_ROW_ID, QueryConfig
 from .. import errors
 
-
 log = logging.getLogger(__name__)
 
-
-@contextmanager
-def prepare_data(session, clean_bucket_name, schema_name, table_name, arrow_table):
-    with session.transaction() as tx:
-        s = tx.bucket(clean_bucket_name).create_schema(schema_name)
-        t = s.create_table(table_name, arrow_table.schema)
-        row_ids_array = t.insert(arrow_table)
-        row_ids = row_ids_array.to_pylist()
-        log.debug("row_ids=%s" % row_ids)
-        assert row_ids == list(range(arrow_table.num_rows))
-        yield t
-        t.drop()
-        s.drop()
-
-log = logging.getLogger(__name__)
 
 def test_tables(session, clean_bucket_name):
     columns = pa.schema([
