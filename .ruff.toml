@@ -4,13 +4,16 @@ exclude = [
 
 [lint]
 select = [
-	"E4", "E7", "E9", "F", # defaults
-	"W292", # missing-newline-at-end-of-file
+	"E", # pycodestyle errors
+	"W", # pycodestyle warnings
+	"F", # pyflakes
+	"I", # isort
 	"D", # pydocstyle
 ]
 ignore = [
 	"D203", # no-blank-line-before-class
 	"D213", # multi-line-summary-second-line
+	"E501", # line-too-long
 ]
 
 [lint.per-file-ignores]

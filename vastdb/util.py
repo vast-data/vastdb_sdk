@@ -6,7 +6,7 @@ import pyarrow.parquet as pq
 
 from .errors import InvalidArgument
 from .schema import Schema
-from .table import Table, ImportConfig
+from .table import ImportConfig, Table
 
 log = logging.getLogger(__name__)
 

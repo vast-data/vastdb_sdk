@@ -1,5 +1,6 @@
 import os
-from setuptools import setup, find_packages
+
+from setuptools import find_packages, setup
 
 long_description = """
 `vastdb` is a Python-based SDK designed for interacting

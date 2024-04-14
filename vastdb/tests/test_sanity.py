@@ -1,14 +1,13 @@
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from itertools import cycle
+import contextlib
 import logging
 import threading
-import contextlib
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from itertools import cycle
 
 import pytest
 import requests
 
 import vastdb
-
 
 log = logging.getLogger(__name__)
 

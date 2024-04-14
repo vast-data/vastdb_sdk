@@ -7,12 +7,11 @@ For more details see:
 - [Tabular identity policy with the proper permissions](https://support.vastdata.com/s/article/UUID-14322b60-d6a2-89ac-3df0-3dfbb6974182)
 """
 
-from . import internal_commands
-from . import transaction
+import os
 
 import boto3
 
-import os
+from . import internal_commands, transaction
 
 
 class Session:

@@ -6,13 +6,12 @@ A transcation is used as a context manager, since every Database-related operati
         tx.bucket("bucket").create_schema("schema")
 """
 
-from . import bucket, errors, session
+import logging
+from dataclasses import dataclass
 
 import botocore
 
-from dataclasses import dataclass
-import logging
-
+from . import bucket, errors, session
 
 log = logging.getLogger(__name__)
 

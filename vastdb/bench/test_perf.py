@@ -1,12 +1,11 @@
-import time
-import pytest
-
 import logging
+import time
+
 import pyarrow as pa
+import pytest
 
 from vastdb import util
 from vastdb.table import ImportConfig, QueryConfig
-
 
 log = logging.getLogger(__name__)
 

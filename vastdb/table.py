@@ -1,19 +1,22 @@
-from . import errors, schema
-from .internal_commands import build_query_data_request, parse_query_data_response, \
-    TABULAR_INVALID_ROW_ID, VastdbApi
-
-import pyarrow as pa
-import ibis
-
 import concurrent.futures
-import queue
-from threading import Event
-from math import ceil
-
-from dataclasses import dataclass, field
-from typing import List, Union
 import logging
 import os
+import queue
+from dataclasses import dataclass, field
+from math import ceil
+from threading import Event
+from typing import List, Union
+
+import ibis
+import pyarrow as pa
+
+from . import errors, schema
+from .internal_commands import (
+    TABULAR_INVALID_ROW_ID,
+    VastdbApi,
+    build_query_data_request,
+    parse_query_data_response,
+)
 
 log = logging.getLogger(__name__)
 

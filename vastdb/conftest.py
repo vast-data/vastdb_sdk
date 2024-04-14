@@ -1,9 +1,10 @@
-import vastdb
-
-import pytest
-import boto3
 import os
 from pathlib import Path
+
+import boto3
+import pytest
+
+import vastdb
 
 
 def pytest_addoption(parser):

@@ -1,5 +1,6 @@
-import pyarrow as pa
 import logging
+
+import pyarrow as pa
 
 log = logging.getLogger(__name__)
 

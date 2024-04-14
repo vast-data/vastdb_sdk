@@ -1,14 +1,12 @@
-import pytest
-
-from tempfile import NamedTemporaryFile
 import logging
+from tempfile import NamedTemporaryFile
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+import pytest
 
-from vastdb.errors import InvalidArgument, ImportFilesError
 from vastdb import util
-
+from vastdb.errors import ImportFilesError, InvalidArgument
 
 log = logging.getLogger(__name__)
 

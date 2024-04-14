@@ -1,25 +1,24 @@
+import itertools
+import json
 import logging
+import math
+import re
 import struct
 import urllib.parse
 from collections import defaultdict, namedtuple
 from enum import Enum
-from typing import Union, Optional, Iterator
-import ibis
-import xmltodict
-import math
 from functools import cmp_to_key
-import pyarrow.parquet as pq
-import flatbuffers
-import pyarrow as pa
-import requests
-import json
-import itertools
-from aws_requests_auth.aws_auth import AWSRequestsAuth
-import urllib3
-import re
-
-from . import errors
 from ipaddress import IPv4Address, IPv6Address
+from typing import Iterator, Optional, Union
+
+import flatbuffers
+import ibis
+import pyarrow as pa
+import pyarrow.parquet as pq
+import requests
+import urllib3
+import xmltodict
+from aws_requests_auth.aws_auth import AWSRequestsAuth
 
 import vast_flatbuf.org.apache.arrow.computeir.flatbuf.BinaryLiteral as fb_binary_lit
 import vast_flatbuf.org.apache.arrow.computeir.flatbuf.BooleanLiteral as fb_bool_lit
@@ -31,10 +30,10 @@ import vast_flatbuf.org.apache.arrow.computeir.flatbuf.FieldIndex as fb_field_in
 import vast_flatbuf.org.apache.arrow.computeir.flatbuf.FieldRef as fb_field_ref
 import vast_flatbuf.org.apache.arrow.computeir.flatbuf.Float32Literal as fb_float32_lit
 import vast_flatbuf.org.apache.arrow.computeir.flatbuf.Float64Literal as fb_float64_lit
+import vast_flatbuf.org.apache.arrow.computeir.flatbuf.Int8Literal as fb_int8_lit
 import vast_flatbuf.org.apache.arrow.computeir.flatbuf.Int16Literal as fb_int16_lit
 import vast_flatbuf.org.apache.arrow.computeir.flatbuf.Int32Literal as fb_int32_lit
 import vast_flatbuf.org.apache.arrow.computeir.flatbuf.Int64Literal as fb_int64_lit
-import vast_flatbuf.org.apache.arrow.computeir.flatbuf.Int8Literal as fb_int8_lit
 import vast_flatbuf.org.apache.arrow.computeir.flatbuf.Literal as fb_literal
 import vast_flatbuf.org.apache.arrow.computeir.flatbuf.Relation as fb_relation
 import vast_flatbuf.org.apache.arrow.computeir.flatbuf.RelationImpl as rel_impl
@@ -47,38 +46,47 @@ import vast_flatbuf.org.apache.arrow.flatbuf.Bool as fb_bool
 import vast_flatbuf.org.apache.arrow.flatbuf.Date as fb_date
 import vast_flatbuf.org.apache.arrow.flatbuf.Decimal as fb_decimal
 import vast_flatbuf.org.apache.arrow.flatbuf.Field as fb_field
+import vast_flatbuf.org.apache.arrow.flatbuf.FixedSizeBinary as fb_fixed_size_binary
 import vast_flatbuf.org.apache.arrow.flatbuf.FloatingPoint as fb_floating_point
 import vast_flatbuf.org.apache.arrow.flatbuf.Int as fb_int
-import vast_flatbuf.org.apache.arrow.flatbuf.Schema as fb_schema
-import vast_flatbuf.org.apache.arrow.flatbuf.Time as fb_time
-import vast_flatbuf.org.apache.arrow.flatbuf.Struct_ as fb_struct
 import vast_flatbuf.org.apache.arrow.flatbuf.List as fb_list
 import vast_flatbuf.org.apache.arrow.flatbuf.Map as fb_map
-import vast_flatbuf.org.apache.arrow.flatbuf.FixedSizeBinary as fb_fixed_size_binary
+import vast_flatbuf.org.apache.arrow.flatbuf.Schema as fb_schema
+import vast_flatbuf.org.apache.arrow.flatbuf.Struct_ as fb_struct
+import vast_flatbuf.org.apache.arrow.flatbuf.Time as fb_time
 import vast_flatbuf.org.apache.arrow.flatbuf.Timestamp as fb_timestamp
 import vast_flatbuf.org.apache.arrow.flatbuf.Utf8 as fb_utf8
 import vast_flatbuf.tabular.AlterColumnRequest as tabular_alter_column
+import vast_flatbuf.tabular.AlterProjectionTableRequest as tabular_alter_projection
 import vast_flatbuf.tabular.AlterSchemaRequest as tabular_alter_schema
 import vast_flatbuf.tabular.AlterTableRequest as tabular_alter_table
-import vast_flatbuf.tabular.AlterProjectionTableRequest as tabular_alter_projection
+import vast_flatbuf.tabular.Column as tabular_projecion_column
+import vast_flatbuf.tabular.ColumnType as tabular_proj_column_type
+import vast_flatbuf.tabular.CreateProjectionRequest as tabular_create_projection
 import vast_flatbuf.tabular.CreateSchemaRequest as tabular_create_schema
 import vast_flatbuf.tabular.ImportDataRequest as tabular_import_data
 import vast_flatbuf.tabular.S3File as tabular_s3_file
-import vast_flatbuf.tabular.CreateProjectionRequest as tabular_create_projection
-import vast_flatbuf.tabular.Column as tabular_projecion_column
-import vast_flatbuf.tabular.ColumnType as tabular_proj_column_type
-
 from vast_flatbuf.org.apache.arrow.computeir.flatbuf.Deref import Deref
-from vast_flatbuf.org.apache.arrow.computeir.flatbuf.ExpressionImpl import ExpressionImpl
+from vast_flatbuf.org.apache.arrow.computeir.flatbuf.ExpressionImpl import (
+    ExpressionImpl,
+)
 from vast_flatbuf.org.apache.arrow.computeir.flatbuf.LiteralImpl import LiteralImpl
 from vast_flatbuf.org.apache.arrow.flatbuf.DateUnit import DateUnit
 from vast_flatbuf.org.apache.arrow.flatbuf.TimeUnit import TimeUnit
 from vast_flatbuf.org.apache.arrow.flatbuf.Type import Type
+from vast_flatbuf.tabular.GetProjectionTableStatsResponse import (
+    GetProjectionTableStatsResponse as get_projection_table_stats,
+)
+from vast_flatbuf.tabular.GetTableStatsResponse import (
+    GetTableStatsResponse as get_table_stats,
+)
+from vast_flatbuf.tabular.ListProjectionsResponse import (
+    ListProjectionsResponse as list_projections,
+)
 from vast_flatbuf.tabular.ListSchemasResponse import ListSchemasResponse as list_schemas
 from vast_flatbuf.tabular.ListTablesResponse import ListTablesResponse as list_tables
-from vast_flatbuf.tabular.GetTableStatsResponse import GetTableStatsResponse as get_table_stats
-from vast_flatbuf.tabular.GetProjectionTableStatsResponse import GetProjectionTableStatsResponse as get_projection_table_stats
-from vast_flatbuf.tabular.ListProjectionsResponse import ListProjectionsResponse as list_projections
+
+from . import errors
 
 UINT64_MAX = 18446744073709551615
 
@@ -165,8 +173,18 @@ class Predicate:
         return builder.EndVector()
 
     def serialize(self, builder: 'flatbuffers.builder.Builder'):
-        from ibis.expr.operations.generic import TableColumn, Literal, IsNull
-        from ibis.expr.operations.logical import Greater, GreaterEqual, Less, LessEqual, Equals, NotEquals, And, Or, Not
+        from ibis.expr.operations.generic import IsNull, Literal, TableColumn
+        from ibis.expr.operations.logical import (
+            And,
+            Equals,
+            Greater,
+            GreaterEqual,
+            Less,
+            LessEqual,
+            Not,
+            NotEquals,
+            Or,
+        )
         from ibis.expr.operations.strings import StringContains
 
         builder_map = {
@@ -1665,7 +1683,7 @@ class VastdbApi:
                                 data=record_batch, headers=headers)
         return self._check_res(res, "update_rows", expected_retvals)
 
-    def delete_rows(self, bucket, schema, table, record_batch, txid=0, client_tags=[], expected_retvals=[], 
+    def delete_rows(self, bucket, schema, table, record_batch, txid=0, client_tags=[], expected_retvals=[],
                     delete_from_imports_table=False):
         """
         DELETE /mybucket/myschema/mytable?rows HTTP/1.1

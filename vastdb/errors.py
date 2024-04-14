@@ -1,9 +1,9 @@
 import logging
-import requests
 import xml.etree.ElementTree
-
-from enum import Enum
 from dataclasses import dataclass
+from enum import Enum
+
+import requests
 
 
 class HttpStatus(Enum):

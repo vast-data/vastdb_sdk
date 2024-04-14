@@ -1,22 +1,21 @@
-import duckdb
-import pytest
-import threading
+import datetime as dt
+import decimal
+import logging
 import random
+import threading
+from contextlib import closing
+from tempfile import NamedTemporaryFile
+
+import duckdb
 import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
-import decimal
-import datetime as dt
-
-from tempfile import NamedTemporaryFile
-from contextlib import closing
-
+import pytest
 from requests.exceptions import HTTPError
-import logging
 
-from .util import prepare_data
-from ..table import INTERNAL_ROW_ID, QueryConfig
 from .. import errors
+from ..table import INTERNAL_ROW_ID, QueryConfig
+from .util import prepare_data
 
 log = logging.getLogger(__name__)
 

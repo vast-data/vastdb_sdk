@@ -4,10 +4,10 @@ VAST S3 buckets can be used to create Database schemas and tables.
 It is possible to list and access VAST snapshots generated over a bucket.
 """
 
-from . import errors, schema, transaction
-
-from dataclasses import dataclass
 import logging
+from dataclasses import dataclass
+
+from . import errors, schema, transaction
 
 log = logging.getLogger(__name__)
 
