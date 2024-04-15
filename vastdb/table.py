@@ -330,7 +330,7 @@ class Table:
                         if record_batches_queue.get() is None:
                             tasks_running -= 1
 
-        return pa.RecordBatchReader.from_batches(query_data_request.response_schema.arrow_schema, batches_iterator())
+        return pa.RecordBatchReader.from_batches(query_data_request.response_schema, batches_iterator())
 
     def _combine_chunks(self, col):
         if hasattr(col, "combine_chunks"):

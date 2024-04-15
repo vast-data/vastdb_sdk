@@ -7,7 +7,6 @@ import struct
 import urllib.parse
 from collections import defaultdict, namedtuple
 from enum import Enum
-from functools import cmp_to_key
 from ipaddress import IPv4Address, IPv6Address
 from typing import Iterator, Optional, Union
 
@@ -580,8 +579,6 @@ class FieldNode:
         # will be set during by the parser (see below)
         self.buffers = None # a list of Arrow buffers (https://arrow.apache.org/docs/format/Columnar.html#buffer-listing-for-each-layout)
         self.length = None # each array must have it's length specified (https://arrow.apache.org/docs/python/generated/pyarrow.Array.html#pyarrow.Array.from_buffers)
-        self.is_projected = False
-        self.projected_field = self.field
 
     def _iter_to_root(self) -> Iterator['FieldNode']:
         yield self
@@ -602,15 +599,13 @@ class FieldNode:
             for child in self.children:
                 yield from child._iter_leaves()
 
-    def _iter_projected_leaves(self) -> Iterator['FieldNode']:
+    def _iter_leaves(self) -> Iterator['FieldNode']:
         """Generate only leaf nodes (i.e. columns having scalar types)."""
         if not self.children:
-            if self.is_projected:
-                yield self
+            yield self
         else:
             for child in self.children:
-                if child.is_projected:
-                    yield from child._iter_projected_leaves()
+                yield from child._iter_leaves()
 
     def debug_log(self, level=0):
         """Recursively dump this node state to log."""
@@ -647,27 +642,17 @@ class FieldNode:
 
     def build(self) -> pa.Array:
         """Construct an Arrow array from the collected buffers (recursively)."""
-        children = self.children and [node.build() for node in self.children if node.is_projected]
-        _logger.debug('build: self.field.name=%s, self.projected_field.type=%s, self.length=%s, self.buffers=%s children=%s',
-                      self.field.name, self.projected_field.type, self.length, self.buffers, children)
-        result = pa.Array.from_buffers(self.projected_field.type, self.length, buffers=self.buffers, children=children)
+        children = self.children and [node.build() for node in self.children]
+        result = pa.Array.from_buffers(self.type, self.length, buffers=self.buffers, children=children)
         if self.debug:
             _logger.debug('%s result=%s', self.field, result)
         return result
 
-    def build_projected_field(self):
-        if isinstance(self.type, pa.StructType):
-            [child.build_projected_field() for child in self.children if child.is_projected]
-            self.projected_field = pa.field(self.field.name,
-                                            pa.struct([child.projected_field for child in self.children if child.is_projected]),
-                                            self.field.nullable,
-                                            self.field.metadata)
 
 class QueryDataParser:
     """Used to parse VAST QueryData RPC response."""
-    def __init__(self, arrow_schema: pa.Schema, *, debug=False, projection_positions=None):
+    def __init__(self, arrow_schema: pa.Schema, *, debug=False):
         self.arrow_schema = arrow_schema
-        self.projection_positions = projection_positions
         index = itertools.count() # used to generate leaf column positions for VAST QueryData RPC
         self.nodes = [FieldNode(field, index, debug=debug) for field in arrow_schema]
         self.debug = debug
@@ -675,24 +660,15 @@ class QueryDataParser:
             for node in self.nodes:
                 node.debug_log()
         self.leaves = [leaf for node in self.nodes for leaf in node._iter_leaves()]
-        self.mark_projected_nodes()
-        [node.build_projected_field() for node in self.nodes]
-        self.projected_leaves = [leaf for node in self.nodes for leaf in node._iter_projected_leaves()]
 
         self.leaf_offset = 0
 
-    def mark_projected_nodes(self):
-        for leaf in self.leaves:
-            if self.projection_positions is None or leaf.index in self.projection_positions:
-                for node in leaf._iter_to_root():
-                    node.is_projected = True
-
     def parse(self, column: pa.Array):
         """Parse a single column response from VAST (see FieldNode.set for details)"""
-        if not self.leaf_offset < len(self.projected_leaves):
+        if not self.leaf_offset < len(self.leaves):
             raise ValueError(f'self.leaf_offset: {self.leaf_offset} are not < '
                              f'than len(self.leaves): {len(self.leaves)}')
-        leaf = self.projected_leaves[self.leaf_offset]
+        leaf = self.leaves[self.leaf_offset]
 
         # A column response may be sent in multiple chunks, therefore we need to combine
         # it into a single chunk to allow reconstruction using `Array.from_buffers()`.
@@ -713,32 +689,19 @@ class QueryDataParser:
 
         self.leaf_offset += 1
 
-    def build(self, output_field_names=None) -> Optional[pa.Table]:
+    def build(self) -> Optional[pa.Table]:
         """Try to build the resulting Table object (if all columns were parsed)"""
-        if self.projection_positions is not None:
-            if self.leaf_offset < len(self.projection_positions):
-                return None
-        else:
-            if self.leaf_offset < len(self.leaves):
-                return None
+        if self.leaf_offset < len(self.leaves):
+            return None
 
         if self.debug:
             for node in self.nodes:
                 node.debug_log()
 
-        # sort resulting table according to the output field names
-        projected_nodes = [node for node in self.nodes if node.is_projected]
-        if output_field_names is not None:
-            def key_func(projected_node):
-                return output_field_names.index(projected_node.field.name)
-            sorted_projected_nodes = sorted(projected_nodes, key=key_func)
-        else:
-            sorted_projected_nodes = projected_nodes
-
         result = pa.Table.from_arrays(
-            arrays=[node.build() for node in sorted_projected_nodes],
-            schema = pa.schema([node.projected_field for node in sorted_projected_nodes]))
-        result.validate(full=True) # does expensive validation checks only if debug is enabled
+            arrays=[node.build() for node in self.nodes],
+            schema=self.arrow_schema)
+        result.validate(full=self.debug) # does expensive validation checks only if debug is enabled
         return result
 
 def _iter_nested_arrays(column: pa.Array) -> Iterator[pa.Array]:
@@ -1968,18 +1931,16 @@ def parse_query_data_response(conn, schema, stream_ids=None, start_row_ids=None,
     """
     if start_row_ids is None:
         start_row_ids = {}
-    projection_positions = schema.projection_positions
-    arrow_schema = schema.arrow_schema
-    output_field_names = schema.output_field_names
-    _logger.debug(f'projection_positions={projection_positions} len(arrow_schema)={len(arrow_schema)} arrow_schema={arrow_schema}')
-    is_empty_projection = (len(projection_positions) == 0)
-    parsers = defaultdict(lambda: QueryDataParser(arrow_schema, debug=debug, projection_positions=projection_positions))  # {stream_id: QueryDataParser}
+
+    is_empty_projection = (len(schema) == 0)
+    parsers = defaultdict(lambda: QueryDataParser(schema, debug=debug))  # {stream_id: QueryDataParser}
+
     for stream_id, next_row_id, table in _iter_query_data_response_columns(conn, stream_ids):
         parser = parsers[stream_id]
         for column in table.columns:
             parser.parse(column)
 
-        parsed_table = parser.build(output_field_names)
+        parsed_table = parser.build()
         if parsed_table is not None:  # when we got all columns (and before starting a new "select_rows" cycle)
             parsers.pop(stream_id)
             if is_empty_projection:  # VAST returns an empty RecordBatch, with the correct rows' count
@@ -2180,12 +2141,6 @@ def build_field(builder: flatbuffers.Builder, f: pa.Field, name: str):
     return fb_field.End(builder)
 
 
-class VastDBResponseSchema:
-    def __init__(self, arrow_schema, projection_positions, output_field_names):
-        self.arrow_schema = arrow_schema
-        self.projection_positions = projection_positions
-        self.output_field_names = output_field_names
-
 class QueryDataRequest:
     def __init__(self, serialized, response_schema):
         self.serialized = serialized
@@ -2212,31 +2167,17 @@ def build_query_data_request(schema: 'pa.Schema' = pa.schema([]), predicate: ibi
     filter_obj = predicate.serialize(builder)
 
     parser = QueryDataParser(schema)
-    leaves_map = {}
-    for node in parser.nodes:
-        for descendent in node._iter_nodes():
-            if descendent.parent and isinstance(descendent.parent.type, (pa.ListType, pa.MapType)):
-                continue
-            iter_from_root = reversed(list(descendent._iter_to_root()))
-            descendent_full_name = '.'.join([n.field.name for n in iter_from_root])
-            descendent_leaves = [leaf.index for leaf in descendent._iter_leaves()]
-            leaves_map[descendent_full_name] = descendent_leaves
+    fields_map = {node.field.name: node.field for node in parser.nodes}
+    leaves_map = {node.field.name: [leaf.index for leaf in node._iter_leaves()] for node in parser.nodes}
 
-    output_field_names = None
     if field_names is None:
         field_names = [field.name for field in schema]
-    else:
-        output_field_names  = [f.split('.')[0] for f in field_names]
-        # sort projected field_names according to positions to maintain ordering according to the schema
-        def compare_field_names_by_pos(field_name1, field_name2):
-            return leaves_map[field_name1][0]-leaves_map[field_name2][0]
-        field_names = sorted(field_names, key=cmp_to_key(compare_field_names_by_pos))
 
+    response_schema = pa.schema([fields_map[name] for name in field_names])
     projection_fields = []
-    projection_positions = []
     for field_name in field_names:
+        # TODO: only root-level projection pushdown is supported (i.e. no support for SELECT s.x FROM t)
         positions = leaves_map[field_name]
-        projection_positions.extend(positions)
         for leaf_position in positions:
             fb_field_index.Start(builder)
             fb_field_index.AddPosition(builder, leaf_position)
@@ -2246,8 +2187,6 @@ def build_query_data_request(schema: 'pa.Schema' = pa.schema([]), predicate: ibi
     for offset in reversed(projection_fields):
         builder.PrependUOffsetTRelative(offset)
     projection = builder.EndVector()
-
-    response_schema = VastDBResponseSchema(schema, projection_positions, output_field_names=output_field_names)
 
     fb_source.Start(builder)
     fb_source.AddName(builder, source_name)
