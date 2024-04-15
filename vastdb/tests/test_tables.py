@@ -70,6 +70,28 @@ def test_tables(session, clean_bucket_name):
             's': ['ccc']
         }
 
+
+def test_exists(session, clean_bucket_name):
+    with session.transaction() as tx:
+        s = tx.bucket(clean_bucket_name).create_schema('s1')
+        assert s.tables() == []
+
+        t = s.create_table('t', pa.schema([('x', pa.int64())]))
+
+        assert s.tables() == [t]
+        with pytest.raises(errors.TableExists):
+            s.create_table('t', pa.schema([('x', pa.int64())]))
+
+        assert s.tables() == [t]
+        assert s.create_table('t', pa.schema([('x', pa.int64())]), fail_if_exists=False) == t
+        assert s.tables() == [t]
+        assert s.create_table('t', pa.schema([('y', pa.int64())]), fail_if_exists=False) == t
+        assert s.tables() == [t]
+        assert s.create_table('t', pa.schema([('x', pa.int64())]), fail_if_exists=False) == t
+        assert s.tables() == [t]
+
+
+
 def test_update_table(session, clean_bucket_name):
     columns = pa.schema([
         ('a', pa.int64()),

@@ -27,18 +27,26 @@ class Bucket:
     name: str
     tx: "transaction.Transaction"
 
-    def create_schema(self, path: str) -> "schema.Schema":
+    def create_schema(self, path: str, fail_if_exists=True) -> "schema.Schema":
         """Create a new schema (a container of tables) under this bucket."""
+        if current := self.schema(path, fail_if_missing=False):
+            if fail_if_exists:
+                raise errors.SchemaExists(self.name, path)
+            else:
+                return current
         self.tx._rpc.api.create_schema(self.name, path, txid=self.tx.txid)
         log.info("Created schema: %s", path)
         return self.schema(path)
 
-    def schema(self, path: str) -> "schema.Schema":
+    def schema(self, path: str, fail_if_missing=True) -> "schema.Schema":
         """Get a specific schema (a container of tables) under this bucket."""
         s = self.schemas(path)
         log.debug("schema: %s", s)
         if not s:
-            raise errors.MissingSchema(self.name, path)
+            if fail_if_missing:
+                raise errors.MissingSchema(self.name, path)
+            else:
+                return None
         assert len(s) == 1, f"Expected to receive only a single schema, but got: {len(s)}. ({s})"
         log.debug("Found schema: %s", s[0].name)
         return s[0]

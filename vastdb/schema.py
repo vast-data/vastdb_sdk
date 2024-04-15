@@ -26,17 +26,25 @@ class Schema:
         """VAST transaction used for this schema."""
         return self.bucket.tx
 
-    def create_table(self, table_name: str, columns: pa.Schema) -> "table.Table":
+    def create_table(self, table_name: str, columns: pa.Schema, fail_if_exists=True) -> "table.Table":
         """Create a new table under this schema."""
+        if current := self.table(table_name, fail_if_missing=False):
+            if fail_if_exists:
+                raise errors.TableExists(self.bucket.name, self.name, table_name)
+            else:
+                return current
         self.tx._rpc.api.create_table(self.bucket.name, self.name, table_name, columns, txid=self.tx.txid)
         log.info("Created table: %s", table_name)
         return self.table(table_name)
 
-    def table(self, name: str) -> "table.Table":
+    def table(self, name: str, fail_if_missing=True) -> "table.Table":
         """Get a specific table under this schema."""
         t = self.tables(table_name=name)
         if not t:
-            raise errors.MissingTable(self.bucket.name, self.name, name)
+            if fail_if_missing:
+                raise errors.MissingTable(self.bucket.name, self.name, name)
+            else:
+                return None
         assert len(t) == 1, f"Expected to receive only a single table, but got: {len(t)}. tables: {t}"
         log.debug("Found table: %s", t[0])
         return t[0]

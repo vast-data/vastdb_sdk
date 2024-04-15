@@ -114,6 +114,23 @@ class MissingProjection(Missing):
     projection: str
 
 
+class Exists(Exception):
+    pass
+
+
+@dataclass
+class SchemaExists(Exists):
+    bucket: str
+    schema: str
+
+
+@dataclass
+class TableExists(Exists):
+    bucket: str
+    schema: str
+    table: str
+
+
 ERROR_TYPES_MAP = {
     HttpStatus.BAD_REQUEST: BadRequest,
     HttpStatus.FOBIDDEN: Forbidden,
