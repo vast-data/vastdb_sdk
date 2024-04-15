@@ -1665,7 +1665,8 @@ class VastdbApi:
                                 data=record_batch, headers=headers)
         return self._check_res(res, "update_rows", expected_retvals)
 
-    def delete_rows(self, bucket, schema, table, record_batch, txid=0, client_tags=[], expected_retvals=[]):
+    def delete_rows(self, bucket, schema, table, record_batch, txid=0, client_tags=[], expected_retvals=[], 
+                    delete_from_imports_table=False):
         """
         DELETE /mybucket/myschema/mytable?rows HTTP/1.1
         Content-Length: ContentLength
@@ -1677,8 +1678,10 @@ class VastdbApi:
         """
         headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
         headers['Content-Length'] = str(len(record_batch))
-        res = self.session.delete(self._api_prefix(bucket=bucket, schema=schema, table=table, command="rows"),
-                               data=record_batch, headers=headers)
+        url_params = {'sub-table': IMPORTED_OBJECTS_TABLE_NAME} if delete_from_imports_table else {}
+
+        res = self.session.delete(self._api_prefix(bucket=bucket, schema=schema, table=table, command="rows", url_params=url_params),
+                                  data=record_batch, headers=headers)
         return self._check_res(res, "delete_rows", expected_retvals)
 
     def create_projection(self, bucket, schema, table, name, columns, txid=0, client_tags=[], expected_retvals=[]):
