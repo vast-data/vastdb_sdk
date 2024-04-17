@@ -964,7 +964,7 @@ class VastdbApi:
 
 
     def create_table(self, bucket, schema, name, arrow_schema, txid=0, client_tags=[], expected_retvals=[],
-                     topic_partitions=0, create_imports_table=False):
+                     topic_partitions=0, create_imports_table=False, use_external_row_ids_allocation=False):
         """
         Create a table, use the following request
         POST /bucket/schema/table?table HTTP/1.1
@@ -985,6 +985,9 @@ class VastdbApi:
 
         serialized_schema = arrow_schema.serialize()
         headers['Content-Length'] = str(len(serialized_schema))
+        if use_external_row_ids_allocation:
+            headers['use-external-row-ids-alloc'] = str(use_external_row_ids_allocation)
+
         url_params = {'topic_partitions': str(topic_partitions)} if topic_partitions else {}
         if create_imports_table:
             url_params['sub-table'] = IMPORTED_OBJECTS_TABLE_NAME
