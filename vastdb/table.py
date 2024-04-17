@@ -75,7 +75,8 @@ class SelectSplitState():
             pages_iter = parse_query_data_response(
                 conn=response.raw,
                 schema=self.query_data_request.response_schema,
-                start_row_ids=self.subsplits_state)
+                start_row_ids=self.subsplits_state,
+                parser = self.query_data_request.response_parser)
 
             for page in pages_iter:
                 for batch in page.to_batches():

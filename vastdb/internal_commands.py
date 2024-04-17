@@ -550,6 +550,11 @@ class Predicate:
     def build_match_substring(self, column: int, literal: int):
         return self.build_function('match_substring', column, literal)
 
+class FieldNodesState:
+        def __init__(self) -> None:
+            # will be set during by the parser (see below)
+            self.buffers = defaultdict(lambda: None) # a list of Arrow buffers (https://arrow.apache.org/docs/format/Columnar.html#buffer-listing-for-each-layout)
+            self.length = defaultdict(lambda: None) # each array must have it's length specified (https://arrow.apache.org/docs/python/generated/pyarrow.Array.html#pyarrow.Array.from_buffers)
 
 class FieldNode:
     """Helper class for representing nested Arrow fields and handling QueryData requests"""
@@ -575,10 +580,6 @@ class FieldNode:
             self.children = [FieldNode(field, index_iter, parent=self)]
         else:
             self.children = [] # for non-nested types
-
-        # will be set during by the parser (see below)
-        self.buffers = None # a list of Arrow buffers (https://arrow.apache.org/docs/format/Columnar.html#buffer-listing-for-each-layout)
-        self.length = None # each array must have it's length specified (https://arrow.apache.org/docs/python/generated/pyarrow.Array.html#pyarrow.Array.from_buffers)
 
     def _iter_to_root(self) -> Iterator['FieldNode']:
         yield self
@@ -614,7 +615,7 @@ class FieldNode:
         for child in self.children:
             child.debug_log(level=level+1)
 
-    def set(self, arr: pa.Array):
+    def set(self, arr: pa.Array, state : FieldNodesState):
         """
         Assign the relevant Arrow buffers from the received array into this node.
 
@@ -629,27 +630,32 @@ class FieldNode:
         buffers = arr.buffers()[:arr.type.num_buffers] # slicing is needed because Array.buffers() returns also nested array buffers
         if self.debug:
             _logger.debug("set: index=%d %s %s", self.index, self.field, [b and b.hex() for b in buffers])
-        if self.buffers is None:
-            self.buffers = buffers
-            self.length = len(arr)
+        if state.buffers[self.index] is None:
+            state.buffers[self.index] = buffers
+            state.length[self.index] = len(arr)
         else:
             # Make sure subsequent assignments are consistent with each other
             if self.debug:
-                if not self.buffers == buffers:
-                    raise ValueError(f'self.buffers: {self.buffers} are not equal with buffers: {buffers}')
-            if not self.length == len(arr):
-                raise ValueError(f'self.length: {self.length} are not equal with len(arr): {len(arr)}')
+                if not state.buffers[self.index] == buffers:
+                    raise ValueError(f'self.buffers: {state.buffers[self.index]} are not equal with buffers: {buffers}')
+            if not state.length[self.index] == len(arr):
+                raise ValueError(f'self.length: {state.length[self.index]} are not equal with len(arr): {len(arr)}')
 
-    def build(self) -> pa.Array:
+    def build(self, state : FieldNodesState) -> pa.Array:
         """Construct an Arrow array from the collected buffers (recursively)."""
-        children = self.children and [node.build() for node in self.children]
-        result = pa.Array.from_buffers(self.type, self.length, buffers=self.buffers, children=children)
+        children = self.children and [node.build(state) for node in self.children]
+        result = pa.Array.from_buffers(self.type, state.length[self.index], buffers=state.buffers[self.index], children=children)
         if self.debug:
             _logger.debug('%s result=%s', self.field, result)
         return result
 
 
 class QueryDataParser:
+    class QueryDataParserState(FieldNodesState):
+        def __init__(self) -> None:
+            super().__init__()
+            self.leaf_offset = 0
+
     """Used to parse VAST QueryData RPC response."""
     def __init__(self, arrow_schema: pa.Schema, *, debug=False):
         self.arrow_schema = arrow_schema
@@ -661,14 +667,12 @@ class QueryDataParser:
                 node.debug_log()
         self.leaves = [leaf for node in self.nodes for leaf in node._iter_leaves()]
 
-        self.leaf_offset = 0
-
-    def parse(self, column: pa.Array):
+    def parse(self, column: pa.Array, state: QueryDataParserState):
         """Parse a single column response from VAST (see FieldNode.set for details)"""
-        if not self.leaf_offset < len(self.leaves):
-            raise ValueError(f'self.leaf_offset: {self.leaf_offset} are not < '
+        if not state.leaf_offset < len(self.leaves):
+            raise ValueError(f'state.leaf_offset: {state.leaf_offset} are not < '
                              f'than len(self.leaves): {len(self.leaves)}')
-        leaf = self.leaves[self.leaf_offset]
+        leaf = self.leaves[state.leaf_offset]
 
         # A column response may be sent in multiple chunks, therefore we need to combine
         # it into a single chunk to allow reconstruction using `Array.from_buffers()`.
@@ -685,13 +689,13 @@ class QueryDataParser:
             raise ValueError(f'len(array_list): {len(array_list)} are not eq '
                              f'with len(node_list): {len(node_list)}')
         for node, arr in zip(node_list, array_list):
-            node.set(arr)
+            node.set(arr, state)
 
-        self.leaf_offset += 1
+        state.leaf_offset += 1
 
-    def build(self) -> Optional[pa.Table]:
+    def build(self, state: QueryDataParserState) -> Optional[pa.Table]:
         """Try to build the resulting Table object (if all columns were parsed)"""
-        if self.leaf_offset < len(self.leaves):
+        if state.leaf_offset < len(self.leaves):
             return None
 
         if self.debug:
@@ -699,7 +703,7 @@ class QueryDataParser:
                 node.debug_log()
 
         result = pa.Table.from_arrays(
-            arrays=[node.build() for node in self.nodes],
+            arrays=[node.build(state) for node in self.nodes],
             schema=self.arrow_schema)
         result.validate(full=self.debug) # does expensive validation checks only if debug is enabled
         return result
@@ -1923,7 +1927,7 @@ def _iter_query_data_response_columns(fileobj, stream_ids=None):
             yield (stream_id, next_row_id, table)
 
 
-def parse_query_data_response(conn, schema, stream_ids=None, start_row_ids=None, debug=False):
+def parse_query_data_response(conn, schema, stream_ids=None, start_row_ids=None, debug=False, parser : QueryDataParser = None):
     """
     Generates pyarrow.Table objects from QueryData API response stream.
 
@@ -1933,16 +1937,18 @@ def parse_query_data_response(conn, schema, stream_ids=None, start_row_ids=None,
         start_row_ids = {}
 
     is_empty_projection = (len(schema) == 0)
-    parsers = defaultdict(lambda: QueryDataParser(schema, debug=debug))  # {stream_id: QueryDataParser}
+    if parser is None:
+        parser = QueryDataParser(schema, debug=debug)
+    states = defaultdict(lambda: QueryDataParser.QueryDataParserState())  # {stream_id: QueryDataParser}
 
     for stream_id, next_row_id, table in _iter_query_data_response_columns(conn, stream_ids):
-        parser = parsers[stream_id]
+        state = states[stream_id]
         for column in table.columns:
-            parser.parse(column)
+            parser.parse(column, state)
 
-        parsed_table = parser.build()
+        parsed_table = parser.build(state)
         if parsed_table is not None:  # when we got all columns (and before starting a new "select_rows" cycle)
-            parsers.pop(stream_id)
+            states.pop(stream_id)
             if is_empty_projection:  # VAST returns an empty RecordBatch, with the correct rows' count
                 parsed_table = table
 
@@ -1951,8 +1957,8 @@ def parse_query_data_response(conn, schema, stream_ids=None, start_row_ids=None,
             start_row_ids[stream_id] = next_row_id
             yield parsed_table  # the result of a single "select_rows()" cycle
 
-    if parsers:
-        raise EOFError(f'all streams should be done before EOF. {parsers}')
+    if states:
+        raise EOFError(f'all streams should be done before EOF. {states}')
 
 def get_field_type(builder: flatbuffers.Builder, field: pa.Field):
     if field.type.equals(pa.int64()):
@@ -2142,9 +2148,11 @@ def build_field(builder: flatbuffers.Builder, f: pa.Field, name: str):
 
 
 class QueryDataRequest:
-    def __init__(self, serialized, response_schema):
+    def __init__(self, serialized, response_schema, response_parser):
         self.serialized = serialized
         self.response_schema = response_schema
+        self.response_parser = response_parser
+
 
 
 def build_query_data_request(schema: 'pa.Schema' = pa.schema([]), predicate: ibis.expr.types.BooleanColumn = None, field_names: list = None):
@@ -2201,7 +2209,8 @@ def build_query_data_request(schema: 'pa.Schema' = pa.schema([]), predicate: ibi
     relation = fb_relation.End(builder)
 
     builder.Finish(relation)
-    return QueryDataRequest(serialized=builder.Output(), response_schema=response_schema)
+
+    return QueryDataRequest(serialized=builder.Output(), response_schema=response_schema, response_parser=QueryDataParser(response_schema))
 
 
 def convert_column_types(table: 'pa.Table') -> 'pa.Table':
