@@ -790,10 +790,10 @@ class VastdbApi:
 
         # probe the cluster for its version
         self.vast_version = None
-        res = self.session.options(self.url)
+        res = self.session.get(self.url)
         server_header = res.headers.get("Server")
         if server_header is None:
-            _logger.error("OPTIONS response doesn't contain 'Server' header")
+            _logger.error("Response doesn't contain 'Server' header")
         else:
             _logger.debug("Server header is '%s'", server_header)
             if m := self.VAST_VERSION_REGEX.match(server_header):
