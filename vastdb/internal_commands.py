@@ -749,48 +749,29 @@ class VastdbApi:
     # we expect the vast version to be <major>.<minor>.<patch>.<protocol>
     VAST_VERSION_REGEX = re.compile(r'^vast (\d+\.\d+\.\d+\.\d+)$')
 
-    def __init__(self, endpoint, access_key, secret_key, username=None, password=None,
-                 secure=False, auth_type=AuthType.SIGV4):
-        url_dict = urllib3.util.parse_url(endpoint)._asdict()
+    def __init__(self, endpoint, access_key, secret_key, auth_type=AuthType.SIGV4, ssl_verify=True):
+        url = urllib3.util.parse_url(endpoint)
         self.access_key = access_key
         self.secret_key = secret_key
-        self.username = username
-        self.password = password
-        self.secure = secure
-        self.auth_type = auth_type
-        self.executor_hosts = [endpoint]  # TODO: remove
-
-        username = username or ''
-        password = password or ''
-        if not url_dict['port']:
-            url_dict['port'] = 443 if secure else 80
-
-        self.port = url_dict['port']
 
         self.default_max_list_columns_page_size = 1000
         self.session = requests.Session()
-        self.session.verify = False
+        self.session.verify = ssl_verify
         self.session.headers['user-agent'] = "VastData Tabular API 1.0 - 2022 (c)"
-        if auth_type == AuthType.BASIC:
-            self.session.auth = requests.auth.HTTPBasicAuth(username, password)
+
+        if url.port in {80, 443, None}:
+            self.aws_host = f'{url.host}'
         else:
-            if url_dict['port'] != 80 and url_dict['port'] != 443:
-                self.aws_host = '{host}:{port}'.format(**url_dict)
-            else:
-                self.aws_host = '{host}'.format(**url_dict)
+            self.aws_host = f'{url.host}:{url.port}'
 
-            self.session.auth = AWSRequestsAuth(aws_access_key=access_key,
-                                                aws_secret_access_key=secret_key,
-                                                aws_host=self.aws_host,
-                                                aws_region='us-east-1',
-                                                aws_service='s3')
-
-        if not url_dict['scheme']:
-            url_dict['scheme'] = "https" if secure else "http"
-
-        url = urllib3.util.Url(**url_dict)
         self.url = str(url)
         _logger.debug('url=%s aws_host=%s', self.url, self.aws_host)
+
+        self.session.auth = AWSRequestsAuth(aws_access_key=access_key,
+                                            aws_secret_access_key=secret_key,
+                                            aws_host=self.aws_host,
+                                            aws_region='us-east-1',
+                                            aws_service='s3')
 
         # probe the cluster for its version
         self.vast_version = None
