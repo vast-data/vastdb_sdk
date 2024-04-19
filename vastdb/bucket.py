@@ -62,7 +62,7 @@ class Bucket:
         exact_match = bool(name)
         log.debug("list schemas param: schema=%s, exact_match=%s", name, exact_match)
         while True:
-            bucket_name, curr_schemas, next_key, is_truncated, _ = \
+            _bucket_name, curr_schemas, next_key, is_truncated, _ = \
                 self.tx._rpc.api.list_schemas(bucket=self.name, next_key=next_key, txid=self.tx.txid,
                                                name_prefix=name, exact_match=exact_match)
             if not curr_schemas:

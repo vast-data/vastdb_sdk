@@ -91,7 +91,6 @@ def test_exists(session, clean_bucket_name):
         assert s.tables() == [t]
 
 
-
 def test_update_table(session, clean_bucket_name):
     columns = pa.schema([
         ('a', pa.int64()),
@@ -147,12 +146,13 @@ def test_update_table(session, clean_bucket_name):
             'b': [0.5, 1.5, 2.5]
         }
 
+
 def test_select_with_multisplits(session, clean_bucket_name):
     columns = pa.schema([
         ('a', pa.int32())
     ])
 
-    data = [ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     data = data * 1000
     expected = pa.table(schema=columns, data=[data])
 
@@ -179,15 +179,15 @@ def test_types(session, clean_bucket_name):
         ('t3', pa.time32('ms')),
         ('t6', pa.time64('us')),
         ('t9', pa.time64('ns')),
-        ('ts0' ,pa.timestamp('s')),
-        ('ts3' ,pa.timestamp('ms')),
-        ('ts6' ,pa.timestamp('us')),
-        ('ts9' ,pa.timestamp('ns')),
+        ('ts0', pa.timestamp('s')),
+        ('ts3', pa.timestamp('ms')),
+        ('ts6', pa.timestamp('us')),
+        ('ts9', pa.timestamp('ns')),
     ])
 
     expected = pa.table(schema=columns, data=[
         [True, True, False],
-        [1 , 2, 4],
+        [1, 2, 4],
         [1999, 2000, 2001],
         [11122221, 222111122, 333333],
         [0.5, 1.5, 2.5],
@@ -295,7 +295,7 @@ def test_filters(session, clean_bucket_name):
         assert select(((t['a'] > 111) | (t['a'] < 333)) & (t['b'] < 2.5)) == expected.filter(((pc.field('a') > 111) | (pc.field('a') < 333)) & (pc.field('b') < 2.5))
         with pytest.raises(NotImplementedError):
             assert select((t['a'] > 111) | (t['b'] > 0) | (t['s'] < 'ccc')) == expected.filter((pc.field('a') > 111) | (pc.field('b') > 0) | (pc.field('s') < 'ccc'))
-        assert select((t['a'] > 111) | (t['a'] < 333) | (t['a'] == 777) ) == expected.filter((pc.field('a') > 111) | (pc.field('a') < 333) | (pc.field('a') == 777))
+        assert select((t['a'] > 111) | (t['a'] < 333) | (t['a'] == 777)) == expected.filter((pc.field('a') > 111) | (pc.field('a') < 333) | (pc.field('a') == 777))
 
         assert select(t['s'].isnull()) == expected.filter(pc.field('s').is_null())
         assert select((t['s'].isnull()) | (t['s'] == 'bb'))  == expected.filter((pc.field('s').is_null()) | (pc.field('s') == 'bb'))
@@ -359,6 +359,7 @@ def test_parquet_export(session, clean_bucket_name):
 
             assert expected == pq.read_table(parquet_file.name)
 
+
 def test_errors(session, clean_bucket_name):
     with pytest.raises(errors.MissingSchema):
         with session.transaction() as tx:
@@ -378,7 +379,8 @@ def test_errors(session, clean_bucket_name):
                 ('s', pa.utf8()),
             ])
             s.create_table('t1', columns)
-            s.drop() # cannot drop schema without dropping its tables first
+            s.drop()  # cannot drop schema without dropping its tables first
+
 
 def test_rename_schema(session, clean_bucket_name):
 
@@ -436,19 +438,20 @@ def test_rename_table(session, clean_bucket_name):
             s.table('t')
         t = s.table('t2')
 
-        #assert that other transactions are isolated
+        # assert that other transactions are isolated
         with pytest.raises(errors.MissingTable):
             tx2.bucket(clean_bucket_name).schema('s').table('t2')
         tx2.bucket(clean_bucket_name).schema('s').table('t')
 
     with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).schema('s')
-        #assert that new transactions see the change
+        # assert that new transactions see the change
         with pytest.raises(errors.MissingTable):
             s.table('t')
         t = s.table('t2')
         t.drop()
         s.drop()
+
 
 def test_add_column(session, clean_bucket_name):
     columns = pa.schema([
@@ -472,17 +475,17 @@ def test_add_column(session, clean_bucket_name):
         # in which it was added
         assert t.arrow_schema == new_schema
 
-        #assert that other transactions are isolated
+        # assert that other transactions are isolated
         assert tx2.bucket(clean_bucket_name).schema('s').table('t').arrow_schema == columns
-
 
     with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).schema('s')
         t = s.table('t')
-        #assert that new transactions see the change
+        # assert that new transactions see the change
         assert t.arrow_schema == new_schema
         t.drop()
         s.drop()
+
 
 def test_drop_column(session, clean_bucket_name):
     columns = pa.schema([
@@ -507,17 +510,17 @@ def test_drop_column(session, clean_bucket_name):
         # in which it was added
         assert t.arrow_schema == new_schema
 
-        #assert that other transactions are isolated
+        # assert that other transactions are isolated
         assert tx2.bucket(clean_bucket_name).schema('s').table('t').arrow_schema == columns
-
 
     with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).schema('s')
         t = s.table('t')
-        #assert that new transactions see the change
+        # assert that new transactions see the change
         assert t.arrow_schema == new_schema
         t.drop()
         s.drop()
+
 
 def test_rename_column(session, clean_bucket_name):
     columns = pa.schema([
@@ -525,13 +528,14 @@ def test_rename_column(session, clean_bucket_name):
             ('b', pa.float32()),
             ('s', pa.utf8()),
         ])
-    def prepare_rename_column(schema : pa.Schema, old_name : str, new_name : str) -> pa.Schema:
+
+    def prepare_rename_column(schema: pa.Schema, old_name: str, new_name: str) -> pa.Schema:
         field_idx = schema.get_field_index(old_name)
         column_to_rename = schema.field(field_idx)
         renamed_column = column_to_rename.with_name(new_name)
         return schema.set(field_idx, renamed_column)
 
-    new_schema = prepare_rename_column(columns,'a','aaa')
+    new_schema = prepare_rename_column(columns, 'a', 'aaa')
 
     with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).create_schema('s')
@@ -546,10 +550,10 @@ def test_rename_column(session, clean_bucket_name):
         # in which it was added
         assert t.arrow_schema == new_schema
 
-        #assert that other transactions are isolated
+        # assert that other transactions are isolated
         assert tx2.bucket(clean_bucket_name).schema('s').table('t').arrow_schema == columns
 
-    #assert that new transactions see the change
+    # assert that new transactions see the change
     with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).schema('s')
         t = s.table('t')
@@ -564,7 +568,7 @@ def test_rename_column(session, clean_bucket_name):
             t1 = tx1.bucket(clean_bucket_name).schema('s').table('t')
             t2 = tx2.bucket(clean_bucket_name).schema('s').table('t')
             t1.rename_column('b', 'bb')
-            with pytest.raises(HTTPError, match = '409 Client Error: Conflict'):
+            with pytest.raises(HTTPError, match='409 Client Error: Conflict'):
                 t2.rename_column('b', 'bbb')
 
     with session.transaction() as tx:
@@ -579,6 +583,7 @@ def test_rename_column(session, clean_bucket_name):
         t = s.table('t')
         t.drop()
         s.drop()
+
 
 def test_select_stop(session, clean_bucket_name):
     columns = pa.schema([
@@ -611,7 +616,7 @@ def test_select_stop(session, clean_bucket_name):
         with session.transaction() as tx_read, session.transaction() as tx_write:
             t_read = tx_read.bucket(clean_bucket_name).schema('s').table('t')
             t_write = tx_write.bucket(clean_bucket_name).schema('s').table('t')
-            for batch in t_read.select(['a'],config=qc):
+            for batch in t_read.select(['a'], config=qc):
                 t_write.insert(batch)
         num_rows = num_rows * 2
         log.info("Num rows: %d", num_rows)
@@ -628,11 +633,12 @@ def test_select_stop(session, clean_bucket_name):
     # If this assert triggers it just means that the test assumptions about how
     # the tabular server splits the batches is not true anymore and we need to
     # rewrite the test.
-    assert read_batches == qc.num_splits*qc.num_sub_splits
-    qc.query_id = str(random.randint(0,2**32))
+    assert read_batches == qc.num_splits * qc.num_sub_splits
+    qc.query_id = str(random.randint(0, 2**32))
     log.info("query id is: %s", qc.query_id)
+
     def active_threads():
-        log.debug("%s",[t.getName() for t in threading.enumerate() if t.is_alive()])
+        log.debug("%s", [t.getName() for t in threading.enumerate() if t.is_alive()])
         return sum([1 if t.is_alive() and qc.query_id in t.getName() else 0 for t in threading.enumerate()])
 
     assert active_threads() == 0

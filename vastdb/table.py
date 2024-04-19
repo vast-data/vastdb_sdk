@@ -21,12 +21,14 @@ MAX_ROWS_PER_BATCH = 512 * 1024
 # for example insert of 512k uint8 result in 512k*8bytes response since row_ids are uint64
 MAX_INSERT_ROWS_PER_PATCH = 512 * 1024
 
+
 @dataclass
 class TableStats:
     num_rows: int
     size_in_bytes: int
     is_external_rowid_alloc: bool = False
     endpoints: Tuple[str, ...] = ()
+
 
 @dataclass
 class QueryConfig:
@@ -44,15 +46,16 @@ class QueryConfig:
 class ImportConfig:
     import_concurrency: int = 2
 
+
 class SelectSplitState():
-    def __init__(self, query_data_request, table : "Table", split_id : int, config: QueryConfig) -> None:
+    def __init__(self, query_data_request, table: "Table", split_id: int, config: QueryConfig) -> None:
         self.split_id = split_id
         self.subsplits_state = {i: 0 for i in range(config.num_sub_splits)}
         self.config = config
         self.query_data_request = query_data_request
         self.table = table
 
-    def batches(self, api : internal_commands.VastdbApi):
+    def batches(self, api: internal_commands.VastdbApi):
         while not self.done:
             response = api.query_data(
                             bucket=self.table.bucket.name,
@@ -70,17 +73,17 @@ class SelectSplitState():
                 conn=response.raw,
                 schema=self.query_data_request.response_schema,
                 start_row_ids=self.subsplits_state,
-                parser = self.query_data_request.response_parser)
+                parser=self.query_data_request.response_parser)
 
             for page in pages_iter:
                 for batch in page.to_batches():
                     if len(batch) > 0:
                         yield batch
 
-
     @property
     def done(self):
         return all(row_id == internal_commands.TABULAR_INVALID_ROW_ID for row_id in self.subsplits_state.values())
+
 
 @dataclass
 class Table:
@@ -135,7 +138,7 @@ class Table:
         name_prefix = projection_name if projection_name else ""
         exact_match = bool(projection_name)
         while True:
-            bucket_name, schema_name, table_name, curr_projections, next_key, is_truncated, _ = \
+            _bucket_name, _schema_name, _table_name, curr_projections, next_key, is_truncated, _ = \
                 self.tx._rpc.api.list_projections(
                     bucket=self.bucket.name, schema=self.schema.name, table=self.name, next_key=next_key, txid=self.tx.txid,
                     exact_match=exact_match, name_prefix=name_prefix)
@@ -259,6 +262,7 @@ class Table:
         record_batches_queue: queue.Queue[pa.RecordBatch] = queue.Queue(maxsize=2)
 
         stop_event = Event()
+
         class StoppedException(Exception):
             pass
 
@@ -266,7 +270,7 @@ class Table:
             if stop_event.is_set():
                 raise StoppedException
 
-        def single_endpoint_worker(endpoint : str):
+        def single_endpoint_worker(endpoint: str):
             try:
                 host_api = internal_commands.VastdbApi(endpoint=endpoint, access_key=self.tx._rpc.api.access_key, secret_key=self.tx._rpc.api.secret_key)
                 while True:
@@ -294,7 +298,7 @@ class Table:
                 record_batches_queue.put(None)
 
         def batches_iterator():
-            def propagate_first_exception(futures : List[concurrent.futures.Future], block = False):
+            def propagate_first_exception(futures: List[concurrent.futures.Future], block=False):
                 done, not_done = concurrent.futures.wait(futures, None if block else 0, concurrent.futures.FIRST_EXCEPTION)
                 for future in done:
                     future.result()
@@ -305,7 +309,7 @@ class Table:
             if config.query_id:
                 threads_prefix = threads_prefix + "-" + config.query_id
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=len(endpoints), thread_name_prefix=threads_prefix) as tp: # TODO: concurrency == enpoints is just a heuristic
+            with concurrent.futures.ThreadPoolExecutor(max_workers=len(endpoints), thread_name_prefix=threads_prefix) as tp:  # TODO: concurrency == enpoints is just a heuristic
                 futures = [tp.submit(single_endpoint_worker, endpoint) for endpoint in endpoints]
                 tasks_running = len(futures)
                 try:
@@ -434,7 +438,7 @@ class Projection:
         columns = []
         next_key = 0
         while True:
-            curr_columns, next_key, is_truncated, count, _ = \
+            curr_columns, next_key, is_truncated, _count, _ = \
                 self.tx._rpc.api.list_projection_columns(
                     self.bucket.name, self.schema.name, self.table.name, self.name, txid=self.table.tx.txid, next_key=next_key)
             if not curr_columns:

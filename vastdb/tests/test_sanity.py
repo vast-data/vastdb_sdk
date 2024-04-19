@@ -57,10 +57,10 @@ def test_version_extraction():
             return f"vast {version}" if version else "vast"
 
         def log_message(self, format, *args):
-            log.debug(format,*args)
+            log.debug(format, *args)
 
     # start the server on localhost on some available port port
-    server_address =('localhost', 0)
+    server_address = ('localhost', 0)
     httpd = HTTPServer(server_address, MockOptionsHandler)
 
     def start_http_server_in_thread():

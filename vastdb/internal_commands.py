@@ -92,7 +92,7 @@ UINT64_MAX = 18446744073709551615
 TABULAR_KEEP_ALIVE_STREAM_ID = 0xFFFFFFFF
 TABULAR_QUERY_DATA_COMPLETED_STREAM_ID = 0xFFFFFFFF - 1
 TABULAR_QUERY_DATA_FAILED_STREAM_ID = 0xFFFFFFFF - 2
-TABULAR_INVALID_ROW_ID = 0xFFFFFFFFFFFF # (1<<48)-1
+TABULAR_INVALID_ROW_ID = 0xFFFFFFFFFFFF  # (1<<48)-1
 ESTORE_INVALID_EHANDLE = UINT64_MAX
 IMPORTED_OBJECTS_TABLE_NAME = "vastdb-imported-objects"
 
@@ -126,6 +126,7 @@ def get_unit_to_flatbuff_time_unit(type):
         's': TimeUnit.SECOND
     }
     return unit_to_flatbuff_time_unit[type]
+
 
 class Predicate:
     def __init__(self, schema: 'pa.Schema', expr: ibis.expr.types.BooleanColumn):
@@ -201,7 +202,7 @@ class Predicate:
             StringContains: self.build_match_substring,
         }
 
-        positions_map = dict((f.name, index) for index, f in enumerate(self.schema)) # TODO: BFS
+        positions_map = dict((f.name, index) for index, f in enumerate(self.schema))  # TODO: BFS
 
         self.builder = builder
 
@@ -541,19 +542,21 @@ class Predicate:
     def build_match_substring(self, column: int, literal: int):
         return self.build_function('match_substring', column, literal)
 
+
 class FieldNodesState:
-        def __init__(self) -> None:
-            # will be set during by the parser (see below)
-            self.buffers: Dict[int, Any] = defaultdict(lambda: None) # a list of Arrow buffers (https://arrow.apache.org/docs/format/Columnar.html#buffer-listing-for-each-layout)
-            self.length: Dict[int, Any] = defaultdict(lambda: None) # each array must have it's length specified (https://arrow.apache.org/docs/python/generated/pyarrow.Array.html#pyarrow.Array.from_buffers)
+    def __init__(self) -> None:
+        # will be set during by the parser (see below)
+        self.buffers: Dict[int, Any] = defaultdict(lambda: None)  # a list of Arrow buffers (https://arrow.apache.org/docs/format/Columnar.html#buffer-listing-for-each-layout)
+        self.length: Dict[int, Any] = defaultdict(lambda: None)  # each array must have it's length specified (https://arrow.apache.org/docs/python/generated/pyarrow.Array.html#pyarrow.Array.from_buffers)
+
 
 class FieldNode:
     """Helper class for representing nested Arrow fields and handling QueryData requests"""
     def __init__(self, field: pa.Field, index_iter, parent: Optional['FieldNode'] = None, debug: bool = False):
-        self.index = next(index_iter) # we use DFS-first enumeration for communicating the column positions to VAST
+        self.index = next(index_iter)  # we use DFS-first enumeration for communicating the column positions to VAST
         self.field = field
         self.type = field.type
-        self.parent = parent # will be None if this is the top-level field
+        self.parent = parent  # will be None if this is the top-level field
         self.debug = debug
         if isinstance(self.type, pa.StructType):
             self.children = [FieldNode(field, index_iter, parent=self) for field in self.type]
@@ -570,7 +573,7 @@ class FieldNode:
             field = pa.field('entries', pa.struct([self.type.key_field, self.type.item_field]))
             self.children = [FieldNode(field, index_iter, parent=self)]
         else:
-            self.children = [] # for non-nested types
+            self.children = []  # for non-nested types
 
     def _iter_to_root(self) -> Iterator['FieldNode']:
         yield self
@@ -594,11 +597,11 @@ class FieldNode:
     def debug_log(self, level=0):
         """Recursively dump this node state to log."""
         bufs = self.buffers and [b and b.hex() for b in self.buffers]
-        _logger.debug('%s%d: %s, bufs=%s, len=%s', '    '*level, self.index, self.field, bufs, self.length)
+        _logger.debug('%s%d: %s, bufs=%s, len=%s', '    ' * level, self.index, self.field, bufs, self.length)
         for child in self.children:
-            child.debug_log(level=level+1)
+            child.debug_log(level=level + 1)
 
-    def set(self, arr: pa.Array, state : FieldNodesState):
+    def set(self, arr: pa.Array, state: FieldNodesState):
         """
         Assign the relevant Arrow buffers from the received array into this node.
 
@@ -610,7 +613,7 @@ class FieldNode:
         For example, `Struct<A, B>` is sent as two separate columns: `Struct<A>` and `Struct<B>`.
         Also, `Map<K, V>` is sent (as its underlying representation): `List<Struct<K>>` and `List<Struct<V>>`
         """
-        buffers = arr.buffers()[:arr.type.num_buffers] # slicing is needed because Array.buffers() returns also nested array buffers
+        buffers = arr.buffers()[:arr.type.num_buffers]  # slicing is needed because Array.buffers() returns also nested array buffers
         if self.debug:
             _logger.debug("set: index=%d %s %s", self.index, self.field, [b and b.hex() for b in buffers])
         if state.buffers[self.index] is None:
@@ -624,7 +627,7 @@ class FieldNode:
             if not state.length[self.index] == len(arr):
                 raise ValueError(f'self.length: {state.length[self.index]} are not equal with len(arr): {len(arr)}')
 
-    def build(self, state : FieldNodesState) -> pa.Array:
+    def build(self, state: FieldNodesState) -> pa.Array:
         """Construct an Arrow array from the collected buffers (recursively)."""
         children = self.children and [node.build(state) for node in self.children]
         result = pa.Array.from_buffers(self.type, state.length[self.index], buffers=state.buffers[self.index], children=children)
@@ -642,7 +645,7 @@ class QueryDataParser:
     """Used to parse VAST QueryData RPC response."""
     def __init__(self, arrow_schema: pa.Schema, *, debug=False):
         self.arrow_schema = arrow_schema
-        index = itertools.count() # used to generate leaf column positions for VAST QueryData RPC
+        index = itertools.count()  # used to generate leaf column positions for VAST QueryData RPC
         self.nodes = [FieldNode(field, index, debug=debug) for field in arrow_schema]
         self.debug = debug
         if self.debug:
@@ -688,8 +691,9 @@ class QueryDataParser:
         result = pa.Table.from_arrays(
             arrays=[node.build(state) for node in self.nodes],
             schema=self.arrow_schema)
-        result.validate(full=self.debug) # does expensive validation checks only if debug is enabled
+        result.validate(full=self.debug)  # does expensive validation checks only if debug is enabled
         return result
+
 
 def _iter_nested_arrays(column: pa.Array) -> Iterator[pa.Array]:
     """Iterate over a single column response, and recursively generate all of its children."""
@@ -703,6 +707,8 @@ def _iter_nested_arrays(column: pa.Array) -> Iterator[pa.Array]:
 
 
 TableInfo = namedtuple('TableInfo', 'name properties handle num_rows size_in_bytes')
+
+
 def _parse_table_info(obj):
 
     name = obj.Name().decode()
@@ -712,12 +718,14 @@ def _parse_table_info(obj):
     used_bytes = obj.SizeInBytes()
     return TableInfo(name, properties, handle, num_rows, used_bytes)
 
+
 def build_record_batch(column_info, column_values):
     fields = [pa.field(column_name, column_type) for column_type, column_name in column_info]
     schema = pa.schema(fields)
     arrays = [pa.array(column_values[column_type], type=column_type) for column_type, _ in column_info]
     batch = pa.record_batch(arrays, schema)
     return serialize_record_batch(batch)
+
 
 def serialize_record_batch(batch):
     sink = pa.BufferOutputStream()
@@ -726,7 +734,10 @@ def serialize_record_batch(batch):
     return sink.getvalue()
 
 # Results that returns from tablestats
-TableStatsResult = namedtuple("TableStatsResult",["num_rows", "size_in_bytes", "is_external_rowid_alloc", "endpoints"])
+
+
+TableStatsResult = namedtuple("TableStatsResult", ["num_rows", "size_in_bytes", "is_external_rowid_alloc", "endpoints"])
+
 
 class VastdbApi:
     # we expect the vast version to be <major>.<minor>.<patch>.<protocol>
@@ -962,7 +973,6 @@ class VastdbApi:
 
             return snapshots, is_truncated, marker
 
-
     def create_table(self, bucket, schema, name, arrow_schema, txid=0, client_tags=[], expected_retvals=[],
                      topic_partitions=0, create_imports_table=False, use_external_row_ids_allocation=False):
         """
@@ -1004,8 +1014,8 @@ class VastdbApi:
         if parquet_path:
             parquet_ds = pq.ParquetDataset(parquet_path)
         elif parquet_bucket_name and parquet_object_name:
-            s3fs  = pa.fs.S3FileSystem(access_key=self.access_key, secret_key=self.secret_key, endpoint_override=self.url)
-            parquet_ds = pq.ParquetDataset('/'.join([parquet_bucket_name,parquet_object_name]), filesystem=s3fs)
+            s3fs = pa.fs.S3FileSystem(access_key=self.access_key, secret_key=self.secret_key, endpoint_override=self.url)
+            parquet_ds = pq.ParquetDataset('/'.join([parquet_bucket_name, parquet_object_name]), filesystem=s3fs)
         else:
             raise RuntimeError(f'invalid params parquet_path={parquet_path} parquet_bucket_name={parquet_bucket_name} parquet_object_name={parquet_object_name}')
 
@@ -1019,7 +1029,6 @@ class VastdbApi:
 
         # create the table
         return self.create_table(bucket, schema, name, arrow_schema, txid, client_tags, expected_retvals)
-
 
     def get_table_stats(self, bucket, schema, name, txid=0, client_tags=[], expected_retvals=[]):
         """
@@ -1048,12 +1057,11 @@ class VastdbApi:
             # extract the vips into list of IPs
             for vip in vips:
                 start_ip = int(ip_cls(vip.StartAddress().decode()))
-                ips.extend(ip_cls(start_ip + i) for i  in range(vip.AddressCount()))
+                ips.extend(ip_cls(start_ip + i) for i in range(vip.AddressCount()))
             for ip in ips:
                 prefix = "http" if not self.secure else "https"
                 endpoints.append(f"{prefix}://{str(ip)}:{self.port}")
         return TableStatsResult(num_rows, size_in_bytes, is_external_rowid_alloc, tuple(endpoints))
-
 
     def alter_table(self, bucket, schema, name, txid=0, client_tags=[], table_properties="",
                     new_name="", expected_retvals=[]):
@@ -1142,7 +1150,6 @@ class VastdbApi:
 
             return bucket_name, schema_name, tables, next_key, is_truncated, count
 
-
     def add_columns(self, bucket, schema, name, arrow_schema, txid=0, client_tags=[], expected_retvals=[]):
         """
         Add a column to table, use the following request
@@ -1168,7 +1175,7 @@ class VastdbApi:
         return self._check_res(res, "add_columns", expected_retvals)
 
     def alter_column(self, bucket, schema, table, name, txid=0, client_tags=[], column_properties="",
-                     new_name="", column_sep = ".", column_stats="", expected_retvals=[]):
+                     new_name="", column_sep=".", column_stats="", expected_retvals=[]):
         """
         PUT /bucket/schema/table?column&tabular-column-name=ColumnName&tabular-new-column-name=NewColumnName HTTP/1.1
         Content-Length: ContentLength
@@ -1197,7 +1204,7 @@ class VastdbApi:
         headers['tabular-column-sep'] = column_sep
         headers['Content-Length'] = str(len(alter_column_req))
 
-        url_params = {'tabular-column-name': name }
+        url_params = {'tabular-column-name': name}
         if len(new_name):
             url_params['tabular-new-column-name'] = new_name
 
@@ -1544,7 +1551,7 @@ class VastdbApi:
         return self._check_res(res, "import_data", expected_retvals)
 
     def _record_batch_slices(self, batch, rows_per_slice=None):
-        max_slice_size_in_bytes = int(0.9*5*1024*1024) # 0.9 * 5MB
+        max_slice_size_in_bytes = int(0.9 * 5 * 1024 * 1024)  # 0.9 * 5MB
         batch_len = len(batch)
         serialized_batch = serialize_record_batch(batch)
         batch_size_in_bytes = len(serialized_batch)
@@ -1562,10 +1569,10 @@ class VastdbApi:
             # Attempt slicing according to the current rows_per_slice
             offset = 0
             serialized_slices = []
-            for i in range(math.ceil(batch_len/rows_per_slice)):
+            for i in range(math.ceil(batch_len / rows_per_slice)):
                 offset = rows_per_slice * i
                 if offset >= batch_len:
-                    done_slicing=True
+                    done_slicing = True
                     break
                 slice_batch = batch.slice(offset, rows_per_slice)
                 serialized_slice_batch = serialize_record_batch(slice_batch)
@@ -1576,7 +1583,7 @@ class VastdbApi:
                 else:
                     _logger.info(f'Using rows_per_slice {rows_per_slice} slice {i} size {sizeof_serialized_slice_batch} exceeds {max_slice_size_in_bytes} bytes, trying smaller rows_per_slice')
                     # We have a slice that is too large
-                    rows_per_slice = int(rows_per_slice/2)
+                    rows_per_slice = int(rows_per_slice / 2)
                     if rows_per_slice < 1:
                         raise ValueError('cannot decrease batch size below 1 row')
                     break
@@ -1884,7 +1891,7 @@ def _iter_query_data_response_columns(fileobj, stream_ids=None):
 
         (reader, batches) = readers[stream_id]
         try:
-            batch = reader.read_next_batch() # read single-column chunk data
+            batch = reader.read_next_batch()  # read single-column chunk data
             _logger.debug("stream_id=%d rows=%d chunk=%s", stream_id, len(batch), batch)
             batches.append(batch)
         except StopIteration:  # we got an end-of-stream IPC message for a given stream ID
@@ -1926,6 +1933,7 @@ def parse_query_data_response(conn, schema, stream_ids=None, start_row_ids=None,
 
     if states:
         raise EOFError(f'all streams should be done before EOF. {states}')
+
 
 def get_field_type(builder: flatbuffers.Builder, field: pa.Field):
     if field.type.equals(pa.int64()):
@@ -2068,6 +2076,7 @@ def get_field_type(builder: flatbuffers.Builder, field: pa.Field):
 
     return field_type, field_type_type
 
+
 def build_field(builder: flatbuffers.Builder, f: pa.Field, name: str):
     children = None
     if isinstance(f.type, pa.StructType):
@@ -2119,7 +2128,6 @@ class QueryDataRequest:
         self.serialized = serialized
         self.response_schema = response_schema
         self.response_parser = response_parser
-
 
 
 def build_query_data_request(schema: 'pa.Schema' = pa.schema([]), predicate: ibis.expr.types.BooleanColumn = None, field_names: Optional[List[str]] = None):

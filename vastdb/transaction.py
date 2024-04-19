@@ -16,6 +16,7 @@ from . import bucket, errors, schema, session, table
 
 log = logging.getLogger(__name__)
 
+
 @dataclass
 class Transaction:
     """A holder of a single VAST transaction."""

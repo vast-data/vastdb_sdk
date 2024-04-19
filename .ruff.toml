@@ -3,6 +3,7 @@ exclude = [
 ]
 
 [lint]
+preview = true
 select = [
 	"E", # pycodestyle errors
 	"W", # pycodestyle warnings

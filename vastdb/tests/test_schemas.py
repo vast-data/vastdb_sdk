@@ -50,11 +50,12 @@ def test_commits_and_rollbacks(session, clean_bucket_name):
             b = tx.bucket(clean_bucket_name)
             b.schema("s3").drop()
             assert b.schemas() == []
-            1/0  # rollback schema dropping
+            1 / 0  # rollback schema dropping
 
     with session.transaction() as tx:
         b = tx.bucket(clean_bucket_name)
         assert b.schemas() != []
+
 
 def test_list_snapshots(session, clean_bucket_name):
     with session.transaction() as tx:

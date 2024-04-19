@@ -4,6 +4,7 @@ import pyarrow as pa
 
 log = logging.getLogger(__name__)
 
+
 def test_basic_projections(session, clean_bucket_name):
     with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).create_schema('s1')

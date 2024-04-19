@@ -61,7 +61,7 @@ class Schema:
         name_prefix = table_name if table_name else ""
         exact_match = bool(table_name)
         while True:
-            bucket_name, schema_name, curr_tables, next_key, is_truncated, _ = \
+            _bucket_name, _schema_name, curr_tables, next_key, is_truncated, _ = \
                 self.tx._rpc.api.list_tables(
                     bucket=self.bucket.name, schema=self.name, next_key=next_key, txid=self.tx.txid,
                     exact_match=exact_match, name_prefix=name_prefix, include_list_stats=exact_match)

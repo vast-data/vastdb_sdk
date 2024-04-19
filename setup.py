@@ -11,12 +11,14 @@ enabling schema and table management, efficient ingest, query and modification o
 For more details, see [our whitepaper](https://vastdata.com/whitepaper/#TheVASTDataBase).
 """
 
+
 def _get_version_suffix():
     import subprocess
 
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"])
     print(f"Git commit: {commit}")
     return f".dev1+vast.{commit.decode()[:16]}"
+
 
 suffix = ''
 if os.environ.get('VASTDB_APPEND_VERSION_SUFFIX'):
