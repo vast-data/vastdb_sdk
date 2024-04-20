@@ -6,10 +6,15 @@ It is possible to list and access VAST snapshots generated over a bucket.
 
 import logging
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, List, Optional
 
 import pyarrow as pa
 
 from . import bucket, errors, schema, table
+
+if TYPE_CHECKING:
+    from .table import Table
+
 
 log = logging.getLogger(__name__)
 
@@ -26,7 +31,7 @@ class Schema:
         """VAST transaction used for this schema."""
         return self.bucket.tx
 
-    def create_table(self, table_name: str, columns: pa.Schema, fail_if_exists=True) -> "table.Table":
+    def create_table(self, table_name: str, columns: pa.Schema, fail_if_exists=True) -> "Table":
         """Create a new table under this schema."""
         if current := self.table(table_name, fail_if_missing=False):
             if fail_if_exists:
@@ -35,9 +40,9 @@ class Schema:
                 return current
         self.tx._rpc.api.create_table(self.bucket.name, self.name, table_name, columns, txid=self.tx.txid)
         log.info("Created table: %s", table_name)
-        return self.table(table_name)
+        return self.table(table_name)  # type: ignore[return-value]
 
-    def table(self, name: str, fail_if_missing=True) -> "table.Table":
+    def table(self, name: str, fail_if_missing=True) -> Optional["table.Table"]:
         """Get a specific table under this schema."""
         t = self.tables(table_name=name)
         if not t:
@@ -49,7 +54,7 @@ class Schema:
         log.debug("Found table: %s", t[0])
         return t[0]
 
-    def tables(self, table_name=None) -> ["table.Table"]:
+    def tables(self, table_name=None) -> List["Table"]:
         """List all tables under this schema."""
         tables = []
         next_key = 0

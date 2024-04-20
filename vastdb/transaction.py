@@ -8,6 +8,7 @@ A transcation is used as a context manager, since every Database-related operati
 
 import logging
 from dataclasses import dataclass
+from typing import Optional
 
 import botocore
 
@@ -20,7 +21,7 @@ class Transaction:
     """A holder of a single VAST transaction."""
 
     _rpc: "session.Session"
-    txid: int = None
+    txid: Optional[int] = None
 
     def __enter__(self):
         """Create a transaction and store its ID."""

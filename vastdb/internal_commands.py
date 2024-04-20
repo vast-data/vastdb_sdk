@@ -8,7 +8,7 @@ import urllib.parse
 from collections import defaultdict, namedtuple
 from enum import Enum
 from ipaddress import IPv4Address, IPv6Address
-from typing import Iterator, Optional, Union
+from typing import Any, Dict, Iterator, List, Optional, Union
 
 import flatbuffers
 import ibis
@@ -131,7 +131,6 @@ class Predicate:
     def __init__(self, schema: 'pa.Schema', expr: ibis.expr.types.BooleanColumn):
         self.schema = schema
         self.expr = expr
-        self.builder = None
 
     def get_field_indexes(self, field: 'pa.Field', field_name_per_index: list) -> None:
         field_name_per_index.append(field.name)
@@ -157,8 +156,8 @@ class Predicate:
             self._field_name_per_index = {field: index for index, field in enumerate(_field_name_per_index)}
         return self._field_name_per_index
 
-    def get_projections(self, builder: 'flatbuffers.builder.Builder', field_names: list = None):
-        if not field_names:
+    def get_projections(self, builder: 'flatbuffers.builder.Builder', field_names: Optional[List[str]] = None):
+        if field_names is None:
             field_names = self.field_name_per_index.keys()
         projection_fields = []
         for field_name in field_names:
@@ -172,7 +171,11 @@ class Predicate:
         return builder.EndVector()
 
     def serialize(self, builder: 'flatbuffers.builder.Builder'):
-        from ibis.expr.operations.generic import IsNull, Literal, TableColumn
+        from ibis.expr.operations.generic import (
+            IsNull,
+            Literal,
+            TableColumn,
+        )
         from ibis.expr.operations.logical import (
             And,
             Equals,
@@ -215,7 +218,7 @@ class Predicate:
                 prev_field_name = None
                 for inner_op in or_args:
                     _logger.debug('inner_op %s', inner_op)
-                    builder_func = builder_map.get(type(inner_op))
+                    builder_func: Any = builder_map.get(type(inner_op))
                     if not builder_func:
                         raise NotImplementedError(inner_op.name)
 
@@ -269,20 +272,6 @@ class Predicate:
         fb_expression.AddImplType(self.builder, ExpressionImpl.FieldRef)
         fb_expression.AddImpl(self.builder, ref)
         return fb_expression.End(self.builder)
-
-    def build_domain(self, column: int, field_name: str):
-        offsets = []
-        filters = self.filters[field_name]
-        if not filters:
-            return self.build_or([self.build_is_not_null(column)])
-
-        field_name, *field_attrs = field_name.split('.')
-        field = self.schema.field(field_name)
-        for attr in field_attrs:
-            field = field.type[attr]
-        for filter_by_name in filters:
-            offsets.append(self.build_range(column=column, field=field, filter_by_name=filter_by_name))
-        return self.build_or(offsets)
 
     def rule_to_operator(self, raw_rule: str):
         operator_matcher = {
@@ -339,6 +328,8 @@ class Predicate:
         return fb_expression.End(self.builder)
 
     def build_literal(self, field: pa.Field, value):
+        literal_type: Any
+
         if field.type.equals(pa.int64()):
             literal_type = fb_int64_lit
             literal_impl = LiteralImpl.Int64Literal
@@ -553,8 +544,8 @@ class Predicate:
 class FieldNodesState:
         def __init__(self) -> None:
             # will be set during by the parser (see below)
-            self.buffers = defaultdict(lambda: None) # a list of Arrow buffers (https://arrow.apache.org/docs/format/Columnar.html#buffer-listing-for-each-layout)
-            self.length = defaultdict(lambda: None) # each array must have it's length specified (https://arrow.apache.org/docs/python/generated/pyarrow.Array.html#pyarrow.Array.from_buffers)
+            self.buffers: Dict[int, Any] = defaultdict(lambda: None) # a list of Arrow buffers (https://arrow.apache.org/docs/format/Columnar.html#buffer-listing-for-each-layout)
+            self.length: Dict[int, Any] = defaultdict(lambda: None) # each array must have it's length specified (https://arrow.apache.org/docs/python/generated/pyarrow.Array.html#pyarrow.Array.from_buffers)
 
 class FieldNode:
     """Helper class for representing nested Arrow fields and handling QueryData requests"""
@@ -591,14 +582,6 @@ class FieldNode:
         yield self
         for child in self.children:
             yield from child._iter_nodes()
-
-    def _iter_leaves(self) -> Iterator['FieldNode']:
-        """Generate only leaf nodes (i.e. columns having scalar types)."""
-        if not self.children:
-            yield self
-        else:
-            for child in self.children:
-                yield from child._iter_leaves()
 
     def _iter_leaves(self) -> Iterator['FieldNode']:
         """Generate only leaf nodes (i.e. columns having scalar types)."""
@@ -719,7 +702,7 @@ def _iter_nested_arrays(column: pa.Array) -> Iterator[pa.Array]:
         yield from _iter_nested_arrays(column.values)  # Note: Map is serialized in VAST as a List<Struct<K, V>>
 
 
-TableInfo = namedtuple('table_info', 'name properties handle num_rows size_in_bytes')
+TableInfo = namedtuple('TableInfo', 'name properties handle num_rows size_in_bytes')
 def _parse_table_info(obj):
 
     name = obj.Name().decode()
@@ -1045,29 +1028,29 @@ class VastdbApi:
         """
         headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
         res = self.session.get(self._api_prefix(bucket=bucket, schema=schema, table=name, command="stats"), headers=headers)
-        if res.status_code == 200:
-            flatbuf = b''.join(res.iter_content(chunk_size=128))
-            stats = get_table_stats.GetRootAs(flatbuf)
-            num_rows = stats.NumRows()
-            size_in_bytes = stats.SizeInBytes()
-            is_external_rowid_alloc = stats.IsExternalRowidAlloc()
-            endpoints = []
-            if stats.VipsLength() == 0:
-                endpoints.append(self.url)
-            else:
-                ip_cls = IPv6Address if (stats.AddressType() == "ipv6") else IPv4Address
-                vips = [stats.Vips(i) for i in range(stats.VipsLength())]
-                ips = []
-                # extract the vips into list of IPs
-                for vip in vips:
-                    start_ip = int(ip_cls(vip.StartAddress().decode()))
-                    ips.extend(ip_cls(start_ip + i) for i  in range(vip.AddressCount()))
-                for ip in ips:
-                    prefix = "http" if not self.secure else "https"
-                    endpoints.append(f"{prefix}://{str(ip)}:{self.port}")
-            return TableStatsResult(num_rows, size_in_bytes, is_external_rowid_alloc, endpoints)
+        self._check_res(res, "get_table_stats", expected_retvals)
 
-        return self._check_res(res, "get_table_stats", expected_retvals)
+        flatbuf = b''.join(res.iter_content(chunk_size=128))
+        stats = get_table_stats.GetRootAs(flatbuf)
+        num_rows = stats.NumRows()
+        size_in_bytes = stats.SizeInBytes()
+        is_external_rowid_alloc = stats.IsExternalRowidAlloc()
+        endpoints = []
+        if stats.VipsLength() == 0:
+            endpoints.append(self.url)
+        else:
+            ip_cls = IPv6Address if (stats.AddressType() == "ipv6") else IPv4Address
+            vips = [stats.Vips(i) for i in range(stats.VipsLength())]
+            ips = []
+            # extract the vips into list of IPs
+            for vip in vips:
+                start_ip = int(ip_cls(vip.StartAddress().decode()))
+                ips.extend(ip_cls(start_ip + i) for i  in range(vip.AddressCount()))
+            for ip in ips:
+                prefix = "http" if not self.secure else "https"
+                endpoints.append(f"{prefix}://{str(ip)}:{self.port}")
+        return TableStatsResult(num_rows, size_in_bytes, is_external_rowid_alloc, tuple(endpoints))
+
 
     def alter_table(self, bucket, schema, name, txid=0, client_tags=[], table_properties="",
                     new_name="", expected_retvals=[]):
@@ -1908,7 +1891,7 @@ def _iter_query_data_response_columns(fileobj, stream_ids=None):
             yield (stream_id, next_row_id, table)
 
 
-def parse_query_data_response(conn, schema, stream_ids=None, start_row_ids=None, debug=False, parser : QueryDataParser = None):
+def parse_query_data_response(conn, schema, stream_ids=None, start_row_ids=None, debug=False, parser: Optional[QueryDataParser] = None):
     """
     Generates pyarrow.Table objects from QueryData API response stream.
 
@@ -1920,7 +1903,7 @@ def parse_query_data_response(conn, schema, stream_ids=None, start_row_ids=None,
     is_empty_projection = (len(schema) == 0)
     if parser is None:
         parser = QueryDataParser(schema, debug=debug)
-    states = defaultdict(lambda: QueryDataParser.QueryDataParserState())  # {stream_id: QueryDataParser}
+    states: Dict[int, QueryDataParser.QueryDataParserState] = defaultdict(lambda: QueryDataParser.QueryDataParserState())  # {stream_id: QueryDataParser}
 
     for stream_id, next_row_id, table in _iter_query_data_response_columns(conn, stream_ids):
         state = states[stream_id]
@@ -2136,7 +2119,7 @@ class QueryDataRequest:
 
 
 
-def build_query_data_request(schema: 'pa.Schema' = pa.schema([]), predicate: ibis.expr.types.BooleanColumn = None, field_names: list = None):
+def build_query_data_request(schema: 'pa.Schema' = pa.schema([]), predicate: ibis.expr.types.BooleanColumn = None, field_names: Optional[List[str]] = None):
     builder = flatbuffers.Builder(1024)
 
     source_name = builder.CreateString('')  # required

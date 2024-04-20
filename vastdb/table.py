@@ -5,18 +5,12 @@ import queue
 from dataclasses import dataclass, field
 from math import ceil
 from threading import Event
-from typing import List, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import ibis
 import pyarrow as pa
 
-from . import errors, schema
-from .internal_commands import (
-    TABULAR_INVALID_ROW_ID,
-    VastdbApi,
-    build_query_data_request,
-    parse_query_data_response,
-)
+from . import errors, internal_commands, schema
 
 log = logging.getLogger(__name__)
 
@@ -32,13 +26,13 @@ class TableStats:
     num_rows: int
     size_in_bytes: int
     is_external_rowid_alloc: bool = False
-    endpoints: List[str] = None
+    endpoints: Tuple[str, ...] = ()
 
 @dataclass
 class QueryConfig:
     num_sub_splits: int = 4
     num_splits: int = 1
-    data_endpoints: [str] = None
+    data_endpoints: Optional[List[str]] = None
     limit_rows_per_sub_split: int = 128 * 1024
     num_row_groups_per_sub_split: int = 8
     use_semi_sorted_projections: bool = True
@@ -58,7 +52,7 @@ class SelectSplitState():
         self.query_data_request = query_data_request
         self.table = table
 
-    def batches(self, api : VastdbApi):
+    def batches(self, api : internal_commands.VastdbApi):
         while not self.done:
             response = api.query_data(
                             bucket=self.table.bucket.name,
@@ -72,7 +66,7 @@ class SelectSplitState():
                             limit_rows=self.config.limit_rows_per_sub_split,
                             sub_split_start_row_ids=self.subsplits_state.items(),
                             enable_sorted_projections=self.config.use_semi_sorted_projections)
-            pages_iter = parse_query_data_response(
+            pages_iter = internal_commands.parse_query_data_response(
                 conn=response.raw,
                 schema=self.query_data_request.response_schema,
                 start_row_ids=self.subsplits_state,
@@ -86,7 +80,7 @@ class SelectSplitState():
 
     @property
     def done(self):
-        return all(row_id == TABULAR_INVALID_ROW_ID for row_id in self.subsplits_state.values())
+        return all(row_id == internal_commands.TABULAR_INVALID_ROW_ID for row_id in self.subsplits_state.values())
 
 @dataclass
 class Table:
@@ -94,12 +88,10 @@ class Table:
     schema: "schema.Schema"
     handle: int
     stats: TableStats
-    properties: dict = None
     arrow_schema: pa.Schema = field(init=False, compare=False)
     _ibis_table: ibis.Schema = field(init=False, compare=False)
 
     def __post_init__(self):
-        self.properties = self.properties or {}
         self.arrow_schema = self.columns()
 
         table_path = f'{self.schema.bucket.name}/{self.schema.name}/{self.name}'
@@ -137,7 +129,7 @@ class Table:
         log.debug("Found projection: %s", projs[0])
         return projs[0]
 
-    def projections(self, projection_name=None) -> ["Projection"]:
+    def projections(self, projection_name=None) -> List["Projection"]:
         projections = []
         next_key = 0
         name_prefix = projection_name if projection_name else ""
@@ -154,7 +146,7 @@ class Table:
                 break
         return [_parse_projection_info(projection, self) for projection in projections]
 
-    def import_files(self, files_to_import: [str], config: ImportConfig = None) -> None:
+    def import_files(self, files_to_import: List[str], config: Optional[ImportConfig] = None) -> None:
         source_files = {}
         for f in files_to_import:
             bucket_name, object_path = _parse_bucket_and_object_names(f)
@@ -162,7 +154,7 @@ class Table:
 
         self._execute_import(source_files, config=config)
 
-    def import_partitioned_files(self, files_and_partitions: {str: pa.RecordBatch}, config: ImportConfig = None) -> None:
+    def import_partitioned_files(self, files_and_partitions: Dict[str, pa.RecordBatch], config: Optional[ImportConfig] = None) -> None:
         source_files = {}
         for f, record_batch in files_and_partitions.items():
             bucket_name, object_path = _parse_bucket_and_object_names(f)
@@ -210,7 +202,7 @@ class Table:
                 max_workers=config.import_concurrency, thread_name_prefix='import_thread') as pool:
             try:
                 for endpoint in endpoints:
-                    session = VastdbApi(endpoint, self.tx._rpc.api.access_key, self.tx._rpc.api.secret_key)
+                    session = internal_commands.VastdbApi(endpoint, self.tx._rpc.api.access_key, self.tx._rpc.api.secret_key)
                     futures.append(pool.submit(import_worker, files_queue, session))
 
                 log.debug("Waiting for import workers to finish")
@@ -219,24 +211,30 @@ class Table:
             finally:
                 stop_event.set()
                 # ThreadPoolExecutor will be joined at the end of the context
-    def refresh_stats(self):
+
+    def get_stats(self) -> TableStats:
         stats_tuple = self.tx._rpc.api.get_table_stats(
             bucket=self.bucket.name, schema=self.schema.name, name=self.name, txid=self.tx.txid)
-        self.stats = TableStats(**stats_tuple._asdict())
+        return TableStats(**stats_tuple._asdict())
 
-    def select(self, columns: [str] = None,
+    def select(self, columns: Optional[List[str]] = None,
                predicate: ibis.expr.types.BooleanColumn = None,
-               config: QueryConfig = None,
+               config: Optional[QueryConfig] = None,
                *,
                internal_row_id: bool = False) -> pa.RecordBatchReader:
         if config is None:
             config = QueryConfig()
 
-        self.refresh_stats()
+        # Take a snapshot of enpoints
+        stats = self.get_stats()
+        endpoints = stats.endpoints if config.data_endpoints is None else config.data_endpoints
 
-        if self.stats.num_rows > config.rows_per_split and config.num_splits is None:
-            config.num_splits = self.stats.num_rows // config.rows_per_split
-        log.debug(f"num_rows={self.stats.num_rows} rows_per_splits={config.rows_per_split} num_splits={config.num_splits} ")
+        if stats.num_rows > config.rows_per_split and config.num_splits is None:
+            config.num_splits = stats.num_rows // config.rows_per_split
+        log.debug(f"num_rows={stats.num_rows} rows_per_splits={config.rows_per_split} num_splits={config.num_splits} ")
+
+        if columns is None:
+            columns = [f.name for f in self.arrow_schema]
 
         query_schema = self.arrow_schema
         if internal_row_id:
@@ -245,12 +243,12 @@ class Table:
             query_schema = pa.schema(queried_fields)
             columns.append(INTERNAL_ROW_ID)
 
-        query_data_request = build_query_data_request(
+        query_data_request = internal_commands.build_query_data_request(
             schema=query_schema,
             predicate=predicate,
             field_names=columns)
 
-        splits_queue = queue.Queue()
+        splits_queue: queue.Queue[int] = queue.Queue()
 
         for split in range(config.num_splits):
             splits_queue.put(split)
@@ -258,7 +256,8 @@ class Table:
         # this queue shouldn't be large it is marely a pipe through which the results
         # are sent to the main thread. Most of the pages actually held in the
         # threads that fetch the pages.
-        record_batches_queue = queue.Queue(maxsize=2)
+        record_batches_queue: queue.Queue[pa.RecordBatch] = queue.Queue(maxsize=2)
+
         stop_event = Event()
         class StoppedException(Exception):
             pass
@@ -269,7 +268,7 @@ class Table:
 
         def single_endpoint_worker(endpoint : str):
             try:
-                host_api = VastdbApi(endpoint=endpoint, access_key=self.tx._rpc.api.access_key, secret_key=self.tx._rpc.api.secret_key)
+                host_api = internal_commands.VastdbApi(endpoint=endpoint, access_key=self.tx._rpc.api.access_key, secret_key=self.tx._rpc.api.secret_key)
                 while True:
                     check_stop()
                     try:
@@ -293,9 +292,6 @@ class Table:
                 # signal that this thread has ended
                 log.debug("exiting")
                 record_batches_queue.put(None)
-
-        # Take a snapshot of enpoints
-        endpoints = list(self.stats.endpoints) if config.data_endpoints is None else list(config.data_endpoints)
 
         def batches_iterator():
             def propagate_first_exception(futures : List[concurrent.futures.Future], block = False):
@@ -350,7 +346,7 @@ class Table:
 
         return pa.chunked_array(row_ids)
 
-    def update(self, rows: Union[pa.RecordBatch, pa.Table], columns: list = None) -> None:
+    def update(self, rows: Union[pa.RecordBatch, pa.Table], columns: Optional[List[str]] = None) -> None:
         if columns is not None:
             update_fields = [(INTERNAL_ROW_ID, pa.uint64())]
             update_values = [self._combine_chunks(rows[INTERNAL_ROW_ID])]
@@ -418,7 +414,6 @@ class Projection:
     table: Table
     handle: int
     stats: TableStats
-    properties: dict = None
 
     @property
     def bucket(self):
@@ -468,9 +463,9 @@ def _parse_projection_info(projection_info, table: "Table"):
     return Projection(name=projection_info.name, table=table, stats=stats, handle=int(projection_info.handle))
 
 
-def _parse_bucket_and_object_names(path: str) -> (str, str):
+def _parse_bucket_and_object_names(path: str) -> Tuple[str, str]:
     if not path.startswith('/'):
-        raise errors.InvalidArgumentError(f"Path {path} must start with a '/'")
+        raise errors.InvalidArgument(f"Path {path} must start with a '/'")
     components = path.split(os.path.sep)
     bucket_name = components[1]
     object_path = os.path.sep.join(components[2:])

@@ -1,5 +1,5 @@
 import logging
-from typing import Callable
+from typing import Callable, List, Optional
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -12,8 +12,9 @@ log = logging.getLogger(__name__)
 
 
 def create_table_from_files(
-        schema: Schema, table_name: str, parquet_files: [str], schema_merge_func: Callable = None,
-        config: ImportConfig = None) -> Table:
+        schema: Schema, table_name: str, parquet_files: List[str],
+        schema_merge_func: Optional[Callable] = None,
+        config: Optional[ImportConfig] = None) -> Table:
     if not schema_merge_func:
         schema_merge_func = default_schema_merge
     else:

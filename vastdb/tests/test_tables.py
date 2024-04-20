@@ -602,11 +602,12 @@ def test_select_stop(session, clean_bucket_name):
     qc = QueryConfig(num_sub_splits=2, num_splits=4, num_row_groups_per_sub_split=1)
     with session.transaction() as tx:
         t = tx.bucket(clean_bucket_name).schema('s').table('t')
-        t.refresh_stats()
-        qc.data_endpoints = list(t.stats.endpoints) * 2
+        qc.data_endpoints = list(t.get_stats().endpoints) * 2
 
     # Duplicate the table until it is large enough to generate enough batches
     while num_rows < (qc.num_sub_splits * qc.num_splits) * ROWS_PER_GROUP:
+        # We need two separate transactions to prevent an infinite loop that may happen
+        # while appending and reading the same table using a single transaction.
         with session.transaction() as tx_read, session.transaction() as tx_write:
             t_read = tx_read.bucket(clean_bucket_name).schema('s').table('t')
             t_write = tx_write.bucket(clean_bucket_name).schema('s').table('t')

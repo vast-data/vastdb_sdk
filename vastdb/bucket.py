@@ -6,8 +6,12 @@ It is possible to list and access VAST snapshots generated over a bucket.
 
 import logging
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, List, Optional
 
 from . import errors, schema, transaction
+
+if TYPE_CHECKING:
+    from .schema import Schema
 
 log = logging.getLogger(__name__)
 
@@ -27,7 +31,7 @@ class Bucket:
     name: str
     tx: "transaction.Transaction"
 
-    def create_schema(self, path: str, fail_if_exists=True) -> "schema.Schema":
+    def create_schema(self, path: str, fail_if_exists=True) -> "Schema":
         """Create a new schema (a container of tables) under this bucket."""
         if current := self.schema(path, fail_if_missing=False):
             if fail_if_exists:
@@ -36,9 +40,9 @@ class Bucket:
                 return current
         self.tx._rpc.api.create_schema(self.name, path, txid=self.tx.txid)
         log.info("Created schema: %s", path)
-        return self.schema(path)
+        return self.schema(path)  # type: ignore[return-value]
 
-    def schema(self, path: str, fail_if_missing=True) -> "schema.Schema":
+    def schema(self, path: str, fail_if_missing=True) -> Optional["Schema"]:
         """Get a specific schema (a container of tables) under this bucket."""
         s = self.schemas(path)
         log.debug("schema: %s", s)
@@ -51,7 +55,7 @@ class Bucket:
         log.debug("Found schema: %s", s[0].name)
         return s[0]
 
-    def schemas(self, name: str = None) -> ["schema.Schema"]:
+    def schemas(self, name: Optional[str] = None) -> List["Schema"]:
         """List bucket's schemas."""
         schemas = []
         next_key = 0
@@ -69,7 +73,7 @@ class Bucket:
 
         return [schema.Schema(name=name, bucket=self) for name, *_ in schemas]
 
-    def snapshots(self) -> [Snapshot]:
+    def snapshots(self) -> List[Snapshot]:
         """List bucket's snapshots."""
         snapshots = []
         next_key = 0

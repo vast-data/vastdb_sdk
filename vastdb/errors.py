@@ -150,21 +150,21 @@ def from_response(res: requests.Response):
 
     log.debug("response: url='%s', code=%s, headers=%s, body='%s'", res.request.url, res.status_code, res.headers, res.text)
     # try to parse S3 XML response for the error details:
-    code = None
-    message = None
+    code_str = None
+    message_str = None
     if res.text:
         try:
             root = xml.etree.ElementTree.fromstring(res.text)
             code = root.find('Code')
-            code = code.text if code is not None else None
+            code_str = code.text if code is not None else None
             message = root.find('Message')
-            message = message.text if message is not None else None
+            message_str = message.text if message is not None else None
         except xml.etree.ElementTree.ParseError:
             log.debug("invalid XML: %r", res.text)
 
     kwargs = dict(
-        code=code,
-        message=message,
+        code=code_str,
+        message=message_str,
         url=res.request.url,
         status=res.status_code,
         headers=res.headers,
