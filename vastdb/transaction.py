@@ -12,7 +12,7 @@ from typing import Optional
 
 import botocore
 
-from . import bucket, errors, session
+from . import bucket, errors, schema, session, table
 
 log = logging.getLogger(__name__)
 
@@ -53,3 +53,9 @@ class Transaction:
                 raise errors.MissingBucket(name)
             raise
         return bucket.Bucket(name, self)
+
+    def catalog(self, fail_if_missing=True) -> Optional["table.Table"]:
+        """Return VAST Catalog table."""
+        b = bucket.Bucket("vast-big-catalog-bucket", self)
+        s = schema.Schema("vast_big_catalog_schema", b)
+        return s.table(name="vast_big_catalog_table", fail_if_missing=fail_if_missing)
