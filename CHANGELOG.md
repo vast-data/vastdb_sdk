@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.1.2] (2024-04-25)
+[0.1.2]: https://github.com/vast-data/vastdb_sdk/compare/v0.1.1...v0.1.2
+
+### Added
+ - Allow querying [VAST Catalog](https://www.vastdata.com/blog/vast-catalog-treat-your-file-system-like-a-database)
+ - Use [mypy](https://mypy-lang.org/) for type annotation checking
+
+### Fixed
+ - Fix handling HTTPS endpoints [#50]
+ - Optimize `Table.select()` performance
+ - Use `GET` request to retrieve cluster version
+ - Enable `ruff` preview mode
+ - Make sure DuckDB integration fails gracefully when transaction is closed prematurely
+
+### Removed
+ - Don't return row IDs from `Table.insert()`
+
 ## [0.1.1] (2024-04-15)
 [0.1.1]: https://github.com/vast-data/vastdb_sdk/compare/v0.1.0...v0.1.1
 
@@ -93,3 +110,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 [#42]: https://github.com/vast-data/vastdb_sdk/pull/42
 [#43]: https://github.com/vast-data/vastdb_sdk/pull/43
 [#47]: https://github.com/vast-data/vastdb_sdk/pull/47
+[#50]: https://github.com/vast-data/vastdb_sdk/pull/50
