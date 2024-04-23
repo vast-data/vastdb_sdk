@@ -26,6 +26,7 @@ log = logging.getLogger(__name__)
 class HttpError(Exception):
     code: str
     message: str
+    method: str
     url: str
     status: int  # HTTP status
     headers: requests.structures.CaseInsensitiveDict  # HTTP response headers
@@ -165,6 +166,7 @@ def from_response(res: requests.Response):
     kwargs = dict(
         code=code_str,
         message=message_str,
+        method=res.request.method,
         url=res.request.url,
         status=res.status_code,
         headers=res.headers,
