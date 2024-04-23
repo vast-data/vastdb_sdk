@@ -1851,6 +1851,10 @@ class VastdbApi:
             return columns, next_key, is_truncated, count
 
 
+class QueryDataInternalError(Exception):
+    pass
+
+
 def _iter_query_data_response_columns(fileobj, stream_ids=None):
     readers = {}  # {stream_id: pa.ipc.RecordBatchStreamReader}
     while True:
@@ -1875,8 +1879,8 @@ def _iter_query_data_response_columns(fileobj, stream_ids=None):
         if stream_id == TABULAR_QUERY_DATA_FAILED_STREAM_ID:
             # read the terminating end chunk from socket
             res = fileobj.read()
-            _logger.warning("stream_id=%d res=%s (failed)", stream_id, res)
-            raise IOError(f"Query data stream failed res={res}")
+            _logger.debug("stream_id=%d res=%s (failed)", stream_id, res)
+            raise QueryDataInternalError()  # connection closed by server due to an internal error
 
         next_row_id_bytes = fileobj.read(8)
         next_row_id, = struct.unpack('<Q', next_row_id_bytes)
