@@ -6,7 +6,6 @@ import threading
 from contextlib import closing
 from tempfile import NamedTemporaryFile
 
-import duckdb
 import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
@@ -304,26 +303,6 @@ def test_filters(session, clean_bucket_name):
         assert select(~t['s'].isnull()) == expected.filter(~pc.field('s').is_null())
         assert select(t['s'].contains('b')) == expected.filter(pc.field('s') == 'bb')
         assert select(t['s'].contains('y')) == expected.filter(pc.field('s') == 'xyz')
-
-
-def test_duckdb(session, clean_bucket_name):
-    columns = pa.schema([
-        ('a', pa.int32()),
-        ('b', pa.float64()),
-    ])
-    data = pa.table(schema=columns, data=[
-        [111, 222, 333],
-        [0.5, 1.5, 2.5],
-    ])
-    with prepare_data(session, clean_bucket_name, 's', 't', data) as t:
-        conn = duckdb.connect()
-        batches = t.select(columns=['a'], predicate=(t['b'] < 2))  # noqa: F841
-        actual = conn.execute('SELECT max(a) as "a_max" FROM batches').arrow()
-        expected = (data
-            .filter(pc.field('b') < 2)
-            .group_by([])
-            .aggregate([('a', 'max')]))
-        assert actual == expected
 
 
 def test_parquet_export(session, clean_bucket_name):

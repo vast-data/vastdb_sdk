@@ -89,6 +89,10 @@ class Missing(Exception):
     pass
 
 
+class MissingTransaction(Missing):
+    pass
+
+
 @dataclass
 class MissingBucket(Missing):
     bucket: str

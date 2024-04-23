@@ -300,6 +300,8 @@ class Table:
         def batches_iterator():
             def propagate_first_exception(futures: List[concurrent.futures.Future], block=False):
                 done, not_done = concurrent.futures.wait(futures, None if block else 0, concurrent.futures.FIRST_EXCEPTION)
+                if self.tx.txid is None:
+                    raise errors.MissingTransaction()
                 for future in done:
                     future.result()
                 return not_done
