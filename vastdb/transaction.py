@@ -33,12 +33,14 @@ class Transaction:
 
     def __exit__(self, exc_type, exc_value, exc_traceback):
         """On success, the transaction is committed. Otherwise, it is rolled back."""
+        txid = self.txid
+        self.txid = None
         if (exc_type, exc_value, exc_traceback) == (None, None, None):
-            log.debug("committing txid=%016x", self.txid)
-            self._rpc.api.commit_transaction(self.txid)
+            log.debug("committing txid=%016x", txid)
+            self._rpc.api.commit_transaction(txid)
         else:
-            log.exception("rolling back txid=%016x due to:", self.txid)
-            self._rpc.api.rollback_transaction(self.txid)
+            log.exception("rolling back txid=%016x due to:", txid)
+            self._rpc.api.rollback_transaction(txid)
 
     def __repr__(self):
         """Don't show the session details."""
