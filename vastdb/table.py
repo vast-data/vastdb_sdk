@@ -343,14 +343,9 @@ class Table:
 
     def insert(self, rows: pa.RecordBatch) -> pa.RecordBatch:
         serialized_slices = self.tx._rpc.api._record_batch_slices(rows, MAX_INSERT_ROWS_PER_PATCH)
-        row_ids = []
         for slice in serialized_slices:
-            res = self.tx._rpc.api.insert_rows(self.bucket.name, self.schema.name, self.name, record_batch=slice,
+            self.tx._rpc.api.insert_rows(self.bucket.name, self.schema.name, self.name, record_batch=slice,
                                                txid=self.tx.txid)
-            (batch,) = pa.RecordBatchStreamReader(res.raw)
-            row_ids.append(batch[INTERNAL_ROW_ID])
-
-        return pa.chunked_array(row_ids)
 
     def update(self, rows: Union[pa.RecordBatch, pa.Table], columns: Optional[List[str]] = None) -> None:
         if columns is not None:

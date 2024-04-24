@@ -323,8 +323,7 @@ def test_parquet_export(session, clean_bucket_name):
             ['a', 'b'],
         ])
         expected = pa.Table.from_batches([rb])
-        rb = t.insert(rb)
-        assert rb.to_pylist() == [0, 1]
+        t.insert(rb)
         actual = pa.Table.from_batches(t.select())
         assert actual == expected
 

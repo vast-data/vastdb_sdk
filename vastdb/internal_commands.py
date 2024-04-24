@@ -1606,7 +1606,8 @@ class VastdbApi:
         headers['Content-Length'] = str(len(record_batch))
         res = self.session.post(self._api_prefix(bucket=bucket, schema=schema, table=table, command="rows"),
                                 data=record_batch, headers=headers, stream=True)
-        return self._check_res(res, "insert_rows", expected_retvals)
+        self._check_res(res, "insert_rows", expected_retvals)
+        res.raw.read()  # flush the response
 
     def update_rows(self, bucket, schema, table, record_batch, txid=0, client_tags=[], expected_retvals=[]):
         """
@@ -1622,7 +1623,7 @@ class VastdbApi:
         headers['Content-Length'] = str(len(record_batch))
         res = self.session.put(self._api_prefix(bucket=bucket, schema=schema, table=table, command="rows"),
                                 data=record_batch, headers=headers)
-        return self._check_res(res, "update_rows", expected_retvals)
+        self._check_res(res, "update_rows", expected_retvals)
 
     def delete_rows(self, bucket, schema, table, record_batch, txid=0, client_tags=[], expected_retvals=[],
                     delete_from_imports_table=False):
@@ -1641,7 +1642,7 @@ class VastdbApi:
 
         res = self.session.delete(self._api_prefix(bucket=bucket, schema=schema, table=table, command="rows", url_params=url_params),
                                   data=record_batch, headers=headers)
-        return self._check_res(res, "delete_rows", expected_retvals)
+        self._check_res(res, "delete_rows", expected_retvals)
 
     def create_projection(self, bucket, schema, table, name, columns, txid=0, client_tags=[], expected_retvals=[]):
         """
