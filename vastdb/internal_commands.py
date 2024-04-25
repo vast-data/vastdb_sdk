@@ -968,7 +968,9 @@ class VastdbApi:
             list_res = xml_dict['ListBucketResult']
             is_truncated = list_res['IsTruncated'] == 'true'
             marker = list_res['Marker']
-            common_prefixes = list_res['CommonPrefixes'] if 'CommonPrefixes' in list_res else []
+            common_prefixes = list_res.get('CommonPrefixes', [])
+            if isinstance(common_prefixes, dict):  # in case there is a single snapshot
+                common_prefixes = [common_prefixes]
             snapshots = [v['Prefix'] for v in common_prefixes]
 
             return snapshots, is_truncated, marker

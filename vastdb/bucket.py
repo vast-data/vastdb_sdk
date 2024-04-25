@@ -17,14 +17,6 @@ log = logging.getLogger(__name__)
 
 
 @dataclass
-class Snapshot:
-    """VAST bucket-level snapshot."""
-
-    name: str
-    bucket: "Bucket"
-
-
-@dataclass
 class Bucket:
     """VAST bucket."""
 
@@ -73,7 +65,7 @@ class Bucket:
 
         return [schema.Schema(name=name, bucket=self) for name, *_ in schemas]
 
-    def snapshots(self) -> List[Snapshot]:
+    def snapshots(self) -> List["Bucket"]:
         """List bucket's snapshots."""
         snapshots = []
         next_key = 0
@@ -86,4 +78,7 @@ class Bucket:
             if not is_truncated:
                 break
 
-        return [Snapshot(name=snapshot, bucket=self) for snapshot in snapshots]
+        return [
+            Bucket(name=f'{self.name}/{snapshot.strip("/")}', tx=self.tx)
+            for snapshot in snapshots
+        ]

@@ -44,6 +44,8 @@ class Transaction:
 
     def __repr__(self):
         """Don't show the session details."""
+        if self.txid is None:
+            return 'InvalidTransaction'
         return f'Transaction(id=0x{self.txid:016x})'
 
     def bucket(self, name: str) -> "bucket.Bucket":

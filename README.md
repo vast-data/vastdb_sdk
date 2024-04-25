@@ -150,10 +150,11 @@ p.drop()
 
 ## Snapshots
 
-It is possible to list [available snapshots](https://vastdata.com/blog/bringing-snapshots-to-vasts-element-store):
+It is possible to use [snapshots](https://vastdata.com/blog/bringing-snapshots-to-vasts-element-store) for accessing the Database:
 
 ```python
-print(bucket.list_snapshots())
+snaps = bucket.list_snapshots()
+batches = snaps[0].schema('schema-name').table('table-name').select()
 ```
 
 ## VAST Catalog
