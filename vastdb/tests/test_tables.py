@@ -3,6 +3,7 @@ import decimal
 import logging
 import random
 import threading
+import time
 from contextlib import closing
 from tempfile import NamedTemporaryFile
 
@@ -645,3 +646,20 @@ def test_select_stop(session, clean_bucket_name):
 
     # validate that all query threads were killed.
     assert active_threads() == 0
+
+
+def test_big_catalog_select(session, clean_bucket_name):
+    with session.transaction() as tx:
+        bc = tx.catalog()
+        actual = pa.Table.from_batches(bc.select(['name']))
+        assert actual
+        log.info("actual=%s", actual)
+
+
+def test_audit_log_select(session, clean_bucket_name):
+    with session.transaction() as tx:
+        a = tx.audit_log()
+        a.columns()
+        time.sleep(1)
+        actual = pa.Table.from_batches(a.select(), a.arrow_schema)
+        log.info("actual=%s", actual)

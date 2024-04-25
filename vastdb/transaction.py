@@ -16,6 +16,14 @@ from . import bucket, errors, schema, session, table
 
 log = logging.getLogger(__name__)
 
+TABULAR_BC_BUCKET = "vast-big-catalog-bucket"
+VAST_CATALOG_SCHEMA_NAME = 'vast_big_catalog_schema'
+VAST_CATALOG_TABLE_NAME = 'vast_big_catalog_table'
+
+TABULAR_AUDERY_BUCKET = "vast-audit-log-bucket"
+AUDERY_SCHEMA_NAME = 'vast_audit_log_schema'
+AUDERY_TABLE_NAME = 'vast_audit_log_table'
+
 
 @dataclass
 class Transaction:
@@ -61,6 +69,12 @@ class Transaction:
 
     def catalog(self, fail_if_missing=True) -> Optional["table.Table"]:
         """Return VAST Catalog table."""
-        b = bucket.Bucket("vast-big-catalog-bucket", self)
-        s = schema.Schema("vast_big_catalog_schema", b)
-        return s.table(name="vast_big_catalog_table", fail_if_missing=fail_if_missing)
+        b = bucket.Bucket(TABULAR_BC_BUCKET, self)
+        s = schema.Schema(VAST_CATALOG_SCHEMA_NAME, b)
+        return s.table(name=VAST_CATALOG_TABLE_NAME, fail_if_missing=fail_if_missing)
+
+    def audit_log(self, fail_if_missing=True) -> Optional["table.Table"]:
+        """Return VAST AuditLog table."""
+        b = bucket.Bucket(TABULAR_AUDERY_BUCKET, self)
+        s = schema.Schema(AUDERY_SCHEMA_NAME, b)
+        return s.table(name=AUDERY_TABLE_NAME, fail_if_missing=fail_if_missing)
