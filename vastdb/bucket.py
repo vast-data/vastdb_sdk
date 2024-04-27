@@ -65,6 +65,21 @@ class Bucket:
 
         return [schema.Schema(name=name, bucket=self) for name, *_ in schemas]
 
+    def snapshot(self, name, fail_if_missing=True) -> Optional["Bucket"]:
+        """Get snapshot by name (if exists)."""
+        snapshots, _is_truncated, _next_key = \
+            self.tx._rpc.api.list_snapshots(bucket=self.name, name_prefix=name, max_keys=1)
+
+        expected_name = f".snapshot/{name}"
+        exists = snapshots and snapshots[0] == expected_name + "/"
+        if not exists:
+            if fail_if_missing:
+                raise errors.MissingSnapshot(self.name, expected_name)
+            else:
+                return None
+
+        return Bucket(name=f'{self.name}/{expected_name}', tx=self.tx)
+
     def snapshots(self) -> List["Bucket"]:
         """List bucket's snapshots."""
         snapshots = []

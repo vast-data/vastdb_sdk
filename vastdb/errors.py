@@ -99,6 +99,12 @@ class MissingBucket(Missing):
 
 
 @dataclass
+class MissingSnapshot(Missing):
+    bucket: str
+    snapshot: str
+
+
+@dataclass
 class MissingSchema(Missing):
     bucket: str
     schema: str

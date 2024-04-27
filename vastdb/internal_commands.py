@@ -952,28 +952,27 @@ class VastdbApi:
 
             return bucket_name, schemas, next_key, is_truncated, count
 
-    def list_snapshots(self, bucket, max_keys=1000, next_token=None, expected_retvals=None):
+    def list_snapshots(self, bucket, max_keys=1000, next_token=None, name_prefix=''):
         next_token = next_token or ''
-        expected_retvals = expected_retvals or []
-        url_params = {'list_type': '2', 'prefix': '.snapshot/', 'delimiter': '/', 'max_keys': str(max_keys)}
+        url_params = {'list_type': '2', 'prefix': '.snapshot/' + name_prefix, 'delimiter': '/', 'max_keys': str(max_keys)}
         if next_token:
             url_params['continuation-token'] = next_token
 
         res = self.session.get(self._api_prefix(bucket=bucket, command="list", url_params=url_params), headers={}, stream=True)
-        self._check_res(res, "list_snapshots", expected_retvals)
-        if res.status_code == 200:
-            out = b''.join(res.iter_content(chunk_size=128))
-            xml_str = out.decode()
-            xml_dict = xmltodict.parse(xml_str)
-            list_res = xml_dict['ListBucketResult']
-            is_truncated = list_res['IsTruncated'] == 'true'
-            marker = list_res['Marker']
-            common_prefixes = list_res.get('CommonPrefixes', [])
-            if isinstance(common_prefixes, dict):  # in case there is a single snapshot
-                common_prefixes = [common_prefixes]
-            snapshots = [v['Prefix'] for v in common_prefixes]
+        self._check_res(res, "list_snapshots")
 
-            return snapshots, is_truncated, marker
+        out = b''.join(res.iter_content(chunk_size=128))
+        xml_str = out.decode()
+        xml_dict = xmltodict.parse(xml_str)
+        list_res = xml_dict['ListBucketResult']
+        is_truncated = list_res['IsTruncated'] == 'true'
+        marker = list_res['Marker']
+        common_prefixes = list_res.get('CommonPrefixes', [])
+        if isinstance(common_prefixes, dict):  # in case there is a single snapshot
+            common_prefixes = [common_prefixes]
+        snapshots = [v['Prefix'] for v in common_prefixes]
+
+        return snapshots, is_truncated, marker
 
     def create_table(self, bucket, schema, name, arrow_schema, txid=0, client_tags=[], expected_retvals=[],
                      topic_partitions=0, create_imports_table=False, use_external_row_ids_allocation=False):
