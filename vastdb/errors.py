@@ -184,4 +184,4 @@ def from_response(res: requests.Response):
     log.warning("RPC failed: %s", kwargs)
     status = HttpStatus(res.status_code)
     error_type = ERROR_TYPES_MAP.get(status, UnexpectedError)
-    raise error_type(**kwargs)
+    return error_type(**kwargs)
