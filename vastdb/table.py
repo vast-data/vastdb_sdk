@@ -1,3 +1,5 @@
+"""VAST Database table."""
+
 import concurrent.futures
 import logging
 import os
@@ -24,6 +26,8 @@ MAX_INSERT_ROWS_PER_PATCH = 512 * 1024
 
 @dataclass
 class TableStats:
+    """Table-related information."""
+
     num_rows: int
     size_in_bytes: int
     is_external_rowid_alloc: bool = False
@@ -32,6 +36,8 @@ class TableStats:
 
 @dataclass
 class QueryConfig:
+    """Query execution configiration."""
+
     num_sub_splits: int = 4
     num_splits: int = 1
     data_endpoints: Optional[List[str]] = None
@@ -44,11 +50,16 @@ class QueryConfig:
 
 @dataclass
 class ImportConfig:
+    """Import execution configiration."""
+
     import_concurrency: int = 2
 
 
-class SelectSplitState():
+class SelectSplitState:
+    """State of a specific query split execution."""
+
     def __init__(self, query_data_request, table: "Table", split_id: int, config: QueryConfig) -> None:
+        """Initialize query split state."""
         self.split_id = split_id
         self.subsplits_state = {i: 0 for i in range(config.num_sub_splits)}
         self.config = config
@@ -56,6 +67,10 @@ class SelectSplitState():
         self.table = table
 
     def batches(self, api: internal_commands.VastdbApi):
+        """Execute QueryData request, and yield parsed RecordBatch objects.
+
+        Can be called repeatedly, to allow pagination.
+        """
         while not self.done:
             response = api.query_data(
                             bucket=self.table.bucket.name,
@@ -82,19 +97,23 @@ class SelectSplitState():
 
     @property
     def done(self):
+        """Returns true iff the pagination over."""
         return all(row_id == internal_commands.TABULAR_INVALID_ROW_ID for row_id in self.subsplits_state.values())
 
 
 @dataclass
 class Table:
+    """VAST Table."""
+
     name: str
     schema: "schema.Schema"
     handle: int
     stats: TableStats
-    arrow_schema: pa.Schema = field(init=False, compare=False)
-    _ibis_table: ibis.Schema = field(init=False, compare=False)
+    arrow_schema: pa.Schema = field(init=False, compare=False, repr=False)
+    _ibis_table: ibis.Schema = field(init=False, compare=False, repr=False)
 
     def __post_init__(self):
+        """Also, load columns' metadata."""
         self.arrow_schema = self.columns()
 
         table_path = f'{self.schema.bucket.name}/{self.schema.name}/{self.name}'
@@ -102,16 +121,16 @@ class Table:
 
     @property
     def tx(self):
+        """Return transaction."""
         return self.schema.tx
 
     @property
     def bucket(self):
+        """Return bucket."""
         return self.schema.bucket
 
-    def __repr__(self):
-        return f"{type(self).__name__}(name={self.name})"
-
     def columns(self) -> pa.Schema:
+        """Return columns' metadata."""
         fields = []
         next_key = 0
         while True:
@@ -125,6 +144,7 @@ class Table:
         return self.arrow_schema
 
     def projection(self, name: str) -> "Projection":
+        """Get a specific semi-sorted projection of this table."""
         projs = self.projections(projection_name=name)
         if not projs:
             raise errors.MissingProjection(self.bucket.name, self.schema.name, self.name, name)
@@ -133,6 +153,7 @@ class Table:
         return projs[0]
 
     def projections(self, projection_name=None) -> List["Projection"]:
+        """List all semi-sorted projections of this table."""
         projections = []
         next_key = 0
         name_prefix = projection_name if projection_name else ""
@@ -150,6 +171,10 @@ class Table:
         return [_parse_projection_info(projection, self) for projection in projections]
 
     def import_files(self, files_to_import: List[str], config: Optional[ImportConfig] = None) -> None:
+        """Import a list of Parquet files into this table.
+
+        The files must be on VAST S3 server and be accessible using current credentials.
+        """
         source_files = {}
         for f in files_to_import:
             bucket_name, object_path = _parse_bucket_and_object_names(f)
@@ -158,6 +183,11 @@ class Table:
         self._execute_import(source_files, config=config)
 
     def import_partitioned_files(self, files_and_partitions: Dict[str, pa.RecordBatch], config: Optional[ImportConfig] = None) -> None:
+        """Import a list of Parquet files into this table.
+
+        The files must be on VAST S3 server and be accessible using current credentials.
+        Each file must have its own partition values defined as an Arrow RecordBatch.
+        """
         source_files = {}
         for f, record_batch in files_and_partitions.items():
             bucket_name, object_path = _parse_bucket_and_object_names(f)
@@ -216,6 +246,7 @@ class Table:
                 # ThreadPoolExecutor will be joined at the end of the context
 
     def get_stats(self) -> TableStats:
+        """Get the statistics of this table."""
         stats_tuple = self.tx._rpc.api.get_table_stats(
             bucket=self.bucket.name, schema=self.schema.name, name=self.name, txid=self.tx.txid)
         return TableStats(**stats_tuple._asdict())
@@ -225,6 +256,14 @@ class Table:
                config: Optional[QueryConfig] = None,
                *,
                internal_row_id: bool = False) -> pa.RecordBatchReader:
+        """Execute a query over this table.
+
+        To read a subset of the columns, specify their names via `columns` argument. Otherwise, all columns will be read.
+
+        In order to apply a filter, a predicate can be specified. See https://github.com/vast-data/vastdb_sdk/blob/main/README.md#filters-and-projections for more details.
+
+        Query-execution configuration options can be specified via the optional `config` argument.
+        """
         if config is None:
             config = QueryConfig()
 
@@ -335,25 +374,26 @@ class Table:
 
         return pa.RecordBatchReader.from_batches(query_data_request.response_schema, batches_iterator())
 
-    def _combine_chunks(self, col):
-        if hasattr(col, "combine_chunks"):
-            return col.combine_chunks()
-        else:
-            return col
-
     def insert(self, rows: pa.RecordBatch) -> pa.RecordBatch:
+        """Insert a RecordBatch into this table."""
         serialized_slices = self.tx._rpc.api._record_batch_slices(rows, MAX_INSERT_ROWS_PER_PATCH)
         for slice in serialized_slices:
             self.tx._rpc.api.insert_rows(self.bucket.name, self.schema.name, self.name, record_batch=slice,
                                                txid=self.tx.txid)
 
     def update(self, rows: Union[pa.RecordBatch, pa.Table], columns: Optional[List[str]] = None) -> None:
+        """Update a subset of cells in this table.
+
+        Row IDs are specified using a special field (named "$row_id" of uint64 type).
+
+        A subset of columns to be updated can be specified via the `columns` argument.
+        """
         if columns is not None:
             update_fields = [(INTERNAL_ROW_ID, pa.uint64())]
-            update_values = [self._combine_chunks(rows[INTERNAL_ROW_ID])]
+            update_values = [_combine_chunks(rows[INTERNAL_ROW_ID])]
             for col in columns:
                 update_fields.append(rows.field(col))
-                update_values.append(self._combine_chunks(rows[col]))
+                update_values.append(_combine_chunks(rows[col]))
 
             update_rows_rb = pa.record_batch(schema=pa.schema(update_fields), data=update_values)
         else:
@@ -365,8 +405,12 @@ class Table:
                                          txid=self.tx.txid)
 
     def delete(self, rows: Union[pa.RecordBatch, pa.Table]) -> None:
+        """Delete a subset of rows in this table.
+
+        Row IDs are specified using a special field (named "$row_id" of uint64 type).
+        """
         delete_rows_rb = pa.record_batch(schema=pa.schema([(INTERNAL_ROW_ID, pa.uint64())]),
-                                         data=[self._combine_chunks(rows[INTERNAL_ROW_ID])])
+                                         data=[_combine_chunks(rows[INTERNAL_ROW_ID])])
 
         serialized_slices = self.tx._rpc.api._record_batch_slices(delete_rows_rb, MAX_ROWS_PER_BATCH)
         for slice in serialized_slices:
@@ -374,43 +418,55 @@ class Table:
                                          txid=self.tx.txid)
 
     def drop(self) -> None:
+        """Drop this table."""
         self.tx._rpc.api.drop_table(self.bucket.name, self.schema.name, self.name, txid=self.tx.txid)
         log.info("Dropped table: %s", self.name)
 
     def rename(self, new_name) -> None:
+        """Rename this table."""
         self.tx._rpc.api.alter_table(
             self.bucket.name, self.schema.name, self.name, txid=self.tx.txid, new_name=new_name)
         log.info("Renamed table from %s to %s ", self.name, new_name)
         self.name = new_name
 
     def add_column(self, new_column: pa.Schema) -> None:
+        """Add a new column."""
         self.tx._rpc.api.add_columns(self.bucket.name, self.schema.name, self.name, new_column, txid=self.tx.txid)
         log.info("Added column(s): %s", new_column)
         self.arrow_schema = self.columns()
 
     def drop_column(self, column_to_drop: pa.Schema) -> None:
+        """Drop an existing column."""
         self.tx._rpc.api.drop_columns(self.bucket.name, self.schema.name, self.name, column_to_drop, txid=self.tx.txid)
         log.info("Dropped column(s): %s", column_to_drop)
         self.arrow_schema = self.columns()
 
     def rename_column(self, current_column_name: str, new_column_name: str) -> None:
+        """Rename an existing column."""
         self.tx._rpc.api.alter_column(self.bucket.name, self.schema.name, self.name, name=current_column_name,
                                        new_name=new_column_name, txid=self.tx.txid)
         log.info("Renamed column: %s to %s", current_column_name, new_column_name)
         self.arrow_schema = self.columns()
 
     def create_projection(self, projection_name: str, sorted_columns: List[str], unsorted_columns: List[str]) -> "Projection":
+        """Create a new semi-sorted projection."""
         columns = [(sorted_column, "Sorted") for sorted_column in sorted_columns] + [(unsorted_column, "Unorted") for unsorted_column in unsorted_columns]
         self.tx._rpc.api.create_projection(self.bucket.name, self.schema.name, self.name, projection_name, columns=columns, txid=self.tx.txid)
         log.info("Created projection: %s", projection_name)
         return self.projection(projection_name)
 
     def __getitem__(self, col_name):
+        """Allow constructing ibis-like column expressions from this table.
+
+        It is useful for constructing expressions for predicate pushdown in `Table.select()` method.
+        """
         return self._ibis_table[col_name]
 
 
 @dataclass
 class Projection:
+    """VAST semi-sorted projection."""
+
     name: str
     table: Table
     handle: int
@@ -418,20 +474,21 @@ class Projection:
 
     @property
     def bucket(self):
+        """Return bucket."""
         return self.table.schema.bucket
 
     @property
     def schema(self):
+        """Return schema."""
         return self.table.schema
 
     @property
     def tx(self):
+        """Return transaction."""
         return self.table.schema.tx
 
-    def __repr__(self):
-        return f"{type(self).__name__}(name={self.name})"
-
     def columns(self) -> pa.Schema:
+        """Return this projections' columns as an Arrow schema."""
         columns = []
         next_key = 0
         while True:
@@ -447,12 +504,14 @@ class Projection:
         return self.arrow_schema
 
     def rename(self, new_name) -> None:
+        """Rename this projection."""
         self.tx._rpc.api.alter_projection(self.bucket.name, self.schema.name,
                                                 self.table.name, self.name, txid=self.tx.txid, new_name=new_name)
         log.info("Renamed projection from %s to %s ", self.name, new_name)
         self.name = new_name
 
     def drop(self) -> None:
+        """Drop this projection."""
         self.tx._rpc.api.drop_projection(self.bucket.name, self.schema.name, self.table.name,
                                          self.name, txid=self.tx.txid)
         log.info("Dropped projection: %s", self.name)
@@ -478,3 +537,10 @@ def _serialize_record_batch(record_batch: pa.RecordBatch) -> pa.lib.Buffer:
     with pa.ipc.new_stream(sink, record_batch.schema) as writer:
         writer.write(record_batch)
     return sink.getvalue()
+
+
+def _combine_chunks(col):
+    if hasattr(col, "combine_chunks"):
+        return col.combine_chunks()
+    else:
+        return col
