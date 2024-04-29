@@ -182,6 +182,7 @@ class Predicate:
             Equals,
             Greater,
             GreaterEqual,
+            InValues,
             Less,
             LessEqual,
             Not,
@@ -219,40 +220,54 @@ class Predicate:
                 prev_field_name = None
                 for inner_op in or_args:
                     _logger.debug('inner_op %s', inner_op)
-                    builder_func: Any = builder_map.get(type(inner_op))
+                    op_type = type(inner_op)
+                    builder_func: Any = builder_map.get(op_type)
                     if not builder_func:
-                        raise NotImplementedError(inner_op.name)
+                        if op_type == InValues:
+                            builder_func = self.build_equal
+                        else:
+                            raise NotImplementedError(self.expr)
 
                     if builder_func == self.build_is_null:
                         column, = inner_op.args
-                        literal = None
+                        literals = (None,)
                     elif builder_func == self.build_is_not_null:
                         not_arg, = inner_op.args
                         # currently we only support not is_null, checking we really got is_null under the not:
                         if not builder_map.get(type(not_arg)) == self.build_is_null:
-                            raise NotImplementedError(not_arg.args[0].name)
+                            raise NotImplementedError(self.expr)
                         column, = not_arg.args
-                        literal = None
+                        literals = (None,)
                     else:
-                        column, literal = inner_op.args
-                        if not isinstance(literal, Literal):
-                            raise NotImplementedError(inner_op.name)
+                        column, arg = inner_op.args
+                        if isinstance(arg, tuple):
+                            literals = arg
+                        else:
+                            literals = (arg,)
+                        for literal in literals:
+                            if not isinstance(literal, Literal):
+                                raise NotImplementedError(self.expr)
 
                     if not isinstance(column, TableColumn):
-                        raise NotImplementedError(inner_op.name)
+                        raise NotImplementedError(self.expr)
 
                     field_name = column.name
                     if prev_field_name is None:
                         prev_field_name = field_name
                     elif prev_field_name != field_name:
-                        raise NotImplementedError(op.name)
+                        raise NotImplementedError(self.expr)
 
-                    args_offsets = [self.build_column(position=positions_map[field_name])]
-                    if literal:
-                        field = self.schema.field(field_name)
-                        args_offsets.append(self.build_literal(field=field, value=literal.value))
+                    column_offset = self.build_column(position=positions_map[field_name])
+                    field = self.schema.field(field_name)
+                    for literal in literals:
+                        args_offsets = [column_offset]
+                        if literal is not None:
+                            args_offsets.append(self.build_literal(field=field, value=literal.value))
 
-                    inner_offsets.append(builder_func(*args_offsets))
+                        inner_offsets.append(builder_func(*args_offsets))
+
+                if not inner_offsets:
+                    raise NotImplementedError(self.expr)  # an empty OR is equivalent to a 'FALSE' literal
 
                 domain_offset = self.build_or(inner_offsets)
                 offsets.append(domain_offset)

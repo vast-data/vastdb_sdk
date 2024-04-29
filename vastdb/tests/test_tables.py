@@ -261,7 +261,7 @@ def test_filters(session, clean_bucket_name):
 
     with prepare_data(session, clean_bucket_name, 's', 't', expected) as t:
         def select(predicate):
-            return pa.Table.from_batches(t.select(predicate=predicate))
+            return pa.Table.from_batches(t.select(predicate=predicate), t.arrow_schema)
 
         assert select(None) == expected
 
@@ -303,6 +303,13 @@ def test_filters(session, clean_bucket_name):
         assert select(~t['s'].isnull()) == expected.filter(~pc.field('s').is_null())
         assert select(t['s'].contains('b')) == expected.filter(pc.field('s') == 'bb')
         assert select(t['s'].contains('y')) == expected.filter(pc.field('s') == 'xyz')
+
+        assert select(t['a'].isin([555])) == expected.filter(pc.field('a').isin([555]))
+        assert select(t['a'].isin([111, 222, 999])) == expected.filter(pc.field('a').isin([111, 222, 999]))
+        assert select((t['a'] == 111) | t['a'].isin([333, 444]) | (t['a'] > 600)) == expected.filter((pc.field('a') == 111) | pc.field('a').isin([333, 444]) | (pc.field('a') > 600))
+
+        with pytest.raises(NotImplementedError):
+            select(t['a'].isin([]))
 
 
 def test_parquet_export(session, clean_bucket_name):
