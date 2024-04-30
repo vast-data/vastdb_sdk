@@ -11,15 +11,21 @@ import os
 
 import boto3
 
-from . import internal_commands, transaction, errors
+from . import errors, internal_commands, transaction
+
 
 class Features:
+    """VAST database features - check if server is already support a feature."""
+
     def __init__(self, vast_version):
+        """Save the server version."""
         self.vast_version = vast_version
 
-    def check_import_table(self):
+    def check_imports_table(self):
+        """Check if the feature that support imports table is supported."""
         if self.vast_version < (5, 2):
             raise errors.NotSupportedVersion("import_table requires 5.2+", self.vast_version)
+
 
 class Session:
     """VAST database session."""

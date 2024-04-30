@@ -93,6 +93,10 @@ class MissingTransaction(Missing):
     pass
 
 
+class NotSupported(Exception):
+    pass
+
+
 @dataclass
 class MissingBucket(Missing):
     bucket: str
@@ -141,16 +145,19 @@ class TableExists(Exists):
     schema: str
     table: str
 
+
 @dataclass
-class NotSupported(Missing):
+class NotSupportedCommand(NotSupported):
     bucket: str
     schema: str
     table: str
 
+
 @dataclass
-class NotSupportedVersion(Missing):
+class NotSupportedVersion(NotSupported):
     err_msg: str
     version: str
+
 
 ERROR_TYPES_MAP = {
     HttpStatus.BAD_REQUEST: BadRequest,

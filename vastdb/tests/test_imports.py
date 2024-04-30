@@ -6,7 +6,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from vastdb import util
-from vastdb.errors import ImportFilesError, InvalidArgument, InternalServerError
+from vastdb.errors import ImportFilesError, InternalServerError, InvalidArgument
 
 log = logging.getLogger(__name__)
 
@@ -42,15 +42,15 @@ def test_parallel_imports(session, clean_bucket_name, s3):
         assert arrow_table.num_rows == num_rows * num_files
         arrow_table = pa.Table.from_batches(t.select(columns=['num'], predicate=t['num'] == 100))
         assert arrow_table.num_rows == num_files
-        import_table = t.get_imports_table()
+        import_table = t.imports_table()
         # checking all imports are on the imports table:
         objects_name = pa.Table.from_batches(import_table.select(columns=["ObjectName"]))
         objects_name = objects_name.to_pydict()
         object_names = set(objects_name['ObjectName'])
         prefix = 'prq'
         numbers = set(range(53))
-        assert all(name.startswith(prefix) for name in object_names) == True
-        all_numbers_present = numbers.issubset(int(name.replace(prefix, '')) for name in object_names)
+        assert all(name.startswith(prefix) for name in object_names)
+        numbers.issubset(int(name.replace(prefix, '')) for name in object_names)
         assert len(object_names) == len(objects_name['ObjectName'])
 
 
