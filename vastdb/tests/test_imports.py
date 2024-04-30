@@ -6,7 +6,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from vastdb import util
-from vastdb.errors import ImportFilesError, InvalidArgument
+from vastdb.errors import ImportFilesError, InvalidArgument, InternalServerError
 
 log = logging.getLogger(__name__)
 
@@ -34,12 +34,24 @@ def test_parallel_imports(session, clean_bucket_name, s3):
         b = tx.bucket(clean_bucket_name)
         s = b.create_schema('s1')
         t = s.create_table('t1', pa.schema([('num', pa.int64())]))
+        with pytest.raises(InternalServerError):
+            t.create_imports_table()
         log.info("Starting import of %d files", num_files)
         t.import_files(files)
         arrow_table = pa.Table.from_batches(t.select(columns=['num']))
         assert arrow_table.num_rows == num_rows * num_files
         arrow_table = pa.Table.from_batches(t.select(columns=['num'], predicate=t['num'] == 100))
         assert arrow_table.num_rows == num_files
+        import_table = t.get_imports_table()
+        # checking all imports are on the imports table:
+        objects_name = pa.Table.from_batches(import_table.select(columns=["ObjectName"]))
+        objects_name = objects_name.to_pydict()
+        object_names = set(objects_name['ObjectName'])
+        prefix = 'prq'
+        numbers = set(range(53))
+        assert all(name.startswith(prefix) for name in object_names) == True
+        all_numbers_present = numbers.issubset(int(name.replace(prefix, '')) for name in object_names)
+        assert len(object_names) == len(objects_name['ObjectName'])
 
 
 def test_create_table_from_files(session, clean_bucket_name, s3):

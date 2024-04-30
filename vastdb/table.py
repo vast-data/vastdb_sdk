@@ -83,7 +83,8 @@ class SelectSplitState:
                             txid=self.table.tx.txid,
                             limit_rows=self.config.limit_rows_per_sub_split,
                             sub_split_start_row_ids=self.subsplits_state.items(),
-                            enable_sorted_projections=self.config.use_semi_sorted_projections)
+                            enable_sorted_projections=self.config.use_semi_sorted_projections,
+                            query_imports_table=self.table.imports_table)
             pages_iter = internal_commands.parse_query_data_response(
                 conn=response.raw,
                 schema=self.query_data_request.response_schema,
@@ -111,6 +112,7 @@ class Table:
     stats: TableStats
     arrow_schema: pa.Schema = field(init=False, compare=False, repr=False)
     _ibis_table: ibis.Schema = field(init=False, compare=False, repr=False)
+    imports_table: bool
 
     def __post_init__(self):
         """Also, load columns' metadata."""
@@ -135,7 +137,7 @@ class Table:
         next_key = 0
         while True:
             cur_columns, next_key, is_truncated, _count = self.tx._rpc.api.list_columns(
-                bucket=self.bucket.name, schema=self.schema.name, table=self.name, next_key=next_key, txid=self.tx.txid)
+                bucket=self.bucket.name, schema=self.schema.name, table=self.name, next_key=next_key, txid=self.tx.txid, list_imports_table=self.imports_table)
             fields.extend(cur_columns)
             if not is_truncated:
                 break
@@ -145,6 +147,8 @@ class Table:
 
     def projection(self, name: str) -> "Projection":
         """Get a specific semi-sorted projection of this table."""
+        if self.imports_table:
+            raise errors.NotSupported(self.bucket.name, self.schema.name, self.name)
         projs = self.projections(projection_name=name)
         if not projs:
             raise errors.MissingProjection(self.bucket.name, self.schema.name, self.name, name)
@@ -154,6 +158,8 @@ class Table:
 
     def projections(self, projection_name=None) -> List["Projection"]:
         """List all semi-sorted projections of this table."""
+        if self.imports_table:
+            raise errors.NotSupported(self.bucket.name, self.schema.name, self.name)
         projections = []
         next_key = 0
         name_prefix = projection_name if projection_name else ""
@@ -175,6 +181,8 @@ class Table:
 
         The files must be on VAST S3 server and be accessible using current credentials.
         """
+        if self.imports_table:
+            raise errors.NotSupported(self.bucket.name, self.schema.name, self.name)
         source_files = {}
         for f in files_to_import:
             bucket_name, object_path = _parse_bucket_and_object_names(f)
@@ -188,6 +196,8 @@ class Table:
         The files must be on VAST S3 server and be accessible using current credentials.
         Each file must have its own partition values defined as an Arrow RecordBatch.
         """
+        if self.imports_table:
+            raise errors.NotSupported(self.bucket.name, self.schema.name, self.name)
         source_files = {}
         for f, record_batch in files_and_partitions.items():
             bucket_name, object_path = _parse_bucket_and_object_names(f)
@@ -248,7 +258,8 @@ class Table:
     def get_stats(self) -> TableStats:
         """Get the statistics of this table."""
         stats_tuple = self.tx._rpc.api.get_table_stats(
-            bucket=self.bucket.name, schema=self.schema.name, name=self.name, txid=self.tx.txid)
+            bucket=self.bucket.name, schema=self.schema.name, name=self.name, txid=self.tx.txid,
+            imports_table_stats=self.imports_table)
         return TableStats(**stats_tuple._asdict())
 
     def select(self, columns: Optional[List[str]] = None,
@@ -376,6 +387,8 @@ class Table:
 
     def insert(self, rows: pa.RecordBatch) -> pa.RecordBatch:
         """Insert a RecordBatch into this table."""
+        if self.imports_table:
+            raise errors.NotSupported(self.bucket.name, self.schema.name, self.name)
         serialized_slices = self.tx._rpc.api._record_batch_slices(rows, MAX_INSERT_ROWS_PER_PATCH)
         for slice in serialized_slices:
             self.tx._rpc.api.insert_rows(self.bucket.name, self.schema.name, self.name, record_batch=slice,
@@ -388,6 +401,8 @@ class Table:
 
         A subset of columns to be updated can be specified via the `columns` argument.
         """
+        if self.imports_table:
+            raise errors.NotSupported(self.bucket.name, self.schema.name, self.name)
         if columns is not None:
             update_fields = [(INTERNAL_ROW_ID, pa.uint64())]
             update_values = [_combine_chunks(rows[INTERNAL_ROW_ID])]
@@ -415,15 +430,17 @@ class Table:
         serialized_slices = self.tx._rpc.api._record_batch_slices(delete_rows_rb, MAX_ROWS_PER_BATCH)
         for slice in serialized_slices:
             self.tx._rpc.api.delete_rows(self.bucket.name, self.schema.name, self.name, record_batch=slice,
-                                         txid=self.tx.txid)
+                                         txid=self.tx.txid, delete_from_imports_table=self.imports_table)
 
     def drop(self) -> None:
         """Drop this table."""
-        self.tx._rpc.api.drop_table(self.bucket.name, self.schema.name, self.name, txid=self.tx.txid)
+        self.tx._rpc.api.drop_table(self.bucket.name, self.schema.name, self.name, txid=self.tx.txid, remove_imports_table=self.imports_table)
         log.info("Dropped table: %s", self.name)
 
     def rename(self, new_name) -> None:
         """Rename this table."""
+        if self.imports_table:
+            raise errors.NotSupported(self.bucket.name, self.schema.name, self.name)
         self.tx._rpc.api.alter_table(
             self.bucket.name, self.schema.name, self.name, txid=self.tx.txid, new_name=new_name)
         log.info("Renamed table from %s to %s ", self.name, new_name)
@@ -431,18 +448,24 @@ class Table:
 
     def add_column(self, new_column: pa.Schema) -> None:
         """Add a new column."""
+        if self.imports_table:
+            raise errors.NotSupported(self.bucket.name, self.schema.name, self.name)
         self.tx._rpc.api.add_columns(self.bucket.name, self.schema.name, self.name, new_column, txid=self.tx.txid)
         log.info("Added column(s): %s", new_column)
         self.arrow_schema = self.columns()
 
     def drop_column(self, column_to_drop: pa.Schema) -> None:
         """Drop an existing column."""
+        if self.imports_table:
+            raise errors.NotSupported(self.bucket.name, self.schema.name, self.name)
         self.tx._rpc.api.drop_columns(self.bucket.name, self.schema.name, self.name, column_to_drop, txid=self.tx.txid)
         log.info("Dropped column(s): %s", column_to_drop)
         self.arrow_schema = self.columns()
 
     def rename_column(self, current_column_name: str, new_column_name: str) -> None:
         """Rename an existing column."""
+        if self.imports_table:
+            raise errors.NotSupported(self.bucket.name, self.schema.name, self.name)
         self.tx._rpc.api.alter_column(self.bucket.name, self.schema.name, self.name, name=current_column_name,
                                        new_name=new_column_name, txid=self.tx.txid)
         log.info("Renamed column: %s to %s", current_column_name, new_column_name)
@@ -450,10 +473,22 @@ class Table:
 
     def create_projection(self, projection_name: str, sorted_columns: List[str], unsorted_columns: List[str]) -> "Projection":
         """Create a new semi-sorted projection."""
+        if self.imports_table:
+            raise errors.NotSupported(self.bucket.name, self.schema.name, self.name)
         columns = [(sorted_column, "Sorted") for sorted_column in sorted_columns] + [(unsorted_column, "Unorted") for unsorted_column in unsorted_columns]
         self.tx._rpc.api.create_projection(self.bucket.name, self.schema.name, self.name, projection_name, columns=columns, txid=self.tx.txid)
         log.info("Created projection: %s", projection_name)
         return self.projection(projection_name)
+
+    def create_imports_table(self, fail_if_exists=True) -> "Table":
+        empty_schema = pa.schema([])
+        self.tx._rpc.api.create_table(self.bucket.name, self.schema.name, self.name, empty_schema, txid=self.tx.txid,
+                                        create_imports_table=True)
+        log.info("Created imports table for table: %s", self.name)
+        return self.get_imports_table()
+
+    def get_imports_table(self, fail_if_missing=True) -> Optional["table.Table"]:
+        return Table(name=self.name, schema=self.schema, handle=int(self.handle), stats=self.stats, imports_table=True)
 
     def __getitem__(self, col_name):
         """Allow constructing ibis-like column expressions from this table.

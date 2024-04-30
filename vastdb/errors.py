@@ -141,6 +141,11 @@ class TableExists(Exists):
     schema: str
     table: str
 
+@dataclass
+class NotSupported(Missing):
+    bucket: str
+    schema: str
+    table: str
 
 ERROR_TYPES_MAP = {
     HttpStatus.BAD_REQUEST: BadRequest,

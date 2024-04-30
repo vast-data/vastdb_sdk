@@ -1046,7 +1046,7 @@ class VastdbApi:
         # create the table
         return self.create_table(bucket, schema, name, arrow_schema, txid, client_tags, expected_retvals)
 
-    def get_table_stats(self, bucket, schema, name, txid=0, client_tags=[], expected_retvals=[]):
+    def get_table_stats(self, bucket, schema, name, txid=0, client_tags=[], expected_retvals=[], imports_table_stats=False):
         """
         GET /mybucket/myschema/mytable?stats HTTP/1.1
         tabular-txid: TransactionId
@@ -1055,7 +1055,8 @@ class VastdbApi:
         The Command will return the statistics in flatbuf format
         """
         headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
-        res = self.session.get(self._api_prefix(bucket=bucket, schema=schema, table=name, command="stats"), headers=headers)
+        url_params = {'sub-table': IMPORTED_OBJECTS_TABLE_NAME} if imports_table_stats else {}
+        res = self.session.get(self._api_prefix(bucket=bucket, schema=schema, table=name, command="stats", url_params=url_params), headers=headers)
         self._check_res(res, "get_table_stats", expected_retvals)
 
         flatbuf = b''.join(res.iter_content(chunk_size=128))
