@@ -481,6 +481,7 @@ class Table:
         return self.projection(projection_name)
 
     def create_imports_table(self, fail_if_exists=True) -> "Table":
+        self.tx._rpc.features.check_import_table()
         empty_schema = pa.schema([])
         self.tx._rpc.api.create_table(self.bucket.name, self.schema.name, self.name, empty_schema, txid=self.tx.txid,
                                         create_imports_table=True)
@@ -488,6 +489,7 @@ class Table:
         return self.get_imports_table()
 
     def get_imports_table(self, fail_if_missing=True) -> Optional["table.Table"]:
+        self.tx._rpc.features.check_import_table()
         return Table(name=self.name, schema=self.schema, handle=int(self.handle), stats=self.stats, imports_table=True)
 
     def __getitem__(self, col_name):

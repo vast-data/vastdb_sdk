@@ -147,6 +147,11 @@ class NotSupported(Missing):
     schema: str
     table: str
 
+@dataclass
+class NotSupportedVersion(Missing):
+    err_msg: str
+    version: str
+
 ERROR_TYPES_MAP = {
     HttpStatus.BAD_REQUEST: BadRequest,
     HttpStatus.FOBIDDEN: Forbidden,

@@ -11,8 +11,15 @@ import os
 
 import boto3
 
-from . import internal_commands, transaction
+from . import internal_commands, transaction, errors
 
+class Features:
+    def __init__(self, vast_version):
+        self.vast_version = vast_version
+
+    def check_import_table(self):
+        if self.vast_version < (5, 2):
+            raise errors.NotSupportedVersion("import_table requires 5.2+", self.vast_version)
 
 class Session:
     """VAST database session."""
@@ -27,6 +34,8 @@ class Session:
             endpoint = os.environ['AWS_S3_ENDPOINT_URL']
 
         self.api = internal_commands.VastdbApi(endpoint, access, secret)
+        version_tuple = tuple(int(part) for part in self.api.vast_version.split('.'))
+        self.features = Features(version_tuple)
         self.s3 = boto3.client('s3',
             aws_access_key_id=access,
             aws_secret_access_key=secret,
