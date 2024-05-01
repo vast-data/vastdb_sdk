@@ -60,5 +60,4 @@ def test_commits_and_rollbacks(session, clean_bucket_name):
 def test_list_snapshots(session, clean_bucket_name):
     with session.transaction() as tx:
         b = tx.bucket(clean_bucket_name)
-        s = b.snapshots()
-        assert s == []
+        b.snapshots()  # VAST Catalog may create some snapshots
