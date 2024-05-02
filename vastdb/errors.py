@@ -85,6 +85,10 @@ class InvalidArgument(Exception):
     pass
 
 
+class TooWideRow(InvalidArgument):
+    pass
+
+
 class Missing(Exception):
     pass
 

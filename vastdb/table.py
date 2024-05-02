@@ -12,7 +12,7 @@ from typing import Dict, List, Optional, Tuple, Union
 import ibis
 import pyarrow as pa
 
-from . import errors, internal_commands, schema
+from . import errors, internal_commands, schema, util
 
 log = logging.getLogger(__name__)
 
@@ -389,7 +389,7 @@ class Table:
         """Insert a RecordBatch into this table."""
         if self._imports_table:
             raise errors.NotSupportedCommand(self.bucket.name, self.schema.name, self.name)
-        serialized_slices = self.tx._rpc.api._record_batch_slices(rows, MAX_INSERT_ROWS_PER_PATCH)
+        serialized_slices = util.iter_serialized_slices(rows, MAX_INSERT_ROWS_PER_PATCH)
         for slice in serialized_slices:
             self.tx._rpc.api.insert_rows(self.bucket.name, self.schema.name, self.name, record_batch=slice,
                                                txid=self.tx.txid)
@@ -414,7 +414,7 @@ class Table:
         else:
             update_rows_rb = rows
 
-        serialized_slices = self.tx._rpc.api._record_batch_slices(update_rows_rb, MAX_ROWS_PER_BATCH)
+        serialized_slices = util.iter_serialized_slices(update_rows_rb, MAX_ROWS_PER_BATCH)
         for slice in serialized_slices:
             self.tx._rpc.api.update_rows(self.bucket.name, self.schema.name, self.name, record_batch=slice,
                                          txid=self.tx.txid)
@@ -427,7 +427,7 @@ class Table:
         delete_rows_rb = pa.record_batch(schema=pa.schema([(INTERNAL_ROW_ID, pa.uint64())]),
                                          data=[_combine_chunks(rows[INTERNAL_ROW_ID])])
 
-        serialized_slices = self.tx._rpc.api._record_batch_slices(delete_rows_rb, MAX_ROWS_PER_BATCH)
+        serialized_slices = util.iter_serialized_slices(delete_rows_rb, MAX_ROWS_PER_BATCH)
         for slice in serialized_slices:
             self.tx._rpc.api.delete_rows(self.bucket.name, self.schema.name, self.name, record_batch=slice,
                                          txid=self.tx.txid, delete_from_imports_table=self._imports_table)

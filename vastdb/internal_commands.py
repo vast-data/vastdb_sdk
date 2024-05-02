@@ -1,7 +1,6 @@
 import itertools
 import json
 import logging
-import math
 import re
 import struct
 import urllib.parse
@@ -733,20 +732,6 @@ def _parse_table_info(obj):
     used_bytes = obj.SizeInBytes()
     return TableInfo(name, properties, handle, num_rows, used_bytes)
 
-
-def build_record_batch(column_info, column_values):
-    fields = [pa.field(column_name, column_type) for column_type, column_name in column_info]
-    schema = pa.schema(fields)
-    arrays = [pa.array(column_values[column_type], type=column_type) for column_type, _ in column_info]
-    batch = pa.record_batch(arrays, schema)
-    return serialize_record_batch(batch)
-
-
-def serialize_record_batch(batch):
-    sink = pa.BufferOutputStream()
-    with pa.ipc.new_stream(sink, batch.schema) as writer:
-        writer.write(batch)
-    return sink.getvalue()
 
 # Results that returns from tablestats
 
@@ -1578,48 +1563,6 @@ class VastdbApi:
             res = iterate_over_import_data_response(res)
 
         return self._check_res(res, "import_data", expected_retvals)
-
-    def _record_batch_slices(self, batch, rows_per_slice=None):
-        max_slice_size_in_bytes = int(0.9 * 5 * 1024 * 1024)  # 0.9 * 5MB
-        batch_len = len(batch)
-        serialized_batch = serialize_record_batch(batch)
-        batch_size_in_bytes = len(serialized_batch)
-        _logger.debug('max_slice_size_in_bytes=%d batch_len=%d batch_size_in_bytes=%d',
-                      max_slice_size_in_bytes, batch_len, batch_size_in_bytes)
-
-        if not rows_per_slice:
-            if batch_size_in_bytes < max_slice_size_in_bytes:
-                rows_per_slice = batch_len
-            else:
-                rows_per_slice = int(0.9 * batch_len * max_slice_size_in_bytes / batch_size_in_bytes)
-
-        done_slicing = False
-        while not done_slicing:
-            # Attempt slicing according to the current rows_per_slice
-            offset = 0
-            serialized_slices = []
-            for i in range(math.ceil(batch_len / rows_per_slice)):
-                offset = rows_per_slice * i
-                if offset >= batch_len:
-                    done_slicing = True
-                    break
-                slice_batch = batch.slice(offset, rows_per_slice)
-                serialized_slice_batch = serialize_record_batch(slice_batch)
-                sizeof_serialized_slice_batch = len(serialized_slice_batch)
-
-                if sizeof_serialized_slice_batch <= max_slice_size_in_bytes:
-                    serialized_slices.append(serialized_slice_batch)
-                else:
-                    _logger.info(f'Using rows_per_slice {rows_per_slice} slice {i} size {sizeof_serialized_slice_batch} exceeds {max_slice_size_in_bytes} bytes, trying smaller rows_per_slice')
-                    # We have a slice that is too large
-                    rows_per_slice = int(rows_per_slice / 2)
-                    if rows_per_slice < 1:
-                        raise ValueError('cannot decrease batch size below 1 row')
-                    break
-            else:
-                done_slicing = True
-
-        return serialized_slices
 
     def insert_rows(self, bucket, schema, table, record_batch, txid=0, client_tags=[], expected_retvals=[]):
         """

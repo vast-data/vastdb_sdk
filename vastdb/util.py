@@ -1,20 +1,22 @@
 import logging
-from typing import Callable, List, Optional
+from typing import TYPE_CHECKING, Callable, List, Optional, Union
 
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from .errors import InvalidArgument
-from .schema import Schema
-from .table import ImportConfig, Table
+from .errors import InvalidArgument, TooWideRow
 
 log = logging.getLogger(__name__)
 
+if TYPE_CHECKING:
+    from .schema import Schema
+    from .table import ImportConfig, Table
+
 
 def create_table_from_files(
-        schema: Schema, table_name: str, parquet_files: List[str],
+        schema: "Schema", table_name: str, parquet_files: List[str],
         schema_merge_func: Optional[Callable] = None,
-        config: Optional[ImportConfig] = None) -> Table:
+        config: Optional["ImportConfig"] = None) -> "Table":
     if not schema_merge_func:
         schema_merge_func = default_schema_merge
     else:
@@ -77,3 +79,36 @@ def union_schema_merge(current_schema: pa.Schema, new_schema: pa.Schema) -> pa.S
     This function returns a unified schema from potentially two different schemas.
     """
     return pa.unify_schemas([current_schema, new_schema])
+
+
+MAX_TABULAR_REQUEST_SIZE = 5 << 20  # in bytes
+MAX_RECORD_BATCH_SLICE_SIZE = int(0.9 * MAX_TABULAR_REQUEST_SIZE)
+
+
+def iter_serialized_slices(batch: Union[pa.RecordBatch, pa.Table], max_rows_per_slice=None):
+    """Iterate over a list of record batch slices."""
+
+    rows_per_slice = int(0.9 * len(batch) * MAX_RECORD_BATCH_SLICE_SIZE / batch.nbytes)
+    if max_rows_per_slice is not None:
+        rows_per_slice = min(rows_per_slice, max_rows_per_slice)
+
+    offset = 0
+    while offset < len(batch):
+        if rows_per_slice < 1:
+            raise TooWideRow(batch)
+
+        batch_slice = batch.slice(offset, rows_per_slice)
+        serialized_slice_batch = serialize_record_batch(batch_slice)
+        if len(serialized_slice_batch) <= MAX_RECORD_BATCH_SLICE_SIZE:
+            yield serialized_slice_batch
+            offset += rows_per_slice
+        else:
+            rows_per_slice = rows_per_slice // 2
+
+
+def serialize_record_batch(batch: Union[pa.RecordBatch, pa.Table]):
+    """Serialize a RecordBatch using Arrow IPC format."""
+    sink = pa.BufferOutputStream()
+    with pa.ipc.new_stream(sink, batch.schema) as writer:
+        writer.write(batch)
+    return sink.getvalue()
