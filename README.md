@@ -86,6 +86,8 @@ Our SDK supports predicate and projection pushdown:
     table.select(predicate=table['c3'].contains('substring'))
 ```
 
+See [here for more details](docs/predicate.md).
+
 ## Import a single Parquet file via S3 protocol
 
 It is possible to efficiently create a table from a Parquet file (without copying it via the client):
