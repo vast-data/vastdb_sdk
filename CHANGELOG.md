@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.1.3] (2024-05-05)
+[0.1.3]: https://github.com/vast-data/vastdb_sdk/compare/v0.1.2...v0.1.3
+
+### Added
+ - Document predicate pushdown support
+ - Access imports' table (for VAST 5.2+)
+ - Support `is_in` predicate pushdown
+ - Document `table.py`
+
+### Fixed
+ - Freeze `ibis` dependency at 8.0.0
+ - Support snapshot-based access
+ - Optimize RecordBatch slicing
+
 ## [0.1.2] (2024-04-25)
 [0.1.2]: https://github.com/vast-data/vastdb_sdk/compare/v0.1.1...v0.1.2
 
