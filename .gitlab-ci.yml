@@ -1,7 +1,7 @@
 variables:
   DOCKER_REGISTRY: 110450271409.dkr.ecr.eu-west-1.amazonaws.com
+  PYSDK_BUILDER_IMAGE: $DOCKER_REGISTRY/dev/infra:vastdb-python-sdk-builder-latest
   ORION_PREFIX: $DOCKER_REGISTRY/dev/orion
-  PYSDK_BUILDER_IMAGE: $ORION_PREFIX:vastdb-python-sdk-builder-latest
   PYSDK_IMAGE_PREFIX: $ORION_PREFIX:vastdb-python-sdk-pipe-$CI_PIPELINE_ID
   ORION_BRANCH: BUILD/roman.zeyde/bump-pysdk-5.2
 
@@ -13,8 +13,7 @@ pre_build:
     - docker build -f Dockerfile.prebuild -t $PYSDK_BUILDER_IMAGE .
     - docker push $PYSDK_BUILDER_IMAGE
   rules:
-    - changes:
-      - Dockerfile.prebuild
+    - if: $CI_COMMIT_BRANCH =~ /^PREBUILD.*/
   tags:
     - code-builder-small-shell
 
