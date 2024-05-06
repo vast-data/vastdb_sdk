@@ -5,3 +5,5 @@ ibis-framework==8.0.0
 pyarrow
 requests
 xmltodict
+backoff==2.2.1
+

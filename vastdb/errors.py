@@ -71,6 +71,10 @@ class ServiceUnavailable(HttpError):
     pass
 
 
+class Slowdown(ServiceUnavailable):
+    pass
+
+
 class UnexpectedError(HttpError):
     pass
 
@@ -163,6 +167,12 @@ class NotSupportedVersion(NotSupported):
     version: str
 
 
+def handle_unavailable(**kwargs):
+    if kwargs['code'] == 'SlowDown':
+        raise Slowdown(**kwargs)
+    raise ServiceUnavailable(**kwargs)
+
+
 ERROR_TYPES_MAP = {
     HttpStatus.BAD_REQUEST: BadRequest,
     HttpStatus.FOBIDDEN: Forbidden,
@@ -172,7 +182,7 @@ ERROR_TYPES_MAP = {
     HttpStatus.CONFLICT: Conflict,
     HttpStatus.INTERNAL_SERVER_ERROR: InternalServerError,
     HttpStatus.NOT_IMPLEMENTED: NotImplemented,
-    HttpStatus.SERVICE_UNAVAILABLE: ServiceUnavailable,
+    HttpStatus.SERVICE_UNAVAILABLE: handle_unavailable,
 }
 
 
@@ -205,4 +215,4 @@ def from_response(res: requests.Response):
     log.warning("RPC failed: %s", kwargs)
     status = HttpStatus(res.status_code)
     error_type = ERROR_TYPES_MAP.get(status, UnexpectedError)
-    return error_type(**kwargs)
+    return error_type(**kwargs)  # type: ignore

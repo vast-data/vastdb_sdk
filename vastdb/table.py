@@ -7,8 +7,9 @@ import queue
 from dataclasses import dataclass, field
 from math import ceil
 from threading import Event
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
+import backoff
 import ibis
 import pyarrow as pa
 
@@ -46,6 +47,8 @@ class QueryConfig:
     use_semi_sorted_projections: bool = True
     rows_per_split: int = 4000000
     query_id: str = ""
+    max_slowdown_retry: int = 10
+    backoff_func: Any = field(default=backoff.on_exception(backoff.expo, errors.Slowdown, max_tries=max_slowdown_retry))
 
 
 @dataclass
@@ -72,7 +75,8 @@ class SelectSplitState:
         Can be called repeatedly, to allow pagination.
         """
         while not self.done:
-            response = api.query_data(
+            query_with_backoff = self.config.backoff_func(api.query_data)
+            response = query_with_backoff(
                             bucket=self.table.bucket.name,
                             schema=self.table.schema.name,
                             table=self.table.name,
