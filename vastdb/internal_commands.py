@@ -178,6 +178,7 @@ class Predicate:
         )
         from ibis.expr.operations.logical import (
             And,
+            Between,
             Equals,
             Greater,
             GreaterEqual,
@@ -200,6 +201,7 @@ class Predicate:
             IsNull: self.build_is_null,
             Not: self.build_is_not_null,
             StringContains: self.build_match_substring,
+            Between: self.build_between,
         }
 
         positions_map = dict((f.name, index) for index, f in enumerate(self.schema))  # TODO: BFS
@@ -237,6 +239,9 @@ class Predicate:
                             raise NotImplementedError(self.expr)
                         column, = not_arg.args
                         literals = (None,)
+                    elif builder_func == self.build_between:
+                        column, lower, upper = inner_op.args
+                        literals = (None,)
                     else:
                         column, arg = inner_op.args
                         if isinstance(arg, tuple):
@@ -262,6 +267,9 @@ class Predicate:
                         args_offsets = [column_offset]
                         if literal is not None:
                             args_offsets.append(self.build_literal(field=field, value=literal.value))
+                        if builder_func == self.build_between:
+                            args_offsets.append(self.build_literal(field=field, value=lower.value))
+                            args_offsets.append(self.build_literal(field=field, value=upper.value))
 
                         inner_offsets.append(builder_func(*args_offsets))
 
@@ -555,6 +563,13 @@ class Predicate:
 
     def build_match_substring(self, column: int, literal: int):
         return self.build_function('match_substring', column, literal)
+
+    def build_between(self, column: int, lower: int, upper: int):
+        offsets = [
+            self.build_greater_equal(column, lower),
+            self.build_less_equal(column, upper),
+        ]
+        return self.build_and(offsets)
 
 
 class FieldNodesState:
