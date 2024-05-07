@@ -265,6 +265,8 @@ def test_filters(session, clean_bucket_name):
             return pa.Table.from_batches(t.select(predicate=predicate), t.arrow_schema)
 
         assert select(None) == expected
+        assert select(True) == expected
+        assert select(False) == pa.Table.from_batches([], schema=columns)
 
         assert select(t['a'].between(222, 444)) == expected.filter((pc.field('a') >= 222) & (pc.field('a') <= 444))
         assert select((t['a'].between(222, 444)) & (t['b'] > 2.5)) == expected.filter((pc.field('a') >= 222) & (pc.field('a') <= 444) & (pc.field('b') > 2.5))

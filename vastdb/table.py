@@ -300,6 +300,12 @@ class Table:
             query_schema = pa.schema(queried_fields)
             columns.append(INTERNAL_ROW_ID)
 
+        if predicate is True:
+            predicate = None
+        if predicate is False:
+            response_schema = internal_commands.get_response_schema(schema=query_schema, field_names=columns)
+            return pa.RecordBatchReader.from_batches(response_schema, [])
+
         query_data_request = internal_commands.build_query_data_request(
             schema=query_schema,
             predicate=predicate,

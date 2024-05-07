@@ -2122,6 +2122,13 @@ class QueryDataRequest:
         self.response_parser = response_parser
 
 
+def get_response_schema(schema: 'pa.Schema' = pa.schema([]), field_names: Optional[List[str]] = None):
+    if field_names is None:
+        field_names = [field.name for field in schema]
+
+    return pa.schema([schema.field(name) for name in field_names])
+
+
 def build_query_data_request(schema: 'pa.Schema' = pa.schema([]), predicate: ibis.expr.types.BooleanColumn = None, field_names: Optional[List[str]] = None):
     builder = flatbuffers.Builder(1024)
 
@@ -2142,13 +2149,11 @@ def build_query_data_request(schema: 'pa.Schema' = pa.schema([]), predicate: ibi
     filter_obj = predicate.serialize(builder)
 
     parser = QueryDataParser(schema)
-    fields_map = {node.field.name: node.field for node in parser.nodes}
     leaves_map = {node.field.name: [leaf.index for leaf in node._iter_leaves()] for node in parser.nodes}
 
-    if field_names is None:
-        field_names = [field.name for field in schema]
+    response_schema = get_response_schema(schema, field_names)
+    field_names = [field.name for field in response_schema]
 
-    response_schema = pa.schema([fields_map[name] for name in field_names])
     projection_fields = []
     for field_name in field_names:
         # TODO: only root-level projection pushdown is supported (i.e. no support for SELECT s.x FROM t)
