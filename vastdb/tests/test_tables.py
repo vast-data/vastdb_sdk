@@ -71,6 +71,16 @@ def test_tables(session, clean_bucket_name):
         }
 
 
+def test_insert_wide_row(session, clean_bucket_name):
+    columns = pa.schema([pa.field(f's{i}', pa.utf8()) for i in range(500)])
+    data = [['a' * 10**4] for i in range(500)]
+    expected = pa.table(schema=columns, data=data)
+
+    with prepare_data(session, clean_bucket_name, 's', 't', expected) as t:
+        actual = pa.Table.from_batches(t.select())
+        assert actual == expected
+
+
 def test_exists(session, clean_bucket_name):
     with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).create_schema('s1')
@@ -336,7 +346,8 @@ def test_parquet_export(session, clean_bucket_name):
             ['a', 'b'],
         ])
         expected = pa.Table.from_batches([rb])
-        t.insert(rb)
+        rb = t.insert(rb)
+        assert rb.to_pylist() == [0, 1]
         actual = pa.Table.from_batches(t.select())
         assert actual == expected
 

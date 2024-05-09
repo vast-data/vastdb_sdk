@@ -19,10 +19,14 @@ log = logging.getLogger(__name__)
 
 
 INTERNAL_ROW_ID = "$row_id"
+INTERNAL_ROW_ID_FIELD = pa.field(INTERNAL_ROW_ID, pa.uint64())
+
 MAX_ROWS_PER_BATCH = 512 * 1024
 # for insert we need a smaller limit due to response amplification
 # for example insert of 512k uint8 result in 512k*8bytes response since row_ids are uint64
 MAX_INSERT_ROWS_PER_PATCH = 512 * 1024
+# in case insert has TooWideRow - need to insert in smaller batches - each cell could contain up to 128K, and our wire is limited to 5MB
+MAX_COLUMN_IN_BATCH = int(5 * 1024 / 128)
 
 
 @dataclass
@@ -295,7 +299,7 @@ class Table:
 
         query_schema = self.arrow_schema
         if internal_row_id:
-            queried_fields = [pa.field(INTERNAL_ROW_ID, pa.uint64())]
+            queried_fields = [INTERNAL_ROW_ID_FIELD]
             queried_fields.extend(column for column in self.arrow_schema)
             query_schema = pa.schema(queried_fields)
             columns.append(INTERNAL_ROW_ID)
@@ -395,27 +399,68 @@ class Table:
 
         return pa.RecordBatchReader.from_batches(query_data_request.response_schema, batches_iterator())
 
-    def insert(self, rows: pa.RecordBatch) -> pa.RecordBatch:
+    def insert_in_column_batches(self, rows: pa.RecordBatch):
+        """Split the RecordBatch into max_columns that can be inserted in single RPC.
+
+        Insert first MAX_COLUMN_IN_BATCH columns and get the row_ids. Then loop on the rest of the columns and
+        update in groups of MAX_COLUMN_IN_BATCH.
+        """
+        column_record_batch = pa.RecordBatch.from_arrays([_combine_chunks(rows.column(i)) for i in range(0, MAX_COLUMN_IN_BATCH)],
+                                                         schema=pa.schema([rows.schema.field(i) for i in range(0, MAX_COLUMN_IN_BATCH)]))
+        row_ids = self.insert(rows=column_record_batch)  # type: ignore
+
+        columns_names = [field.name for field in rows.schema]
+        columns = list(rows.schema)
+        arrays = [_combine_chunks(rows.column(i)) for i in range(len(rows.schema))]
+        for start in range(MAX_COLUMN_IN_BATCH, len(rows.schema), MAX_COLUMN_IN_BATCH):
+            end = start + MAX_COLUMN_IN_BATCH if start + MAX_COLUMN_IN_BATCH < len(rows.schema) else len(rows.schema)
+            columns_name_chunk = columns_names[start:end]
+            columns_chunks = columns[start:end]
+            arrays_chunks = arrays[start:end]
+            columns_chunks.append(INTERNAL_ROW_ID_FIELD)
+            arrays_chunks.append(row_ids.to_pylist())
+            column_record_batch = pa.RecordBatch.from_arrays(arrays_chunks, schema=pa.schema(columns_chunks))
+            self.update(rows=column_record_batch, columns=columns_name_chunk)
+        return row_ids
+
+    def insert(self, rows: pa.RecordBatch):
         """Insert a RecordBatch into this table."""
         if self._imports_table:
             raise errors.NotSupportedCommand(self.bucket.name, self.schema.name, self.name)
-        serialized_slices = util.iter_serialized_slices(rows, MAX_INSERT_ROWS_PER_PATCH)
-        for slice in serialized_slices:
-            self.tx._rpc.api.insert_rows(self.bucket.name, self.schema.name, self.name, record_batch=slice,
-                                               txid=self.tx.txid)
+        try:
+            row_ids = []
+            serialized_slices = util.iter_serialized_slices(rows, MAX_INSERT_ROWS_PER_PATCH)
+            for slice in serialized_slices:
+                res = self.tx._rpc.api.insert_rows(self.bucket.name, self.schema.name, self.name, record_batch=slice,
+                                                   txid=self.tx.txid)
+                (batch,) = pa.RecordBatchStreamReader(res.raw)
+                row_ids.append(batch[INTERNAL_ROW_ID])
+            try:
+                self.tx._rpc.features.check_return_row_ids()
+            except errors.NotSupportedVersion:
+                return  # type: ignore
+            return pa.chunked_array(row_ids)
+        except errors.TooWideRow:
+            self.tx._rpc.features.check_return_row_ids()
+            return self.insert_in_column_batches(rows)
 
     def update(self, rows: Union[pa.RecordBatch, pa.Table], columns: Optional[List[str]] = None) -> None:
         """Update a subset of cells in this table.
 
-        Row IDs are specified using a special field (named "$row_id" of uint64 type).
+        Row IDs are specified using a special field (named "$row_id" of uint64 type) - this function assume that this
+        special field is part of arguments.
 
         A subset of columns to be updated can be specified via the `columns` argument.
         """
         if self._imports_table:
             raise errors.NotSupportedCommand(self.bucket.name, self.schema.name, self.name)
+        try:
+            rows_chunk = rows[INTERNAL_ROW_ID]
+        except KeyError:
+            raise errors.MissingRowIdColumn
         if columns is not None:
             update_fields = [(INTERNAL_ROW_ID, pa.uint64())]
-            update_values = [_combine_chunks(rows[INTERNAL_ROW_ID])]
+            update_values = [_combine_chunks(rows_chunk)]
             for col in columns:
                 update_fields.append(rows.field(col))
                 update_values.append(_combine_chunks(rows[col]))
@@ -434,8 +479,14 @@ class Table:
 
         Row IDs are specified using a special field (named "$row_id" of uint64 type).
         """
+        if self._imports_table:
+            raise errors.NotSupportedCommand(self.bucket.name, self.schema.name, self.name)
+        try:
+            rows_chunk = rows[INTERNAL_ROW_ID]
+        except KeyError:
+            raise errors.MissingRowIdColumn
         delete_rows_rb = pa.record_batch(schema=pa.schema([(INTERNAL_ROW_ID, pa.uint64())]),
-                                         data=[_combine_chunks(rows[INTERNAL_ROW_ID])])
+                                         data=[_combine_chunks(rows_chunk)])
 
         serialized_slices = util.iter_serialized_slices(delete_rows_rb, MAX_ROWS_PER_BATCH)
         for slice in serialized_slices:

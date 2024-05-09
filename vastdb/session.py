@@ -26,6 +26,11 @@ class Features:
         if self.vast_version < (5, 2):
             raise errors.NotSupportedVersion("import_table requires 5.2+", self.vast_version)
 
+    def check_return_row_ids(self):
+        """Check if insert/update/delete can return the row_ids."""
+        if self.vast_version < (5, 1):
+            raise errors.NotSupportedVersion("return_row_ids requires 5.1+", self.vast_version)
+
 
 class Session:
     """VAST database session."""

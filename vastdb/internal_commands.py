@@ -1593,8 +1593,7 @@ class VastdbApi:
         headers['Content-Length'] = str(len(record_batch))
         res = self.session.post(self._api_prefix(bucket=bucket, schema=schema, table=table, command="rows"),
                                 data=record_batch, headers=headers, stream=True)
-        self._check_res(res, "insert_rows", expected_retvals)
-        res.raw.read()  # flush the response
+        return self._check_res(res, "insert_rows", expected_retvals)
 
     def update_rows(self, bucket, schema, table, record_batch, txid=0, client_tags=[], expected_retvals=[]):
         """

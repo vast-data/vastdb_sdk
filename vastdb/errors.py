@@ -101,6 +101,10 @@ class MissingTransaction(Missing):
     pass
 
 
+class MissingRowIdColumn(Missing):
+    pass
+
+
 class NotSupported(Exception):
     pass
 
