@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 from setuptools import find_packages, setup
 
@@ -34,7 +35,7 @@ setup(
     author_email='hello@vastdata.com',
     license='Copyright (C) VAST Data Ltd.',
     packages=find_packages(),
-    install_requires=open('requirements.txt').read().strip().split('\n'),
+    install_requires=Path('requirements.txt').read_text().strip().split(),
     long_description=long_description,
     long_description_content_type='text/markdown',
     classifiers=[
