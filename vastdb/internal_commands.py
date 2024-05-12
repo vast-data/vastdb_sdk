@@ -839,12 +839,13 @@ class VastdbApi:
         return prefix
 
     def _fill_common_headers(self, txid=0, client_tags=[], version_id=1):
-        common_headers = {'tabular-txid': str(txid), 'tabular-api-version-id': str(version_id),
-                          'tabular-client-name': 'tabular-api'}
-        for tag in client_tags:
-            common_headers['tabular-client-tags-%d' % client_tags.index(tag)] = tag
+        common_headers = {
+            'tabular-txid': str(txid),
+            'tabular-api-version-id': str(version_id),
+            'tabular-client-name': 'tabular-api'
+        }
 
-        return common_headers
+        return common_headers | {f'tabular-client-tags-{index}': tag for index, tag in enumerate(client_tags)}
 
     def _check_res(self, res, cmd="", expected_retvals=[]):
         if exc := errors.from_response(res):
