@@ -953,8 +953,7 @@ class VastdbApi:
             res_headers = res.headers
             next_key = int(res_headers['tabular-next-key'])
             is_truncated = res_headers['tabular-is-truncated'] == 'true'
-            flatbuf = b''.join(res.iter_content(chunk_size=128))
-            lists = list_schemas.GetRootAs(flatbuf)
+            lists = list_schemas.GetRootAs(res.content)
             bucket_name = lists.BucketName().decode()
             if not bucket.startswith(bucket_name):
                 raise ValueError(f'bucket: {bucket} did not start from {bucket_name}')
@@ -977,8 +976,7 @@ class VastdbApi:
         res = self.session.get(self._api_prefix(bucket=bucket, command="list", url_params=url_params), headers={}, stream=True)
         self._check_res(res, "list_snapshots")
 
-        out = b''.join(res.iter_content(chunk_size=128))
-        xml_str = out.decode()
+        xml_str = res.content.decode()
         xml_dict = xmltodict.parse(xml_str)
         list_res = xml_dict['ListBucketResult']
         is_truncated = list_res['IsTruncated'] == 'true'
@@ -1060,8 +1058,7 @@ class VastdbApi:
         res = self.session.get(self._api_prefix(bucket=bucket, schema=schema, table=name, command="stats", url_params=url_params), headers=headers)
         self._check_res(res, "get_table_stats", expected_retvals)
 
-        flatbuf = b''.join(res.iter_content(chunk_size=128))
-        stats = get_table_stats.GetRootAs(flatbuf)
+        stats = get_table_stats.GetRootAs(res.content)
         num_rows = stats.NumRows()
         size_in_bytes = stats.SizeInBytes()
         is_external_rowid_alloc = stats.IsExternalRowidAlloc()
@@ -1160,8 +1157,7 @@ class VastdbApi:
             res_headers = res.headers
             next_key = int(res_headers['tabular-next-key'])
             is_truncated = res_headers['tabular-is-truncated'] == 'true'
-            flatbuf = b''.join(res.iter_content(chunk_size=128))
-            lists = list_tables.GetRootAs(flatbuf)
+            lists = list_tables.GetRootAs(res.content)
             bucket_name = lists.BucketName().decode()
             schema_name = lists.SchemaName().decode()
             if not bucket.startswith(bucket_name):  # ignore snapshot name
@@ -1289,11 +1285,7 @@ class VastdbApi:
             next_key = int(res_headers['tabular-next-key'])
             is_truncated = res_headers['tabular-is-truncated'] == 'true'
             count = int(res_headers['tabular-list-count'])
-            columns = []
-            if not count_only:
-                schema_buf = b''.join(res.iter_content(chunk_size=128))
-                schema_out = pa.ipc.open_stream(schema_buf).schema
-                columns = schema_out
+            columns = [] if count_only else pa.ipc.open_stream(res.content).schema
 
             return columns, next_key, is_truncated, count
 
@@ -1693,8 +1685,7 @@ class VastdbApi:
         res = self.session.get(self._api_prefix(bucket=bucket, schema=schema, table=table, command="projection-stats", url_params=url_params),
                                headers=headers)
         if res.status_code == 200:
-            flatbuf = b''.join(res.iter_content(chunk_size=128))
-            stats = get_projection_table_stats.GetRootAs(flatbuf)
+            stats = get_projection_table_stats.GetRootAs(res.content)
             num_rows = stats.NumRows()
             size_in_bytes = stats.SizeInBytes()
             dirty_blocks_percentage = stats.DirtyBlocksPercentage()
@@ -1780,8 +1771,7 @@ class VastdbApi:
             next_key = int(res_headers['tabular-next-key'])
             is_truncated = res_headers['tabular-is-truncated'] == 'true'
             count = int(res_headers['tabular-list-count'])
-            flatbuf = b''.join(res.iter_content(chunk_size=128))
-            lists = list_projections.GetRootAs(flatbuf)
+            lists = list_projections.GetRootAs(res.content)
             bucket_name = lists.BucketName().decode()
             schema_name = lists.SchemaName().decode()
             table_name = lists.TableName().decode()
@@ -1828,13 +1818,8 @@ class VastdbApi:
             next_key = int(res_headers['tabular-next-key'])
             is_truncated = res_headers['tabular-is-truncated'] == 'true'
             count = int(res_headers['tabular-list-count'])
-            columns = []
-            if not count_only:
-                schema_buf = b''.join(res.iter_content(chunk_size=128))
-                schema_out = pa.ipc.open_stream(schema_buf).schema
-                for f in schema_out:
-                    columns.append([f.name, f.type, f.metadata])
-                #   sort_type = f.metadata[b'VAST:sort_type'].decode()
+            columns = [] if count_only else [[f.name, f.type, f.metadata] for f in
+                                             pa.ipc.open_stream(res.content).schema]
 
             return columns, next_key, is_truncated, count
 
