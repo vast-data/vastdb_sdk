@@ -63,7 +63,7 @@ class Transaction:
         except botocore.exceptions.ClientError as e:
             log.warning("res: %s", e.response)
             if e.response['Error']['Code'] == '404':
-                raise errors.MissingBucket(name)
+                raise errors.MissingBucket(name) from e
             raise
         return bucket.Bucket(name, self)
 
