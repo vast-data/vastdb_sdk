@@ -35,7 +35,7 @@ class Features:
 class Session:
     """VAST database session."""
 
-    def __init__(self, access=None, secret=None, endpoint=None):
+    def __init__(self, access=None, secret=None, endpoint=None, ssl_verify=True):
         """Connect to a VAST Database endpoint, using specified credentials."""
         if access is None:
             access = os.environ['AWS_ACCESS_KEY_ID']
@@ -44,7 +44,7 @@ class Session:
         if endpoint is None:
             endpoint = os.environ['AWS_S3_ENDPOINT_URL']
 
-        self.api = internal_commands.VastdbApi(endpoint, access, secret)
+        self.api = internal_commands.VastdbApi(endpoint, access, secret, ssl_verify=ssl_verify)
         version_tuple = tuple(int(part) for part in self.api.vast_version.split('.'))
         self.features = Features(version_tuple)
         self.s3 = boto3.client('s3',
