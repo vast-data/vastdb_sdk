@@ -43,16 +43,34 @@ class TableStats:
 class QueryConfig:
     """Query execution configiration."""
 
+    # allows server-side parallel processing by issuing multiple reads concurrently for a single RPC
     num_sub_splits: int = 4
+
+    # used to split the table into disjoint subsets of rows, to be processed concurrently using multiple RPCs
     num_splits: int = 1
+
+    # each endpoint will be handled by a separate worker thread
+    # a single endpoint can be specified more than once to benefit from multithreaded execution
     data_endpoints: Optional[List[str]] = None
+
+    # a subsplit fiber will finish after sending this number of rows back to the client
     limit_rows_per_sub_split: int = 128 * 1024
+
+    # each fiber will read the following number of rowgroups coninuously before skipping
+    # in order to use semi-sorted projections this value must be 8
     num_row_groups_per_sub_split: int = 8
+
+    # can be disabled for benchmarking purposes
     use_semi_sorted_projections: bool = True
+
+    # used to estimate the number of splits, given the table rows' count
     rows_per_split: int = 4000000
+
+    # used for worker threads' naming
     query_id: str = ""
-    max_slowdown_retry: int = 10
-    backoff_func: Any = field(default=backoff.on_exception(backoff.expo, errors.Slowdown, max_tries=max_slowdown_retry))
+
+    # allows retrying QueryData when the server is overloaded
+    backoff_func: Any = field(default=backoff.on_exception(backoff.expo, errors.Slowdown, max_tries=10))
 
 
 @dataclass
