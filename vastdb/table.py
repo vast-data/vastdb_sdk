@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import backoff
 import ibis
 import pyarrow as pa
+import requests
 
 from . import errors, internal_commands, schema, util
 
@@ -37,6 +38,12 @@ class TableStats:
     size_in_bytes: int
     is_external_rowid_alloc: bool = False
     endpoints: Tuple[str, ...] = ()
+
+
+RETRIABLE_ERRORS = (
+    errors.Slowdown,
+    requests.exceptions.ConnectionError,
+)
 
 
 @dataclass
@@ -70,7 +77,7 @@ class QueryConfig:
     query_id: str = ""
 
     # allows retrying QueryData when the server is overloaded
-    backoff_func: Any = field(default=backoff.on_exception(backoff.expo, errors.Slowdown, max_tries=10))
+    backoff_func: Any = field(default=backoff.on_exception(backoff.expo, RETRIABLE_ERRORS, max_tries=10))
 
 
 @dataclass
