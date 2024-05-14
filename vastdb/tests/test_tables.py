@@ -7,6 +7,7 @@ import time
 from contextlib import closing
 from tempfile import NamedTemporaryFile
 
+import ibis
 import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
@@ -215,46 +216,47 @@ def test_types(session, clean_bucket_name):
         [dt.datetime(2024, 4, 10, 12, 34, 56, 789789), dt.datetime(2025, 4, 10, 12, 34, 56, 789789), dt.datetime(2026, 4, 10, 12, 34, 56, 789789)],
     ])
 
-    with prepare_data(session, clean_bucket_name, 's', 't', expected) as t:
+    with prepare_data(session, clean_bucket_name, 's', 't', expected) as table:
         def select(predicate):
-            return pa.Table.from_batches(t.select(predicate=predicate))
+            return pa.Table.from_batches(table.select(predicate=predicate))
 
         assert select(None) == expected
-        assert select(t['tb'] == False) == expected.filter(pc.field('tb') == False)  # noqa: E712
-        assert select(t['a1'] == 2) == expected.filter(pc.field('a1') == 2)
-        assert select(t['a2'] == 2000) == expected.filter(pc.field('a2') == 2000)
-        assert select(t['a4'] == 222111122) == expected.filter(pc.field('a4') == 222111122)
-        assert select(t['b'] == 1.5) == expected.filter(pc.field('b') == 1.5)
-        assert select(t['s'] == "v") == expected.filter(pc.field('s') == "v")
-        assert select(t['d'] == 231.15) == expected.filter(pc.field('d') == 231.15)
-        assert select(t['bin'] == b"\x01\x02") == expected.filter(pc.field('bin') == b"\x01\x02")
+        for t in [table, ibis._]:
+            assert select(t['tb'] == False) == expected.filter(pc.field('tb') == False)  # noqa: E712
+            assert select(t['a1'] == 2) == expected.filter(pc.field('a1') == 2)
+            assert select(t['a2'] == 2000) == expected.filter(pc.field('a2') == 2000)
+            assert select(t['a4'] == 222111122) == expected.filter(pc.field('a4') == 222111122)
+            assert select(t['b'] == 1.5) == expected.filter(pc.field('b') == 1.5)
+            assert select(t['s'] == "v") == expected.filter(pc.field('s') == "v")
+            assert select(t['d'] == 231.15) == expected.filter(pc.field('d') == 231.15)
+            assert select(t['bin'] == b"\x01\x02") == expected.filter(pc.field('bin') == b"\x01\x02")
 
-        date_literal = dt.date(2024, 4, 10)
-        assert select(t['date'] == date_literal) == expected.filter(pc.field('date') == date_literal)
+            date_literal = dt.date(2024, 4, 10)
+            assert select(t['date'] == date_literal) == expected.filter(pc.field('date') == date_literal)
 
-        time_literal = dt.time(12, 34, 56)
-        assert select(t['t0'] == time_literal) == expected.filter(pc.field('t0') == time_literal)
+            time_literal = dt.time(12, 34, 56)
+            assert select(t['t0'] == time_literal) == expected.filter(pc.field('t0') == time_literal)
 
-        time_literal = dt.time(12, 34, 56, 789000)
-        assert select(t['t3'] == time_literal) == expected.filter(pc.field('t3') == time_literal)
+            time_literal = dt.time(12, 34, 56, 789000)
+            assert select(t['t3'] == time_literal) == expected.filter(pc.field('t3') == time_literal)
 
-        time_literal = dt.time(12, 34, 56, 789789)
-        assert select(t['t6'] == time_literal) == expected.filter(pc.field('t6') == time_literal)
+            time_literal = dt.time(12, 34, 56, 789789)
+            assert select(t['t6'] == time_literal) == expected.filter(pc.field('t6') == time_literal)
 
-        time_literal = dt.time(12, 34, 56, 789789)
-        assert select(t['t9'] == time_literal) == expected.filter(pc.field('t9') == time_literal)
+            time_literal = dt.time(12, 34, 56, 789789)
+            assert select(t['t9'] == time_literal) == expected.filter(pc.field('t9') == time_literal)
 
-        ts_literal = dt.datetime(2024, 4, 10, 12, 34, 56)
-        assert select(t['ts0'] == ts_literal) == expected.filter(pc.field('ts0') == ts_literal)
+            ts_literal = dt.datetime(2024, 4, 10, 12, 34, 56)
+            assert select(t['ts0'] == ts_literal) == expected.filter(pc.field('ts0') == ts_literal)
 
-        ts_literal = dt.datetime(2024, 4, 10, 12, 34, 56, 789000)
-        assert select(t['ts3'] == ts_literal) == expected.filter(pc.field('ts3') == ts_literal)
+            ts_literal = dt.datetime(2024, 4, 10, 12, 34, 56, 789000)
+            assert select(t['ts3'] == ts_literal) == expected.filter(pc.field('ts3') == ts_literal)
 
-        ts_literal = dt.datetime(2024, 4, 10, 12, 34, 56, 789789)
-        assert select(t['ts6'] == ts_literal) == expected.filter(pc.field('ts6') == ts_literal)
+            ts_literal = dt.datetime(2024, 4, 10, 12, 34, 56, 789789)
+            assert select(t['ts6'] == ts_literal) == expected.filter(pc.field('ts6') == ts_literal)
 
-        ts_literal = dt.datetime(2024, 4, 10, 12, 34, 56, 789789)
-        assert select(t['ts9'] == ts_literal) == expected.filter(pc.field('ts9') == ts_literal)
+            ts_literal = dt.datetime(2024, 4, 10, 12, 34, 56, 789789)
+            assert select(t['ts9'] == ts_literal) == expected.filter(pc.field('ts9') == ts_literal)
 
 
 def test_filters(session, clean_bucket_name):
@@ -270,62 +272,63 @@ def test_filters(session, clean_bucket_name):
         ['a', 'bb', 'ccc', None, 'xyz'],
     ])
 
-    with prepare_data(session, clean_bucket_name, 's', 't', expected) as t:
+    with prepare_data(session, clean_bucket_name, 's', 't', expected) as table:
         def select(predicate):
-            return pa.Table.from_batches(t.select(predicate=predicate), t.arrow_schema)
+            return pa.Table.from_batches(table.select(predicate=predicate), table.arrow_schema)
 
         assert select(None) == expected
         assert select(True) == expected
         assert select(False) == pa.Table.from_batches([], schema=columns)
 
-        assert select(t['a'].between(222, 444)) == expected.filter((pc.field('a') >= 222) & (pc.field('a') <= 444))
-        assert select((t['a'].between(222, 444)) & (t['b'] > 2.5)) == expected.filter((pc.field('a') >= 222) & (pc.field('a') <= 444) & (pc.field('b') > 2.5))
+        for t in [table, ibis._]:
+            assert select(t['a'].between(222, 444)) == expected.filter((pc.field('a') >= 222) & (pc.field('a') <= 444))
+            assert select((t['a'].between(222, 444)) & (t['b'] > 2.5)) == expected.filter((pc.field('a') >= 222) & (pc.field('a') <= 444) & (pc.field('b') > 2.5))
 
-        assert select(t['a'] > 222) == expected.filter(pc.field('a') > 222)
-        assert select(t['a'] < 222) == expected.filter(pc.field('a') < 222)
-        assert select(t['a'] == 222) == expected.filter(pc.field('a') == 222)
-        assert select(t['a'] != 222) == expected.filter(pc.field('a') != 222)
-        assert select(t['a'] <= 222) == expected.filter(pc.field('a') <= 222)
-        assert select(t['a'] >= 222) == expected.filter(pc.field('a') >= 222)
+            assert select(t['a'] > 222) == expected.filter(pc.field('a') > 222)
+            assert select(t['a'] < 222) == expected.filter(pc.field('a') < 222)
+            assert select(t['a'] == 222) == expected.filter(pc.field('a') == 222)
+            assert select(t['a'] != 222) == expected.filter(pc.field('a') != 222)
+            assert select(t['a'] <= 222) == expected.filter(pc.field('a') <= 222)
+            assert select(t['a'] >= 222) == expected.filter(pc.field('a') >= 222)
 
-        assert select(t['b'] > 1.5) == expected.filter(pc.field('b') > 1.5)
-        assert select(t['b'] < 1.5) == expected.filter(pc.field('b') < 1.5)
-        assert select(t['b'] == 1.5) == expected.filter(pc.field('b') == 1.5)
-        assert select(t['b'] != 1.5) == expected.filter(pc.field('b') != 1.5)
-        assert select(t['b'] <= 1.5) == expected.filter(pc.field('b') <= 1.5)
-        assert select(t['b'] >= 1.5) == expected.filter(pc.field('b') >= 1.5)
+            assert select(t['b'] > 1.5) == expected.filter(pc.field('b') > 1.5)
+            assert select(t['b'] < 1.5) == expected.filter(pc.field('b') < 1.5)
+            assert select(t['b'] == 1.5) == expected.filter(pc.field('b') == 1.5)
+            assert select(t['b'] != 1.5) == expected.filter(pc.field('b') != 1.5)
+            assert select(t['b'] <= 1.5) == expected.filter(pc.field('b') <= 1.5)
+            assert select(t['b'] >= 1.5) == expected.filter(pc.field('b') >= 1.5)
 
-        assert select(t['s'] > 'bb') == expected.filter(pc.field('s') > 'bb')
-        assert select(t['s'] < 'bb') == expected.filter(pc.field('s') < 'bb')
-        assert select(t['s'] == 'bb') == expected.filter(pc.field('s') == 'bb')
-        assert select(t['s'] != 'bb') == expected.filter(pc.field('s') != 'bb')
-        assert select(t['s'] <= 'bb') == expected.filter(pc.field('s') <= 'bb')
-        assert select(t['s'] >= 'bb') == expected.filter(pc.field('s') >= 'bb')
+            assert select(t['s'] > 'bb') == expected.filter(pc.field('s') > 'bb')
+            assert select(t['s'] < 'bb') == expected.filter(pc.field('s') < 'bb')
+            assert select(t['s'] == 'bb') == expected.filter(pc.field('s') == 'bb')
+            assert select(t['s'] != 'bb') == expected.filter(pc.field('s') != 'bb')
+            assert select(t['s'] <= 'bb') == expected.filter(pc.field('s') <= 'bb')
+            assert select(t['s'] >= 'bb') == expected.filter(pc.field('s') >= 'bb')
 
-        assert select((t['a'] > 111) & (t['b'] > 0) & (t['s'] < 'ccc')) == expected.filter((pc.field('a') > 111) & (pc.field('b') > 0) & (pc.field('s') < 'ccc'))
-        assert select((t['a'] > 111) & (t['b'] < 2.5)) == expected.filter((pc.field('a') > 111) & (pc.field('b') < 2.5))
-        assert select((t['a'] > 111) & (t['a'] < 333)) == expected.filter((pc.field('a') > 111) & (pc.field('a') < 333))
+            assert select((t['a'] > 111) & (t['b'] > 0) & (t['s'] < 'ccc')) == expected.filter((pc.field('a') > 111) & (pc.field('b') > 0) & (pc.field('s') < 'ccc'))
+            assert select((t['a'] > 111) & (t['b'] < 2.5)) == expected.filter((pc.field('a') > 111) & (pc.field('b') < 2.5))
+            assert select((t['a'] > 111) & (t['a'] < 333)) == expected.filter((pc.field('a') > 111) & (pc.field('a') < 333))
 
-        assert select((t['a'] > 111) | (t['a'] < 333)) == expected.filter((pc.field('a') > 111) | (pc.field('a') < 333))
-        assert select(((t['a'] > 111) | (t['a'] < 333)) & (t['b'] < 2.5)) == expected.filter(((pc.field('a') > 111) | (pc.field('a') < 333)) & (pc.field('b') < 2.5))
-        with pytest.raises(NotImplementedError):
-            assert select((t['a'] > 111) | (t['b'] > 0) | (t['s'] < 'ccc')) == expected.filter((pc.field('a') > 111) | (pc.field('b') > 0) | (pc.field('s') < 'ccc'))
-        assert select((t['a'] > 111) | (t['a'] < 333) | (t['a'] == 777)) == expected.filter((pc.field('a') > 111) | (pc.field('a') < 333) | (pc.field('a') == 777))
+            assert select((t['a'] > 111) | (t['a'] < 333)) == expected.filter((pc.field('a') > 111) | (pc.field('a') < 333))
+            assert select(((t['a'] > 111) | (t['a'] < 333)) & (t['b'] < 2.5)) == expected.filter(((pc.field('a') > 111) | (pc.field('a') < 333)) & (pc.field('b') < 2.5))
+            with pytest.raises(NotImplementedError):
+                assert select((t['a'] > 111) | (t['b'] > 0) | (t['s'] < 'ccc')) == expected.filter((pc.field('a') > 111) | (pc.field('b') > 0) | (pc.field('s') < 'ccc'))
+            assert select((t['a'] > 111) | (t['a'] < 333) | (t['a'] == 777)) == expected.filter((pc.field('a') > 111) | (pc.field('a') < 333) | (pc.field('a') == 777))
 
-        assert select(t['s'].isnull()) == expected.filter(pc.field('s').is_null())
-        assert select((t['s'].isnull()) | (t['s'] == 'bb'))  == expected.filter((pc.field('s').is_null()) | (pc.field('s') == 'bb'))
-        assert select((t['s'].isnull()) & (t['b'] == 3.5))  == expected.filter((pc.field('s').is_null()) & (pc.field('b') == 3.5))
+            assert select(t['s'].isnull()) == expected.filter(pc.field('s').is_null())
+            assert select((t['s'].isnull()) | (t['s'] == 'bb'))  == expected.filter((pc.field('s').is_null()) | (pc.field('s') == 'bb'))
+            assert select((t['s'].isnull()) & (t['b'] == 3.5))  == expected.filter((pc.field('s').is_null()) & (pc.field('b') == 3.5))
 
-        assert select(~t['s'].isnull()) == expected.filter(~pc.field('s').is_null())
-        assert select(t['s'].contains('b')) == expected.filter(pc.field('s') == 'bb')
-        assert select(t['s'].contains('y')) == expected.filter(pc.field('s') == 'xyz')
+            assert select(~t['s'].isnull()) == expected.filter(~pc.field('s').is_null())
+            assert select(t['s'].contains('b')) == expected.filter(pc.field('s') == 'bb')
+            assert select(t['s'].contains('y')) == expected.filter(pc.field('s') == 'xyz')
 
-        assert select(t['a'].isin([555])) == expected.filter(pc.field('a').isin([555]))
-        assert select(t['a'].isin([111, 222, 999])) == expected.filter(pc.field('a').isin([111, 222, 999]))
-        assert select((t['a'] == 111) | t['a'].isin([333, 444]) | (t['a'] > 600)) == expected.filter((pc.field('a') == 111) | pc.field('a').isin([333, 444]) | (pc.field('a') > 600))
+            assert select(t['a'].isin([555])) == expected.filter(pc.field('a').isin([555]))
+            assert select(t['a'].isin([111, 222, 999])) == expected.filter(pc.field('a').isin([111, 222, 999]))
+            assert select((t['a'] == 111) | t['a'].isin([333, 444]) | (t['a'] > 600)) == expected.filter((pc.field('a') == 111) | pc.field('a').isin([333, 444]) | (pc.field('a') > 600))
 
-        with pytest.raises(NotImplementedError):
-            select(t['a'].isin([]))
+            with pytest.raises(NotImplementedError):
+                select(t['a'].isin([]))
 
 
 def test_parquet_export(session, clean_bucket_name):

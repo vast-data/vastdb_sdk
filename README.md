@@ -74,16 +74,18 @@ with session.transaction() as tx:
 Our SDK supports predicate and projection pushdown:
 
 ```python
+    from ibis import _
+
     # SELECT c1 FROM t WHERE (c2 > 2) AND (c3 IS NULL)
     table.select(columns=['c1'],
-                 predicate=(table['c2'] > 2) & table['c3'].isnull())
+                 predicate=(_.c2 > 2) & _.c3.isnull())
 
     # SELECT c2, c3 FROM t WHERE (c2 BETWEEN 0 AND 1) OR (c2 > 10)
     table.select(columns=['c2', 'c3'],
-                 predicate=table['c2'].between(0, 1) | (table['c2'] > 10))
+                 predicate=(_.c2.between(0, 1) | (table['c2'] > 10))
 
     # SELECT * FROM t WHERE c3 LIKE '%substring%'
-    table.select(predicate=table['c3'].contains('substring'))
+    table.select(predicate=_.c3.contains('substring'))
 ```
 
 See [here for more details](docs/predicate.md).
@@ -132,10 +134,12 @@ with contextlib.closing(pa.parquet.ParquetWriter('/path/to/file.parquet', batche
 We can use [DuckDB](https://duckdb.org/docs/guides/python/sql_on_arrow.html) to post-process the resulting stream of [PyArrow record batches](https://arrow.apache.org/docs/python/data.html#record-batches):
 
 ```python
+from ibis import _
+
 import duckdb
 conn = duckdb.connect()
 
-batches = table.select(columns=['c1'], predicate=(table['c2'] > 2))
+batches = table.select(columns=['c1'], predicate=(_.c2 > 2))
 print(conn.execute("SELECT sum(c1) FROM batches").arrow())
 ```
 

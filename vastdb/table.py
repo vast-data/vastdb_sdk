@@ -271,7 +271,7 @@ class Table:
         return TableStats(**stats_tuple._asdict())
 
     def select(self, columns: Optional[List[str]] = None,
-               predicate: ibis.expr.types.BooleanColumn = None,
+               predicate: Union[ibis.expr.types.BooleanColumn, ibis.common.deferred.Deferred] = None,
                config: Optional[QueryConfig] = None,
                *,
                internal_row_id: bool = False) -> pa.RecordBatchReader:
@@ -309,6 +309,9 @@ class Table:
         if predicate is False:
             response_schema = internal_commands.get_response_schema(schema=query_schema, field_names=columns)
             return pa.RecordBatchReader.from_batches(response_schema, [])
+
+        if isinstance(predicate, ibis.common.deferred.Deferred):
+            predicate = predicate.resolve(self._ibis_table)  # may raise if the predicate is invalid (e.g. wrong types / missing column)
 
         query_data_request = internal_commands.build_query_data_request(
             schema=query_schema,
