@@ -130,45 +130,12 @@ def get_unit_to_flatbuff_time_unit(type):
 class Predicate:
     def __init__(self, schema: 'pa.Schema', expr: ibis.expr.types.BooleanColumn):
         self.schema = schema
+        index = itertools.count()  # used to generate leaf column positions for VAST QueryData RPC
+        # Arrow schema contains the top-level columns, where each column may include multiple subfields
+        # We use DFS is used to enumerate all the sub-columns, using `index` as an ID allocator
+        nodes = [FieldNode(field, index) for field in schema]
+        self.nodes_map = {node.field.name: node for node in nodes}
         self.expr = expr
-
-    def get_field_indexes(self, field: 'pa.Field', field_name_per_index: list) -> None:
-        field_name_per_index.append(field.name)
-
-        if isinstance(field.type, pa.StructType):
-            flat_fields = field.flatten()
-        elif isinstance(field.type, pa.MapType):
-            flat_fields = [pa.field(f'{field.name}.entries', pa.struct([field.type.key_field, field.type.item_field]))]
-        elif isinstance(field.type, pa.ListType):
-            flat_fields = [pa.field(f'{field.name}.{field.type.value_field.name}', field.type.value_field.type)]
-        else:
-            return
-
-        for flat_field in flat_fields:
-            self.get_field_indexes(flat_field, field_name_per_index)
-
-    @property
-    def field_name_per_index(self):
-        if self._field_name_per_index is None:
-            _field_name_per_index = []
-            for field in self.schema:
-                self.get_field_indexes(field, _field_name_per_index)
-            self._field_name_per_index = {field: index for index, field in enumerate(_field_name_per_index)}
-        return self._field_name_per_index
-
-    def get_projections(self, builder: 'flatbuffers.builder.Builder', field_names: Optional[List[str]] = None):
-        if field_names is None:
-            field_names = self.field_name_per_index.keys()
-        projection_fields = []
-        for field_name in field_names:
-            fb_field_index.Start(builder)
-            fb_field_index.AddPosition(builder, self.field_name_per_index[field_name])
-            offset = fb_field_index.End(builder)
-            projection_fields.append(offset)
-        fb_source.StartProjectionVector(builder, len(projection_fields))
-        for offset in reversed(projection_fields):
-            builder.PrependUOffsetTRelative(offset)
-        return builder.EndVector()
 
     def serialize(self, builder: 'flatbuffers.builder.Builder'):
         from ibis.expr.operations.generic import (
@@ -203,8 +170,6 @@ class Predicate:
             StringContains: self.build_match_substring,
             Between: self.build_between,
         }
-
-        positions_map = dict((f.name, index) for index, f in enumerate(self.schema))  # TODO: BFS
 
         self.builder = builder
 
@@ -261,7 +226,11 @@ class Predicate:
                     elif prev_field_name != field_name:
                         raise NotImplementedError(self.expr)
 
-                    column_offset = self.build_column(position=positions_map[field_name])
+                    node = self.nodes_map[field_name]
+                    # TODO: support predicate pushdown for leaf nodes (ORION-160338)
+                    if node.children:
+                        raise NotImplementedError(node.field)  # no predicate pushdown for nested columns
+                    column_offset = self.build_column(position=node.index)
                     field = self.schema.field(field_name)
                     for literal in literals:
                         args_offsets = [column_offset]
