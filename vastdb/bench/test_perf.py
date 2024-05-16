@@ -1,7 +1,6 @@
 import logging
 import time
 
-import pyarrow as pa
 import pytest
 
 from vastdb import util
@@ -20,7 +19,7 @@ def test_bench(session, clean_bucket_name, parquets_path, crater_path):
         t = util.create_table_from_files(s, 't1', files, config=ImportConfig(import_concurrency=8))
         config = QueryConfig(num_splits=8, num_sub_splits=4)
         s = time.time()
-        pa_table = pa.Table.from_batches(t.select(columns=['sid'], predicate=t['sid'] == 10033007, config=config))
+        pa_table = t.select(columns=['sid'], predicate=t['sid'] == 10033007, config=config).read_all()
         e = time.time()
         log.info("'SELECT sid from TABLE WHERE sid = 10033007' returned in %s seconds.", e - s)
         if crater_path:

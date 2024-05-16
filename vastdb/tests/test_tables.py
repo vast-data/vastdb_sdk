@@ -32,25 +32,25 @@ def test_tables(session, clean_bucket_name):
         ['a', 'bb', 'ccc'],
     ])
     with prepare_data(session, clean_bucket_name, 's', 't', expected) as t:
-        actual = pa.Table.from_batches(t.select(columns=['a', 'b', 's']))
+        actual = t.select(columns=['a', 'b', 's']).read_all()
         assert actual == expected
 
-        actual = pa.Table.from_batches(t.select())
+        actual = t.select().read_all()
         assert actual == expected
 
-        actual = pa.Table.from_batches(t.select(columns=['a', 'b']))
+        actual = t.select(columns=['a', 'b']).read_all()
         assert actual == expected.select(['a', 'b'])
 
-        actual = pa.Table.from_batches(t.select(columns=['b', 's', 'a']))
+        actual = t.select(columns=['b', 's', 'a']).read_all()
         assert actual == expected.select(['b', 's', 'a'])
 
-        actual = pa.Table.from_batches(t.select(columns=['s']))
+        actual = t.select(columns=['s']).read_all()
         assert actual == expected.select(['s'])
 
-        actual = pa.Table.from_batches(t.select(columns=[]))
+        actual = t.select(columns=[]).read_all()
         assert actual == expected.select([])
 
-        actual = pa.Table.from_batches(t.select(columns=['s'], internal_row_id=True))
+        actual = t.select(columns=['s'], internal_row_id=True).read_all()
         log.debug("actual=%s", actual)
         assert actual.to_pydict() == {
             's': ['a', 'bb', 'ccc'],
@@ -61,9 +61,9 @@ def test_tables(session, clean_bucket_name):
         rb = pa.record_batch(schema=columns_to_delete, data=[[0]])  # delete rows 0,1
         t.delete(rb)
 
-        selected_rows = pa.Table.from_batches(t.select(columns=['b'], predicate=(t['a'] == 222), internal_row_id=True))
+        selected_rows = t.select(columns=['b'], predicate=(t['a'] == 222), internal_row_id=True).read_all()
         t.delete(selected_rows)
-        actual = pa.Table.from_batches(t.select(columns=['a', 'b', 's']))
+        actual = t.select(columns=['a', 'b', 's']).read_all()
         assert actual.to_pydict() == {
             'a': [333],
             'b': [2.5],
@@ -77,7 +77,7 @@ def test_insert_wide_row(session, clean_bucket_name):
     expected = pa.table(schema=columns, data=data)
 
     with prepare_data(session, clean_bucket_name, 's', 't', expected) as t:
-        actual = pa.Table.from_batches(t.select())
+        actual = t.select().read_all()
         assert actual == expected
 
 
@@ -124,33 +124,33 @@ def test_update_table(session, clean_bucket_name):
         ])
 
         t.update(rb)
-        actual = pa.Table.from_batches(t.select(columns=['a', 'b']))
+        actual = t.select(columns=['a', 'b']).read_all()
         assert actual.to_pydict() == {
             'a': [1110, 222, 3330],
             'b': [0.5, 1.5, 2.5]
         }
 
-        actual = pa.Table.from_batches(t.select(columns=['a', 'b'], predicate=(t['a'] < 1000), internal_row_id=True))
+        actual = t.select(columns=['a', 'b'], predicate=(t['a'] < 1000), internal_row_id=True).read_all()
         column_index = actual.column_names.index('a')
         column_field = actual.field(column_index)
         new_data = pc.add(actual.column('a'), 2000)
         update_table = actual.set_column(column_index, column_field, new_data)
 
         t.update(update_table, columns=['a'])
-        actual = pa.Table.from_batches(t.select(columns=['a', 'b']))
+        actual = t.select(columns=['a', 'b']).read_all()
         assert actual.to_pydict() == {
             'a': [1110, 2222, 3330],
             'b': [0.5, 1.5, 2.5]
         }
 
-        actual = pa.Table.from_batches(t.select(columns=['a', 'b'], predicate=(t['a'] != 2222), internal_row_id=True))
+        actual = t.select(columns=['a', 'b'], predicate=(t['a'] != 2222), internal_row_id=True).read_all()
         column_index = actual.column_names.index('a')
         column_field = actual.field(column_index)
         new_data = pc.divide(actual.column('a'), 10)
         update_table = actual.set_column(column_index, column_field, new_data)
 
         t.update(update_table.to_batches()[0], columns=['a'])
-        actual = pa.Table.from_batches(t.select(columns=['a', 'b']))
+        actual = t.select(columns=['a', 'b']).read_all()
         assert actual.to_pydict() == {
             'a': [111, 2222, 333],
             'b': [0.5, 1.5, 2.5]
@@ -170,7 +170,7 @@ def test_select_with_multisplits(session, clean_bucket_name):
     config.rows_per_split = 1000
 
     with prepare_data(session, clean_bucket_name, 's', 't', expected) as t:
-        actual = pa.Table.from_batches(t.select(columns=['a'], config=config))
+        actual = t.select(columns=['a'], config=config).read_all()
         assert actual == expected
 
 
@@ -217,7 +217,7 @@ def test_types(session, clean_bucket_name):
 
     with prepare_data(session, clean_bucket_name, 's', 't', expected) as table:
         def select(predicate):
-            return pa.Table.from_batches(table.select(predicate=predicate))
+            return table.select(predicate=predicate).read_all()
 
         assert select(None) == expected
         for t in [table, ibis._]:
@@ -273,7 +273,7 @@ def test_filters(session, clean_bucket_name):
 
     with prepare_data(session, clean_bucket_name, 's', 't', expected) as table:
         def select(predicate):
-            return pa.Table.from_batches(table.select(predicate=predicate), table.arrow_schema)
+            return table.select(predicate=predicate).read_all()
 
         assert select(None) == expected
         assert select(True) == expected
@@ -350,7 +350,7 @@ def test_parquet_export(session, clean_bucket_name):
         expected = pa.Table.from_batches([rb])
         rb = t.insert(rb)
         assert rb.to_pylist() == [0, 1]
-        actual = pa.Table.from_batches(t.select())
+        actual = t.select().read_all()
         assert actual == expected
 
         table_batches = t.select()

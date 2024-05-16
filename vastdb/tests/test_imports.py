@@ -38,13 +38,13 @@ def test_parallel_imports(session, clean_bucket_name, s3):
             t.create_imports_table()
         log.info("Starting import of %d files", num_files)
         t.import_files(files)
-        arrow_table = pa.Table.from_batches(t.select(columns=['num']))
+        arrow_table = t.select(columns=['num']).read_all()
         assert arrow_table.num_rows == num_rows * num_files
-        arrow_table = pa.Table.from_batches(t.select(columns=['num'], predicate=t['num'] == 100))
+        arrow_table = t.select(columns=['num'], predicate=t['num'] == 100).read_all()
         assert arrow_table.num_rows == num_files
         import_table = t.imports_table()
         # checking all imports are on the imports table:
-        objects_name = pa.Table.from_batches(import_table.select(columns=["ObjectName"]))
+        objects_name = import_table.select(columns=["ObjectName"]).read_all()
         objects_name = objects_name.to_pydict()
         object_names = set(objects_name['ObjectName'])
         prefix = 'prq'

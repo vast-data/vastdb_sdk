@@ -22,13 +22,13 @@ def test_nested_select(session, clean_bucket_name):
     ])
 
     with prepare_data(session, clean_bucket_name, 's', 't', expected) as t:
-        actual = pa.Table.from_batches(t.select())
+        actual = t.select().read_all()
         assert actual == expected
 
         names = [f.name for f in columns]
         for n in range(len(names) + 1):
             for cols in itertools.permutations(names, n):
-                actual = pa.Table.from_batches(t.select(columns=cols))
+                actual = t.select(columns=cols).read_all()
                 assert actual == expected.select(cols)
 
 
@@ -53,7 +53,7 @@ def test_nested_filter(session, clean_bucket_name):
     ])
 
     with prepare_data(session, clean_bucket_name, 's', 't', expected) as t:
-        actual = pa.Table.from_batches(t.select())
+        actual = t.select().read_all()
         assert actual == expected
 
         names = list('xyzw')
@@ -62,7 +62,7 @@ def test_nested_filter(session, clean_bucket_name):
                 ibis_predicate = functools.reduce(
                     operator.and_,
                     (t[col] > 2 for col in cols))
-                actual = pa.Table.from_batches(t.select(predicate=ibis_predicate), t.arrow_schema)
+                actual = t.select(predicate=ibis_predicate).read_all()
 
                 arrow_predicate = functools.reduce(
                     operator.and_,
