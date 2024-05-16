@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.1.5] (2024-05-16)
+[0.1.5]: https://github.com/vast-data/vastdb_sdk/compare/v0.1.4...v0.1.5
+
+### Added
+ - Allow passing `ssl_verify` via `Session` c-tor
+ - Retry `requests.exceptions.ConnectionError`
+ - Document `QueryConfig` properties
+ - Support "deferred" `ibis` predicates using [Underscore (`_`) API](https://github.com/ibis-project/ibis/pull/3804)
+
+### Fixed
+ - Fix predicate pushdown when nested columns are present
+ - Attach original traceback to `MissingBucket` exception
+
 ## [0.1.4] (2024-05-13)
 [0.1.4]: https://github.com/vast-data/vastdb_sdk/compare/v0.1.3...v0.1.4
 
