@@ -3,7 +3,6 @@ import decimal
 import logging
 import random
 import threading
-import time
 from contextlib import closing
 from tempfile import NamedTemporaryFile
 
@@ -667,18 +666,29 @@ def test_select_stop(session, clean_bucket_name):
     assert active_threads() == 0
 
 
-def test_big_catalog_select(session, clean_bucket_name):
+def test_catalog_select(session, clean_bucket_name):
     with session.transaction() as tx:
         bc = tx.catalog()
-        actual = pa.Table.from_batches(bc.select(['name']))
-        assert actual
-        log.info("actual=%s", actual)
+        assert bc.columns()
+        rows = bc.select(['name']).read_all()
+        assert len(rows) > 0, rows
 
 
+@pytest.mark.flaky(retries=30, delay=1, only_on=[AssertionError])
 def test_audit_log_select(session, clean_bucket_name):
     with session.transaction() as tx:
         a = tx.audit_log()
-        a.columns()
-        time.sleep(1)
-        actual = pa.Table.from_batches(a.select(), a.arrow_schema)
-        log.info("actual=%s", actual)
+        assert a.columns()
+        rows = a.select().read_all()
+        assert len(rows) > 0, rows
+
+
+def test_catalog_snapshots_select(session, clean_bucket_name):
+    with session.transaction() as tx:
+        snaps = tx.catalog_snapshots()
+        assert snaps
+        latest = snaps[-1]
+        t = tx.catalog(latest)
+        assert t.columns()
+        rows = t.select().read_all()
+        assert len(rows) > 0, rows
