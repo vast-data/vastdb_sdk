@@ -345,6 +345,8 @@ class Table:
             schema=query_schema,
             predicate=predicate,
             field_names=columns)
+        if len(query_data_request.serialized) > util.MAX_QUERY_DATA_REQUEST_SIZE:
+            raise errors.TooLargeRequest(f"{len(query_data_request.serialized)} bytes")
 
         splits_queue: queue.Queue[int] = queue.Queue()
 

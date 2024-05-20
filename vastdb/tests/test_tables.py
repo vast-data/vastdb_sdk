@@ -280,6 +280,13 @@ def test_filters(session, clean_bucket_name):
         assert select(False) == pa.Table.from_batches([], schema=columns)
 
         for t in [table, ibis._]:
+
+            select(t['a'].isin(list(range(100))))
+            select(t['a'].isin(list(range(1000))))
+            select(t['a'].isin(list(range(10000))))
+            with pytest.raises(errors.TooLargeRequest):
+                select(t['a'].isin(list(range(100000))))
+
             assert select(t['a'].between(222, 444)) == expected.filter((pc.field('a') >= 222) & (pc.field('a') <= 444))
             assert select((t['a'].between(222, 444)) & (t['b'] > 2.5)) == expected.filter((pc.field('a') >= 222) & (pc.field('a') <= 444) & (pc.field('b') > 2.5))
 

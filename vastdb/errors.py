@@ -89,7 +89,11 @@ class InvalidArgument(Exception):
     pass
 
 
-class TooWideRow(InvalidArgument):
+class TooLargeRequest(InvalidArgument):
+    pass
+
+
+class TooWideRow(TooLargeRequest):
     pass
 
 

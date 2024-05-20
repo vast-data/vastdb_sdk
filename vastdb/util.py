@@ -83,6 +83,7 @@ def union_schema_merge(current_schema: pa.Schema, new_schema: pa.Schema) -> pa.S
 
 MAX_TABULAR_REQUEST_SIZE = 5 << 20  # in bytes
 MAX_RECORD_BATCH_SLICE_SIZE = int(0.9 * MAX_TABULAR_REQUEST_SIZE)
+MAX_QUERY_DATA_REQUEST_SIZE = int(0.9 * MAX_TABULAR_REQUEST_SIZE)
 
 
 def iter_serialized_slices(batch: Union[pa.RecordBatch, pa.Table], max_rows_per_slice=None):
