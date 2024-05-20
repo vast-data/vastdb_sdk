@@ -681,21 +681,29 @@ def test_catalog_select(session, clean_bucket_name):
         assert len(rows) > 0, rows
 
 
-@pytest.mark.flaky(retries=30, delay=1, only_on=[AssertionError])
+class NotReady(Exception):
+    pass
+
+
+@pytest.mark.flaky(retries=30, delay=1, only_on=[NotReady])
 def test_audit_log_select(session, clean_bucket_name):
     with session.transaction() as tx:
         a = tx.audit_log()
         assert a.columns()
         rows = a.select().read_all()
-        assert len(rows) > 0, rows
+        if len(rows) == 0:
+            raise NotReady
 
 
+@pytest.mark.flaky(retries=30, delay=1, only_on=[NotReady])
 def test_catalog_snapshots_select(session, clean_bucket_name):
     with session.transaction() as tx:
         snaps = tx.catalog_snapshots()
-        assert snaps
+        if not snaps:
+            raise NotReady
         latest = snaps[-1]
         t = tx.catalog(latest)
         assert t.columns()
         rows = t.select().read_all()
-        assert len(rows) > 0, rows
+        if not rows:
+            raise NotReady
