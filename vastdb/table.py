@@ -54,7 +54,8 @@ class QueryConfig:
     num_sub_splits: int = 4
 
     # used to split the table into disjoint subsets of rows, to be processed concurrently using multiple RPCs
-    num_splits: int = 1
+    # will be estimated from the table's row count, if not explicitly set
+    num_splits: Optional[int] = None
 
     # each endpoint will be handled by a separate worker thread
     # a single endpoint can be specified more than once to benefit from multithreaded execution
@@ -313,11 +314,13 @@ class Table:
 
         # Take a snapshot of enpoints
         stats = self.get_stats()
+        log.debug("stats: %s", stats)
         endpoints = stats.endpoints if config.data_endpoints is None else config.data_endpoints
+        log.debug("endpoints: %s", endpoints)
 
-        if stats.num_rows > config.rows_per_split and config.num_splits is None:
-            config.num_splits = stats.num_rows // config.rows_per_split
-        log.debug(f"num_rows={stats.num_rows} rows_per_splits={config.rows_per_split} num_splits={config.num_splits} ")
+        if config.num_splits is None:
+            config.num_splits = max(1, stats.num_rows // config.rows_per_split)
+        log.debug("config: %s", config)
 
         if columns is None:
             columns = [f.name for f in self.arrow_schema]
