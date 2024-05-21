@@ -71,6 +71,9 @@ class QueryConfig:
     # can be disabled for benchmarking purposes
     use_semi_sorted_projections: bool = True
 
+    # enforce using a specific semi-sorted projection (if enabled above)
+    semi_sorted_projection_name: Optional[str] = None
+
     # used to estimate the number of splits, given the table rows' count
     rows_per_split: int = 4000000
 
@@ -91,14 +94,13 @@ class ImportConfig:
 class SelectSplitState:
     """State of a specific query split execution."""
 
-    def __init__(self, query_data_request, table: "Table", split_id: int, config: QueryConfig, projection: Optional[str]) -> None:
+    def __init__(self, query_data_request, table: "Table", split_id: int, config: QueryConfig) -> None:
         """Initialize query split state."""
         self.split_id = split_id
         self.subsplits_state = {i: 0 for i in range(config.num_sub_splits)}
         self.config = config
         self.query_data_request = query_data_request
         self.table = table
-        self.projection = projection
 
     def batches(self, api: internal_commands.VastdbApi):
         """Execute QueryData request, and yield parsed RecordBatch objects.
@@ -120,7 +122,7 @@ class SelectSplitState:
                             sub_split_start_row_ids=self.subsplits_state.items(),
                             enable_sorted_projections=self.config.use_semi_sorted_projections,
                             query_imports_table=self.table._imports_table,
-                            projection=self.projection)
+                            projection=self.config.semi_sorted_projection_name)
             pages_iter = internal_commands.parse_query_data_response(
                 conn=response.raw,
                 schema=self.query_data_request.response_schema,
@@ -302,8 +304,7 @@ class Table:
                predicate: Union[ibis.expr.types.BooleanColumn, ibis.common.deferred.Deferred] = None,
                config: Optional[QueryConfig] = None,
                *,
-               internal_row_id: bool = False,
-               projection: Optional[str] = None) -> pa.RecordBatchReader:
+               internal_row_id: bool = False) -> pa.RecordBatchReader:
         """Execute a query over this table.
 
         To read a subset of the columns, specify their names via `columns` argument. Otherwise, all columns will be read.
@@ -324,6 +325,9 @@ class Table:
         if config.num_splits is None:
             config.num_splits = max(1, stats.num_rows // config.rows_per_split)
         log.debug("config: %s", config)
+
+        if config.semi_sorted_projection_name:
+            self.tx._rpc.features.check_enforce_semisorted_projection()
 
         if columns is None:
             columns = [f.name for f in self.arrow_schema]
@@ -384,8 +388,7 @@ class Table:
                     split_state = SelectSplitState(query_data_request=query_data_request,
                                                    table=self,
                                                    split_id=split,
-                                                   config=config,
-                                                   projection=projection)
+                                                   config=config)
 
                     for batch in split_state.batches(host_api):
                         check_stop()

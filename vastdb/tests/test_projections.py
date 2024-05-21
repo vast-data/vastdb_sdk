@@ -107,10 +107,13 @@ def test_query_data_with_projection(session, clean_bucket_name):
         # no projection supply - need to be with p1 projeciton
         assert expected_projection_p1 == projection_actual
 
-        projection_actual = pa.Table.from_batches(t.select(columns=['a', 'b', 's'], predicate=(t['b'] < 5), projection='p1', config=config))
+        config.semi_sorted_projection_name = 'p1'
+        projection_actual = pa.Table.from_batches(t.select(columns=['a', 'b', 's'], predicate=(t['b'] < 5), config=config))
         # expecting results of projection p1 since we asked it specificaly
         assert expected_projection_p1 == projection_actual
-        projection_actual = pa.Table.from_batches(t.select(columns=['a', 'b', 's'], predicate=(t['b'] < 5), projection='p2', config=config))
+
+        config.semi_sorted_projection_name = 'p2'
+        projection_actual = pa.Table.from_batches(t.select(columns=['a', 'b', 's'], predicate=(t['b'] < 5), config=config))
         # expecting results of projection p2 since we asked it specificaly
         assert expected_projection_p2 == projection_actual
 

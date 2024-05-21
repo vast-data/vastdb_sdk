@@ -7,11 +7,14 @@ For more details see:
 - [Tabular identity policy with the proper permissions](https://support.vastdata.com/s/article/UUID-14322b60-d6a2-89ac-3df0-3dfbb6974182)
 """
 
+import logging
 import os
 
 import boto3
 
 from . import errors, internal_commands, transaction
+
+log = logging.getLogger()
 
 
 class Features:
@@ -21,15 +24,28 @@ class Features:
         """Save the server version."""
         self.vast_version = vast_version
 
-    def check_imports_table(self):
-        """Check if the feature that support imports table is supported."""
-        if self.vast_version < (5, 2):
-            raise errors.NotSupportedVersion("import_table requires 5.2+", self.vast_version)
+        self.check_imports_table = self._check(
+            "Imported objects' table feature requires 5.2+ VAST release",
+            vast_version >= (5, 2))
 
-    def check_return_row_ids(self):
-        """Check if insert/update/delete can return the row_ids."""
-        if self.vast_version < (5, 1):
-            raise errors.NotSupportedVersion("return_row_ids requires 5.1+", self.vast_version)
+        self.check_return_row_ids = self._check(
+            "Returning row IDs requires 5.1+ VAST release",
+            vast_version >= (5, 1))
+
+        self.check_enforce_semisorted_projection = self._check(
+            "Semi-sorted projection enforcement requires 5.1+ VAST release",
+            vast_version >= (5, 1))
+
+    def _check(self, msg, supported):
+        log.debug("%s (current version is %s): supported=%s", msg, self.vast_version, supported)
+        if not supported:
+            def fail():
+                raise errors.NotSupportedVersion(msg, self.vast_version)
+            return fail
+
+        def noop():
+            pass
+        return noop
 
 
 class Session:
