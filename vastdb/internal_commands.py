@@ -6,7 +6,6 @@ import struct
 import urllib.parse
 from collections import defaultdict, namedtuple
 from enum import Enum
-from ipaddress import IPv4Address, IPv6Address
 from typing import Any, Dict, Iterator, List, Optional, Union
 
 import flatbuffers
@@ -1031,25 +1030,7 @@ class VastdbApi:
         num_rows = stats.NumRows()
         size_in_bytes = stats.SizeInBytes()
         is_external_rowid_alloc = stats.IsExternalRowidAlloc()
-        endpoints = []
-        if stats.VipsLength() == 0:
-            endpoints.append(self.url)
-        else:
-            url = urllib3.util.parse_url(self.url)
-
-            ip_cls = IPv6Address if (stats.AddressType() == "ipv6") else IPv4Address
-            vips = [stats.Vips(i) for i in range(stats.VipsLength())]
-            ips = []
-            # extract the vips into list of IPs
-            for vip in vips:
-                start_ip = int(ip_cls(vip.StartAddress().decode()))
-                ips.extend(ip_cls(start_ip + i) for i in range(vip.AddressCount()))
-            # build a list of endpoint URLs, reusing schema and port (if specified when constructing the session).
-            # it is assumed that the client can access the returned IPs (e.g. if they are part of the VIP pool).
-            for ip in ips:
-                d = url._asdict()
-                d['host'] = str(ip)
-                endpoints.append(str(urllib3.util.Url(**d)))
+        endpoints = [self.url]  # we cannot replace the host by a VIP address in HTTPS-based URLs
         return TableStatsResult(num_rows, size_in_bytes, is_external_rowid_alloc, tuple(endpoints))
 
     def alter_table(self, bucket, schema, name, txid=0, client_tags=[], table_properties="",
