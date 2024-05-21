@@ -5,7 +5,7 @@ It is possible to list and access VAST snapshots generated over a bucket.
 """
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, List, Optional
 
 from . import errors, schema, transaction
@@ -22,48 +22,23 @@ class Bucket:
 
     name: str
     tx: "transaction.Transaction"
+    _root_schema: "Schema" = field(init=False, compare=False, repr=False)
 
-    def create_schema(self, path: str, fail_if_exists=True) -> "Schema":
+    def __post_init__(self):
+        """Root schema is empty."""
+        self._root_schema = schema.Schema(name="", bucket=self)
+
+    def create_schema(self, name: str, fail_if_exists=True) -> "Schema":
         """Create a new schema (a container of tables) under this bucket."""
-        if current := self.schema(path, fail_if_missing=False):
-            if fail_if_exists:
-                raise errors.SchemaExists(self.name, path)
-            else:
-                return current
-        self.tx._rpc.api.create_schema(self.name, path, txid=self.tx.txid)
-        log.info("Created schema: %s", path)
-        return self.schema(path)  # type: ignore[return-value]
+        return self._root_schema.create_schema(name=name, fail_if_exists=fail_if_exists)
 
-    def schema(self, path: str, fail_if_missing=True) -> Optional["Schema"]:
+    def schema(self, name: str, fail_if_missing=True) -> Optional["Schema"]:
         """Get a specific schema (a container of tables) under this bucket."""
-        s = self.schemas(path)
-        log.debug("schema: %s", s)
-        if not s:
-            if fail_if_missing:
-                raise errors.MissingSchema(self.name, path)
-            else:
-                return None
-        assert len(s) == 1, f"Expected to receive only a single schema, but got: {len(s)}. ({s})"
-        log.debug("Found schema: %s", s[0].name)
-        return s[0]
+        return self._root_schema.schema(name=name, fail_if_missing=fail_if_missing)
 
-    def schemas(self, name: Optional[str] = None) -> List["Schema"]:
+    def schemas(self, batch_size=None):
         """List bucket's schemas."""
-        schemas = []
-        next_key = 0
-        exact_match = bool(name)
-        log.debug("list schemas param: schema=%s, exact_match=%s", name, exact_match)
-        while True:
-            _bucket_name, curr_schemas, next_key, is_truncated, _ = \
-                self.tx._rpc.api.list_schemas(bucket=self.name, next_key=next_key, txid=self.tx.txid,
-                                               name_prefix=name, exact_match=exact_match)
-            if not curr_schemas:
-                break
-            schemas.extend(curr_schemas)
-            if not is_truncated:
-                break
-
-        return [schema.Schema(name=name, bucket=self) for name, *_ in schemas]
+        return self._root_schema.schemas(batch_size=batch_size)
 
     def snapshot(self, name, fail_if_missing=True) -> Optional["Bucket"]:
         """Get snapshot by name (if exists)."""

@@ -31,6 +31,51 @@ class Schema:
         """VAST transaction used for this schema."""
         return self.bucket.tx
 
+    def _subschema_full_name(self, name: str) -> str:
+        return f"{self.name}/{name}" if self.name else name
+
+    def create_schema(self, name: str, fail_if_exists=True) -> "Schema":
+        """Create a new schema (a container of tables) under this schema."""
+        if current := self.schema(name, fail_if_missing=False):
+            if fail_if_exists:
+                raise errors.SchemaExists(self.bucket.name, name)
+            else:
+                return current
+        full_name = self._subschema_full_name(name)
+        self.tx._rpc.api.create_schema(self.bucket.name, full_name, txid=self.tx.txid)
+        log.info("Created schema: %s", full_name)
+        return self.schema(name)  # type: ignore[return-value]
+
+    def schema(self, name: str, fail_if_missing=True) -> Optional["Schema"]:
+        """Get a specific schema (a container of tables) under this schema."""
+        _bucket_name, schemas, _next_key, _is_truncated, _ = \
+            self.tx._rpc.api.list_schemas(bucket=self.bucket.name, schema=self.name, next_key=0, txid=self.tx.txid,
+                                          name_prefix=name, exact_match=True, max_keys=1)
+        names = [name for name, *_ in schemas]
+        log.debug("Found schemas: %s", names)
+        if not names:
+            if fail_if_missing:
+                raise errors.MissingSchema(self.bucket.name, self._subschema_full_name(name))
+            else:
+                return None
+
+        assert len(names) == 1, f"Expected to receive only a single schema, but got {len(schemas)}: ({schemas})"
+        return schema.Schema(name=self._subschema_full_name(names[0]), bucket=self.bucket)
+
+    def schemas(self, batch_size=None) -> List["Schema"]:
+        """List child schemas."""
+        next_key = 0
+        if not batch_size:
+            batch_size = 1000
+        result: List["Schema"] = []
+        while True:
+            _bucket_name, curr_schemas, next_key, is_truncated, _ = \
+                self.tx._rpc.api.list_schemas(bucket=self.bucket.name, schema=self.name, next_key=next_key, max_keys=batch_size, txid=self.tx.txid)
+            result.extend(schema.Schema(name=self._subschema_full_name(name), bucket=self.bucket) for name, *_ in curr_schemas)
+            if not is_truncated:
+                break
+        return result
+
     def create_table(self, table_name: str, columns: pa.Schema, fail_if_exists=True) -> "Table":
         """Create a new table under this schema."""
         if current := self.table(table_name, fail_if_missing=False):

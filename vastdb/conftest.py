@@ -30,14 +30,23 @@ def test_bucket_name(request):
     return request.config.getoption("--tabular-bucket-name")
 
 
+def iter_schemas(s):
+    """Recusively scan all schemas."""
+    children = s.schemas()
+    for c in children:
+        yield from iter_schemas(c)
+    yield s
+
+
 @pytest.fixture(scope="function")
 def clean_bucket_name(request, test_bucket_name, session):
     with session.transaction() as tx:
         b = tx.bucket(test_bucket_name)
-        for s in b.schemas():
-            for t in s.tables():
-                t.drop()
-            s.drop()
+        for top_schema in b.schemas():
+            for s in iter_schemas(top_schema):
+                for t in s.tables():
+                    t.drop()
+                s.drop()
     return test_bucket_name
 
 
