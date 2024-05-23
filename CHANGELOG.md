@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.1.6] (2024-05-23)
+[0.1.6]: https://github.com/vast-data/vastdb_sdk/compare/v0.1.5...v0.1.6
+
+### Added
+ - Allow listing and querying Catalog snapshots
+ - Support nested schemas
+ - Use automatic split estimation
+
+### Fixed
+ - Allow using specific semi-sorted projection (needs VAST 5.1+ release)
+ - Add a client-side check for too large requests
+
 ## [0.1.5] (2024-05-16)
 [0.1.5]: https://github.com/vast-data/vastdb_sdk/compare/v0.1.4...v0.1.5
 
