@@ -82,7 +82,7 @@ Our SDK supports predicate and projection pushdown:
 
     # SELECT c2, c3 FROM t WHERE (c2 BETWEEN 0 AND 1) OR (c2 > 10)
     table.select(columns=['c2', 'c3'],
-                 predicate=(_.c2.between(0, 1) | (table['c2'] > 10))
+                 predicate=(_.c2.between(0, 1) | (_.c2 > 10))
 
     # SELECT * FROM t WHERE c3 LIKE '%substring%'
     table.select(predicate=_.c3.contains('substring'))
