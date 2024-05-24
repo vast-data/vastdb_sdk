@@ -63,11 +63,15 @@ with session.transaction() as tx:
     ])
     table.insert(arrow_table)
 
-    result = pa.Table.from_batches(table.select())  # SELECT * FROM t
+    # run `SELECT * FROM t`
+    reader = table.select()  # return a `pyarrow.RecordBatchReader`
+    result = pa.Table.from_batches(reader)  # build an PyArrow Table from the `pyarrow.RecordBatch` objects read from VAST
     assert result == arrow_table
 
     # the transaction is automatically committed when exiting the context
 ```
+
+Note: the transaction must be remain open while the returned [pyarrow.RecordBatchReader](https://arrow.apache.org/docs/python/generated/pyarrow.RecordBatchReader.html) generator is being used.
 
 ## Filters and projections
 
@@ -129,7 +133,7 @@ with contextlib.closing(pa.parquet.ParquetWriter('/path/to/file.parquet', batche
         writer.write_batch(batch)
 ```
 
-### DuckDB
+### DuckDB integration
 
 We can use [DuckDB](https://duckdb.org/docs/guides/python/sql_on_arrow.html) to post-process the resulting stream of [PyArrow record batches](https://arrow.apache.org/docs/python/data.html#record-batches):
 
@@ -139,9 +143,13 @@ from ibis import _
 import duckdb
 conn = duckdb.connect()
 
-batches = table.select(columns=['c1'], predicate=(_.c2 > 2))
-print(conn.execute("SELECT sum(c1) FROM batches").arrow())
+with session.transaction() as tx:
+    table = tx.bucket("bucket-name").schema("schema-name").table("table-name")
+    batches = table.select(columns=['c1'], predicate=(_.c2 > 2))
+    print(conn.execute("SELECT sum(c1) FROM batches").arrow())
 ```
+
+Note: the transaction must be active while DuckDB query is executing and fetching results using the Python SDK.
 
 ## Semi-sorted projections
 
