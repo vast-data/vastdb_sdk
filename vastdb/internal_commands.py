@@ -16,6 +16,25 @@ import requests
 import urllib3
 import xmltodict
 from aws_requests_auth.aws_auth import AWSRequestsAuth
+from ibis.expr.operations.generic import (
+    IsNull,
+    Literal,
+)
+from ibis.expr.operations.logical import (
+    And,
+    Between,
+    Equals,
+    Greater,
+    GreaterEqual,
+    InValues,
+    Less,
+    LessEqual,
+    Not,
+    NotEquals,
+    Or,
+)
+from ibis.expr.operations.relations import Field
+from ibis.expr.operations.strings import StringContains
 
 import vast_flatbuf.org.apache.arrow.computeir.flatbuf.BinaryLiteral as fb_binary_lit
 import vast_flatbuf.org.apache.arrow.computeir.flatbuf.BooleanLiteral as fb_bool_lit
@@ -137,26 +156,6 @@ class Predicate:
         self.expr = expr
 
     def serialize(self, builder: 'flatbuffers.builder.Builder'):
-        from ibis.expr.operations.generic import (
-            IsNull,
-            Literal,
-            TableColumn,
-        )
-        from ibis.expr.operations.logical import (
-            And,
-            Between,
-            Equals,
-            Greater,
-            GreaterEqual,
-            InValues,
-            Less,
-            LessEqual,
-            Not,
-            NotEquals,
-            Or,
-        )
-        from ibis.expr.operations.strings import StringContains
-
         builder_map = {
             Greater: self.build_greater,
             GreaterEqual: self.build_greater_equal,
@@ -216,7 +215,7 @@ class Predicate:
                             if not isinstance(literal, Literal):
                                 raise NotImplementedError(self.expr)
 
-                    if not isinstance(column, TableColumn):
+                    if not isinstance(column, Field):
                         raise NotImplementedError(self.expr)
 
                     field_name = column.name

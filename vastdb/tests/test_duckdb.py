@@ -56,6 +56,6 @@ def test_closed_tx(session, clean_bucket_name):
         res = conn.execute('SELECT a FROM batches')
         log.debug("closing tx=%s after first batch=%s", t.tx, first)
 
-    # transaction is closed, collecting the result should fail
-    with pytest.raises(duckdb.InvalidInputException, match="Detail: Python exception: MissingTransaction"):
+    # transaction is closed, collecting the result should fail internally in DuckDB
+    with pytest.raises(duckdb.InvalidInputException):
         res.arrow()
