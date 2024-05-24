@@ -58,7 +58,7 @@ def test_tables(session, clean_bucket_name):
         }
 
         columns_to_delete = pa.schema([(INTERNAL_ROW_ID, pa.uint64())])
-        rb = pa.record_batch(schema=columns_to_delete, data=[[0]])  # delete rows 0,1
+        rb = pa.record_batch(schema=columns_to_delete, data=[[0]])  # delete row 0
         t.delete(rb)
 
         selected_rows = t.select(columns=['b'], predicate=(t['a'] == 222), internal_row_id=True).read_all()
