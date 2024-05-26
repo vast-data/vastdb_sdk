@@ -11,7 +11,6 @@ from typing import Any, Dict, Iterator, List, Optional, Union
 import flatbuffers
 import ibis
 import pyarrow as pa
-import pyarrow.parquet as pq
 import requests
 import urllib3
 import xmltodict
@@ -731,9 +730,9 @@ class VastdbApi:
         self.secret_key = secret_key
 
         self.default_max_list_columns_page_size = 1000
-        self.session = requests.Session()
-        self.session.verify = ssl_verify
-        self.session.headers['user-agent'] = "VastData Tabular API 1.0 - 2022 (c)"
+        self._session = requests.Session()
+        self._session.verify = ssl_verify
+        self._session.headers['user-agent'] = "VastData Tabular API 1.0 - 2022 (c)"
 
         if url.port in {80, 443, None}:
             self.aws_host = f'{url.host}'
@@ -743,7 +742,7 @@ class VastdbApi:
         self.url = str(url)
         _logger.debug('url=%s aws_host=%s', self.url, self.aws_host)
 
-        self.session.auth = AWSRequestsAuth(aws_access_key=access_key,
+        self._session.auth = AWSRequestsAuth(aws_access_key=access_key,
                                             aws_secret_access_key=secret_key,
                                             aws_host=self.aws_host,
                                             aws_region='us-east-1',
@@ -771,7 +770,10 @@ class VastdbApi:
         _logger.critical(msg)
         raise NotImplementedError(msg)
 
-    def _api_prefix(self, bucket="", schema="", table="", command="", url_params={}):
+    def _request(self, *, method, url, **kwargs):
+        return self._session.request(method=method, url=url, **kwargs)
+
+    def _url(self, bucket="", schema="", table="", command="", url_params={}):
         prefix_list = [self.url]
         if len(bucket):
             prefix_list.append(bucket)
@@ -832,8 +834,10 @@ class VastdbApi:
 
         headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
         headers['Content-Length'] = str(len(create_schema_req))
-        res = self.session.post(self._api_prefix(bucket=bucket, schema=name, command="schema"),
-                                data=create_schema_req, headers=headers, stream=True)
+        res = self._request(
+            method="POST",
+            url=self._url(bucket=bucket, schema=name, command="schema"),
+            data=create_schema_req, headers=headers)
 
         return self._check_res(res, "create_schema", expected_retvals)
 
@@ -861,8 +865,10 @@ class VastdbApi:
         headers['Content-Length'] = str(len(alter_schema_req))
         url_params = {'tabular-new-schema-name': new_name} if len(new_name) else {}
 
-        res = self.session.put(self._api_prefix(bucket=bucket, schema=name, command="schema", url_params=url_params),
-                               data=alter_schema_req, headers=headers)
+        res = self._request(
+            method="PUT",
+            url=self._url(bucket=bucket, schema=name, command="schema", url_params=url_params),
+            data=alter_schema_req, headers=headers)
 
         return self._check_res(res, "alter_schema", expected_retvals)
 
@@ -875,7 +881,10 @@ class VastdbApi:
         """
         headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
 
-        res = self.session.delete(self._api_prefix(bucket=bucket, schema=name, command="schema"), headers=headers)
+        res = self._request(
+            method="DELETE",
+            url=self._url(bucket=bucket, schema=name, command="schema"),
+            headers=headers)
 
         return self._check_res(res, "drop_schema", expected_retvals)
 
@@ -906,7 +915,10 @@ class VastdbApi:
 
         schemas = []
         schema = schema or ""
-        res = self.session.get(self._api_prefix(bucket=bucket, schema=schema, command="schema"), headers=headers, stream=True)
+        res = self._request(
+            method="GET",
+            url=self._url(bucket=bucket, schema=schema, command="schema"),
+            headers=headers)
         self._check_res(res, "list_schemas", expected_retvals)
         if res.status_code == 200:
             res_headers = res.headers
@@ -932,7 +944,9 @@ class VastdbApi:
         if next_token:
             url_params['continuation-token'] = next_token
 
-        res = self.session.get(self._api_prefix(bucket=bucket, command="list", url_params=url_params), headers={}, stream=True)
+        res = self._request(
+            method="GET",
+            url=self._url(bucket=bucket, command="list", url_params=url_params))
         self._check_res(res, "list_snapshots")
 
         xml_str = res.content.decode()
@@ -976,8 +990,10 @@ class VastdbApi:
         if create_imports_table:
             url_params['sub-table'] = IMPORTED_OBJECTS_TABLE_NAME
 
-        res = self.session.post(self._api_prefix(bucket=bucket, schema=schema, table=name, command="table", url_params=url_params),
-                                data=serialized_schema, headers=headers)
+        res = self._request(
+            method="POST",
+            url=self._url(bucket=bucket, schema=schema, table=name, command="table", url_params=url_params),
+            data=serialized_schema, headers=headers)
         return self._check_res(res, "create_table", expected_retvals)
 
     def get_table_stats(self, bucket, schema, name, txid=0, client_tags=[], expected_retvals=[], imports_table_stats=False):
@@ -990,7 +1006,10 @@ class VastdbApi:
         """
         headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
         url_params = {'sub-table': IMPORTED_OBJECTS_TABLE_NAME} if imports_table_stats else {}
-        res = self.session.get(self._api_prefix(bucket=bucket, schema=schema, table=name, command="stats", url_params=url_params), headers=headers)
+        res = self._request(
+            method="GET",
+            url=self._url(bucket=bucket, schema=schema, table=name, command="stats", url_params=url_params),
+            headers=headers)
         self._check_res(res, "get_table_stats", expected_retvals)
 
         stats = get_table_stats.GetRootAs(res.content)
@@ -1026,8 +1045,10 @@ class VastdbApi:
         headers['Content-Length'] = str(len(alter_table_req))
         url_params = {'tabular-new-table-name': schema + "/" + new_name} if len(new_name) else {}
 
-        res = self.session.put(self._api_prefix(bucket=bucket, schema=schema, table=name, command="table", url_params=url_params),
-                               data=alter_table_req, headers=headers)
+        res = self._request(
+            method="PUT",
+            url=self._url(bucket=bucket, schema=schema, table=name, command="table", url_params=url_params),
+            data=alter_table_req, headers=headers)
 
         return self._check_res(res, "alter_table", expected_retvals)
 
@@ -1042,8 +1063,10 @@ class VastdbApi:
         headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
         url_params = {'sub-table': IMPORTED_OBJECTS_TABLE_NAME} if remove_imports_table else {}
 
-        res = self.session.delete(self._api_prefix(bucket=bucket, schema=schema, table=name, command="table", url_params=url_params),
-                                  headers=headers)
+        res = self._request(
+            method="DELETE",
+            url=self._url(bucket=bucket, schema=schema, table=name, command="table", url_params=url_params),
+            headers=headers)
         return self._check_res(res, "drop_table", expected_retvals)
 
     def list_tables(self, bucket, schema, txid=0, client_tags=[], max_keys=1000, next_key=0, name_prefix="",
@@ -1068,7 +1091,10 @@ class VastdbApi:
         headers['tabular-include-list-stats'] = str(include_list_stats)
 
         tables = []
-        res = self.session.get(self._api_prefix(bucket=bucket, schema=schema, command="table"), headers=headers)
+        res = self._request(
+            method="GET",
+            url=self._url(bucket=bucket, schema=schema, command="table"),
+            headers=headers)
         self._check_res(res, "list_table", expected_retvals)
         if res.status_code == 200:
             res_headers = res.headers
@@ -1106,8 +1132,10 @@ class VastdbApi:
         serialized_schema = arrow_schema.serialize()
         headers['Content-Length'] = str(len(serialized_schema))
 
-        res = self.session.post(self._api_prefix(bucket=bucket, schema=schema, table=name, command="column"),
-                                data=serialized_schema, headers=headers)
+        res = self._request(
+            method="POST",
+            url=self._url(bucket=bucket, schema=schema, table=name, command="column"),
+            data=serialized_schema, headers=headers)
         return self._check_res(res, "add_columns", expected_retvals)
 
     def alter_column(self, bucket, schema, table, name, txid=0, client_tags=[], column_properties="",
@@ -1144,8 +1172,10 @@ class VastdbApi:
         if len(new_name):
             url_params['tabular-new-column-name'] = new_name
 
-        res = self.session.put(self._api_prefix(bucket=bucket, schema=schema, table=table, command="column", url_params=url_params),
-                               data=alter_column_req, headers=headers)
+        res = self._request(
+            method="PUT",
+            url=self._url(bucket=bucket, schema=schema, table=table, command="column", url_params=url_params),
+            data=alter_column_req, headers=headers)
         return self._check_res(res, "alter_column", expected_retvals)
 
     def drop_columns(self, bucket, schema, table, arrow_schema, txid=0, client_tags=[], expected_retvals=[]):
@@ -1159,8 +1189,10 @@ class VastdbApi:
         serialized_schema = arrow_schema.serialize()
         headers['Content-Length'] = str(len(serialized_schema))
 
-        res = self.session.delete(self._api_prefix(bucket=bucket, schema=schema, table=table, command="column"),
-                                data=serialized_schema, headers=headers)
+        res = self._request(
+            method="DELETE",
+            url=self._url(bucket=bucket, schema=schema, table=table, command="column"),
+            data=serialized_schema, headers=headers)
         return self._check_res(res, "drop_columns", expected_retvals)
 
     def list_columns(self, bucket, schema, table, *, txid=0, client_tags=None, max_keys=None, next_key=0,
@@ -1193,9 +1225,10 @@ class VastdbApi:
             headers['tabular-name-prefix'] = name_prefix
 
         url_params = {'sub-table': IMPORTED_OBJECTS_TABLE_NAME} if list_imports_table else {}
-        res = self.session.get(self._api_prefix(bucket=bucket, schema=schema, table=table, command="column",
-                                                url_params=url_params),
-                               headers=headers, stream=True)
+        res = self._request(
+            method="GET",
+            url=self._url(bucket=bucket, schema=schema, table=table, command="column", url_params=url_params),
+            headers=headers)
         self._check_res(res, "list_columns", expected_retvals)
         if res.status_code == 200:
             res_headers = res.headers
@@ -1215,7 +1248,10 @@ class VastdbApi:
         tabular-txid: TransactionId
         """
         headers = self._fill_common_headers(client_tags=client_tags)
-        res = self.session.post(self._api_prefix(command="transaction"), headers=headers)
+        res = self._request(
+            method="POST",
+            url=self._url(command="transaction"),
+            headers=headers)
         return self._check_res(res, "begin_transaction", expected_retvals)
 
     def commit_transaction(self, txid, client_tags=[], expected_retvals=[]):
@@ -1225,7 +1261,10 @@ class VastdbApi:
         tabular-client-tag: ClientTag
         """
         headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
-        res = self.session.put(self._api_prefix(command="transaction"), headers=headers)
+        res = self._request(
+            method="PUT",
+            url=self._url(command="transaction"),
+            headers=headers)
         return self._check_res(res, "commit_transaction", expected_retvals)
 
     def rollback_transaction(self, txid, client_tags=[], expected_retvals=[]):
@@ -1235,7 +1274,10 @@ class VastdbApi:
         tabular-client-tag: ClientTag
         """
         headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
-        res = self.session.delete(self._api_prefix(command="transaction"), headers=headers)
+        res = self._request(
+            method="DELETE",
+            url=self._url(command="transaction"),
+            headers=headers)
         return self._check_res(res, "rollback_transaction", expected_retvals)
 
     def get_transaction(self, txid, client_tags=[], expected_retvals=[]):
@@ -1245,7 +1287,10 @@ class VastdbApi:
         tabular-client-tag: ClientTag
         """
         headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
-        res = self.session.get(self._api_prefix(command="transaction"), headers=headers)
+        res = self._request(
+            method="GET",
+            url=self._url(command="transaction"),
+            headers=headers)
         return self._check_res(res, "get_transaction", expected_retvals)
 
     def _build_query_data_headers(self, txid, client_tags, params, split, num_sub_splits, request_format, response_format,
@@ -1317,8 +1362,10 @@ class VastdbApi:
 
         url_params = self._build_query_data_url_params(projection, query_imports_table)
 
-        res = self.session.get(self._api_prefix(bucket=bucket, schema=schema, table=table, command="data", url_params=url_params),
-                               data=params, headers=headers, stream=True)
+        res = self._request(
+            method="GET",
+            url=self._url(bucket=bucket, schema=schema, table=table, command="data", url_params=url_params),
+            data=params, headers=headers, stream=True)
         return self._check_res(res, "query_data", expected_retvals)
 
     """
@@ -1405,8 +1452,10 @@ class VastdbApi:
             headers['tabular-schedule-id'] = str(schedule_id)
         if retry_count > 0:
             headers['tabular-retry-count'] = str(retry_count)
-        res = self.session.post(self._api_prefix(bucket=bucket, schema=schema, table=table, command="data"),
-                                data=import_req, headers=headers, stream=True)
+        res = self._request(
+            method="POST",
+            url=self._url(bucket=bucket, schema=schema, table=table, command="data"),
+            data=import_req, headers=headers, stream=True)
         if blocking:
             res = iterate_over_import_data_response(res)
 
@@ -1424,8 +1473,10 @@ class VastdbApi:
         """
         headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
         headers['Content-Length'] = str(len(record_batch))
-        res = self.session.post(self._api_prefix(bucket=bucket, schema=schema, table=table, command="rows"),
-                                data=record_batch, headers=headers, stream=True)
+        res = self._request(
+            method="POST",
+            url=self._url(bucket=bucket, schema=schema, table=table, command="rows"),
+            data=record_batch, headers=headers)
         return self._check_res(res, "insert_rows", expected_retvals)
 
     def update_rows(self, bucket, schema, table, record_batch, txid=0, client_tags=[], expected_retvals=[]):
@@ -1440,8 +1491,10 @@ class VastdbApi:
         """
         headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
         headers['Content-Length'] = str(len(record_batch))
-        res = self.session.put(self._api_prefix(bucket=bucket, schema=schema, table=table, command="rows"),
-                                data=record_batch, headers=headers)
+        res = self._request(
+            method="PUT",
+            url=self._url(bucket=bucket, schema=schema, table=table, command="rows"),
+            data=record_batch, headers=headers)
         self._check_res(res, "update_rows", expected_retvals)
 
     def delete_rows(self, bucket, schema, table, record_batch, txid=0, client_tags=[], expected_retvals=[],
@@ -1459,8 +1512,10 @@ class VastdbApi:
         headers['Content-Length'] = str(len(record_batch))
         url_params = {'sub-table': IMPORTED_OBJECTS_TABLE_NAME} if delete_from_imports_table else {}
 
-        res = self.session.delete(self._api_prefix(bucket=bucket, schema=schema, table=table, command="rows", url_params=url_params),
-                                  data=record_batch, headers=headers)
+        res = self._request(
+            method="DELETE",
+            url=self._url(bucket=bucket, schema=schema, table=table, command="rows", url_params=url_params),
+            data=record_batch, headers=headers)
         self._check_res(res, "delete_rows", expected_retvals)
 
     def create_projection(self, bucket, schema, table, name, columns, txid=0, client_tags=[], expected_retvals=[]):
@@ -1508,8 +1563,10 @@ class VastdbApi:
         headers['Content-Length'] = str(len(create_projection_req))
         url_params = {'name': name}
 
-        res = self.session.post(self._api_prefix(bucket=bucket, schema=schema, table=table, command="projection", url_params=url_params),
-                                data=create_projection_req, headers=headers)
+        res = self._request(
+            method="POST",
+            url=self._url(bucket=bucket, schema=schema, table=table, command="projection", url_params=url_params),
+            data=create_projection_req, headers=headers)
         return self._check_res(res, "create_projection", expected_retvals)
 
     def get_projection_stats(self, bucket, schema, table, name, txid=0, client_tags=[], expected_retvals=[]):
@@ -1522,8 +1579,10 @@ class VastdbApi:
         """
         headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
         url_params = {'name': name}
-        res = self.session.get(self._api_prefix(bucket=bucket, schema=schema, table=table, command="projection-stats", url_params=url_params),
-                               headers=headers)
+        res = self._request(
+            method="GET",
+            url=self._url(bucket=bucket, schema=schema, table=table, command="projection-stats", url_params=url_params),
+            headers=headers)
         if res.status_code == 200:
             stats = get_projection_table_stats.GetRootAs(res.content)
             num_rows = stats.NumRows()
@@ -1564,8 +1623,10 @@ class VastdbApi:
         headers['Content-Length'] = str(len(alter_projection_req))
         url_params = {'name': name}
 
-        res = self.session.put(self._api_prefix(bucket=bucket, schema=schema, table=table, command="projection", url_params=url_params),
-                               data=alter_projection_req, headers=headers)
+        res = self._request(
+            method="PUT",
+            url=self._url(bucket=bucket, schema=schema, table=table, command="projection", url_params=url_params),
+            data=alter_projection_req, headers=headers)
 
         return self._check_res(res, "alter_projection", expected_retvals)
 
@@ -1578,8 +1639,10 @@ class VastdbApi:
         headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
         url_params = {'name': name}
 
-        res = self.session.delete(self._api_prefix(bucket=bucket, schema=schema, table=table, command="projection", url_params=url_params),
-                                  headers=headers)
+        res = self._request(
+            method="DELETE",
+            url=self._url(bucket=bucket, schema=schema, table=table, command="projection", url_params=url_params),
+            headers=headers)
         return self._check_res(res, "drop_projection", expected_retvals)
 
     def list_projections(self, bucket, schema, table, txid=0, client_tags=[], max_keys=1000, next_key=0, name_prefix="",
@@ -1604,7 +1667,10 @@ class VastdbApi:
         headers['tabular-include-list-stats'] = str(include_list_stats)
 
         projections = []
-        res = self.session.get(self._api_prefix(bucket=bucket, schema=schema, table=table, command="projection"), headers=headers)
+        res = self._request(
+            method="GET",
+            url=self._url(bucket=bucket, schema=schema, table=table, command="projection"),
+            headers=headers)
         self._check_res(res, "list_projections", expected_retvals)
         if res.status_code == 200:
             res_headers = res.headers
@@ -1649,8 +1715,10 @@ class VastdbApi:
 
         url_params = {'name': projection}
 
-        res = self.session.get(self._api_prefix(bucket=bucket, schema=schema, table=table, command="projection-columns", url_params=url_params),
-                               headers=headers, stream=True)
+        res = self._request(
+            method="GET",
+            url=self._url(bucket=bucket, schema=schema, table=table, command="projection-columns", url_params=url_params),
+            headers=headers)
         self._check_res(res, "list_projection_columns", expected_retvals)
         # list projection columns response will also show column type Sorted/UnSorted
         if res.status_code == 200:

@@ -473,7 +473,7 @@ class Table:
             for slice in serialized_slices:
                 res = self.tx._rpc.api.insert_rows(self.bucket.name, self.schema.name, self.name, record_batch=slice,
                                                    txid=self.tx.txid)
-                (batch,) = pa.RecordBatchStreamReader(res.raw)
+                (batch,) = pa.RecordBatchStreamReader(res.content)
                 row_ids.append(batch[INTERNAL_ROW_ID])
             try:
                 self.tx._rpc.features.check_return_row_ids()
