@@ -33,6 +33,12 @@ def test_wide_row():
         list(util.iter_serialized_slices(t))
 
 
+def test_expand_ip_ranges():
+    endpoints = ["http://172.19.101.1-3"]
+    expected = ["http://172.19.101.1", "http://172.19.101.2", "http://172.19.101.3"]
+    assert util.expand_ip_ranges(endpoints) == expected
+
+
 def _parse(bufs):
     for buf in bufs:
         with pa.ipc.open_stream(buf) as reader:

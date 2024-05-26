@@ -1,4 +1,5 @@
 import logging
+import re
 from typing import TYPE_CHECKING, Callable, List, Optional, Union
 
 import pyarrow as pa
@@ -113,3 +114,22 @@ def serialize_record_batch(batch: Union[pa.RecordBatch, pa.Table]):
     with pa.ipc.new_stream(sink, batch.schema) as writer:
         writer.write(batch)
     return sink.getvalue()
+
+
+def expand_ip_ranges(endpoints):
+    """Expands endpoint strings that include an IP range in the format 'http://172.19.101.1-16'."""
+    expanded_endpoints = []
+    pattern = re.compile(r"(http://\d+\.\d+\.\d+)\.(\d+)-(\d+)")
+
+    for endpoint in endpoints:
+        match = pattern.match(endpoint)
+        if match:
+            base_url = match.group(1)
+            start_ip = int(match.group(2))
+            end_ip = int(match.group(3))
+            if start_ip > end_ip:
+                raise ValueError("Start IP cannot be greater than end IP in the range.")
+            expanded_endpoints.extend(f"{base_url}.{ip}" for ip in range(start_ip, end_ip + 1))
+        else:
+            expanded_endpoints.append(endpoint)
+    return expanded_endpoints
