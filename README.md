@@ -194,3 +194,10 @@ See the following blog posts for more examples:
 
 - https://vastdata.com/blog/the-vast-catalog-in-action-part-1
 - https://vastdata.com/blog/the-vast-catalog-in-action-part-2
+
+
+## Required VAST release
+
+Currently, VAST DB Python SDK requires `5.0.0-sp10` or later VAST release.
+
+If the cluster is running an older VAST release, please contact customer.support@vastdata.com for more details.
