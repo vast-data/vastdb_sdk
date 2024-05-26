@@ -13,6 +13,7 @@ import backoff
 import ibis
 import pyarrow as pa
 import requests
+import re
 
 from . import errors, internal_commands, schema, util
 
@@ -46,6 +47,26 @@ RETRIABLE_ERRORS = (
 )
 
 
+def expand_ip_ranges(endpoints):
+    """Expands endpoint strings that include an IP range in the format 'http://172.19.101.1-16'."""
+    expanded_endpoints = []
+    pattern = re.compile(r"(http://\d+\.\d+\.\d+)\.(\d+)-(\d+)")
+
+    for endpoint in endpoints:
+        match = pattern.match(endpoint)
+        if match:
+            base_url = match.group(1)
+            start_ip = int(match.group(2))
+            end_ip = int(match.group(3))
+            if start_ip > end_ip:
+                raise ValueError("Start IP cannot be greater than end IP in the range.")
+            expanded_endpoints.extend(f"{base_url}.{ip}" for ip in range(start_ip, end_ip + 1))
+        else:
+            expanded_endpoints.append(endpoint)
+    return expanded_endpoints
+
+
+
 @dataclass
 class QueryConfig:
     """Query execution configiration."""
@@ -59,7 +80,8 @@ class QueryConfig:
 
     # each endpoint will be handled by a separate worker thread
     # a single endpoint can be specified more than once to benefit from multithreaded execution
-    data_endpoints: Optional[List[str]] = None
+    #Optional; defaults to an empty list, supports expanded IP ranges like http://172.19.101.1-24
+    data_endpoints: Optional[List[str]] = None 
 
     # a subsplit fiber will finish after sending this number of rows back to the client
     limit_rows_per_sub_split: int = 128 * 1024
@@ -83,6 +105,11 @@ class QueryConfig:
     # allows retrying QueryData when the server is overloaded
     backoff_func: Any = field(default=backoff.on_exception(backoff.expo, RETRIABLE_ERRORS, max_tries=10))
 
+
+    def __post_init__(self):
+        """Expands IP ranges in endpoints immediately after initialization if provided."""
+        if self.data_endpoints:
+            self.data_endpoints = expand_ip_ranges(self.data_endpoints)
 
 @dataclass
 class ImportConfig:
