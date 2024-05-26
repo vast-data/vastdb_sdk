@@ -14,7 +14,7 @@ import ibis
 import pyarrow as pa
 import requests
 
-from . import errors, internal_commands, schema, util
+from . import _internal, errors, schema, util
 
 log = logging.getLogger(__name__)
 
@@ -102,7 +102,7 @@ class SelectSplitState:
         self.query_data_request = query_data_request
         self.table = table
 
-    def batches(self, api: internal_commands.VastdbApi):
+    def batches(self, api: _internal.VastdbApi):
         """Execute QueryData request, and yield parsed RecordBatch objects.
 
         Can be called repeatedly, to allow pagination.
@@ -123,7 +123,7 @@ class SelectSplitState:
                             enable_sorted_projections=self.config.use_semi_sorted_projections,
                             query_imports_table=self.table._imports_table,
                             projection=self.config.semi_sorted_projection_name)
-            pages_iter = internal_commands.parse_query_data_response(
+            pages_iter = _internal.parse_query_data_response(
                 conn=response.raw,
                 schema=self.query_data_request.response_schema,
                 start_row_ids=self.subsplits_state,
@@ -137,7 +137,7 @@ class SelectSplitState:
     @property
     def done(self):
         """Returns true iff the pagination over."""
-        return all(row_id == internal_commands.TABULAR_INVALID_ROW_ID for row_id in self.subsplits_state.values())
+        return all(row_id == _internal.TABULAR_INVALID_ROW_ID for row_id in self.subsplits_state.values())
 
 
 @dataclass
@@ -283,7 +283,7 @@ class Table:
                 max_workers=config.import_concurrency, thread_name_prefix='import_thread') as pool:
             try:
                 for endpoint in endpoints:
-                    session = internal_commands.VastdbApi(endpoint, self.tx._rpc.api.access_key, self.tx._rpc.api.secret_key)
+                    session = _internal.VastdbApi(endpoint, self.tx._rpc.api.access_key, self.tx._rpc.api.secret_key)
                     futures.append(pool.submit(import_worker, files_queue, session))
 
                 log.debug("Waiting for import workers to finish")
@@ -342,13 +342,13 @@ class Table:
         if predicate is True:
             predicate = None
         if predicate is False:
-            response_schema = internal_commands.get_response_schema(schema=query_schema, field_names=columns)
+            response_schema = _internal.get_response_schema(schema=query_schema, field_names=columns)
             return pa.RecordBatchReader.from_batches(response_schema, [])
 
         if isinstance(predicate, ibis.common.deferred.Deferred):
             predicate = predicate.resolve(self._ibis_table)  # may raise if the predicate is invalid (e.g. wrong types / missing column)
 
-        query_data_request = internal_commands.build_query_data_request(
+        query_data_request = _internal.build_query_data_request(
             schema=query_schema,
             predicate=predicate,
             field_names=columns)
@@ -376,7 +376,7 @@ class Table:
 
         def single_endpoint_worker(endpoint: str):
             try:
-                host_api = internal_commands.VastdbApi(endpoint=endpoint, access_key=self.tx._rpc.api.access_key, secret_key=self.tx._rpc.api.secret_key)
+                host_api = _internal.VastdbApi(endpoint=endpoint, access_key=self.tx._rpc.api.access_key, secret_key=self.tx._rpc.api.secret_key)
                 while True:
                     check_stop()
                     try:

@@ -12,7 +12,7 @@ import os
 
 import boto3
 
-from . import errors, internal_commands, transaction
+from . import _internal, errors, transaction
 
 log = logging.getLogger()
 
@@ -60,7 +60,7 @@ class Session:
         if endpoint is None:
             endpoint = os.environ['AWS_S3_ENDPOINT_URL']
 
-        self.api = internal_commands.VastdbApi(endpoint, access, secret, ssl_verify=ssl_verify)
+        self.api = _internal.VastdbApi(endpoint, access, secret, ssl_verify=ssl_verify)
         version_tuple = tuple(int(part) for part in self.api.vast_version.split('.'))
         self.features = Features(version_tuple)
         self.s3 = boto3.client('s3',

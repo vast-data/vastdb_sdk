@@ -24,6 +24,6 @@ ignore = [
 
 # TODO: add relevant docstrings
 "vastdb/errors.py" = ["D"]
-"vastdb/internal_commands.py" = ["D"]
+"vastdb/_internal.py" = ["D"]
 "vastdb/util.py" = ["D"]
 "setup.py" = ["D"]
