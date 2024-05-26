@@ -593,7 +593,7 @@ class Table:
         return self.imports_table()  # type: ignore[return-value]
 
     def imports_table(self) -> Optional["Table"]:
-        """Get the imports table under of this table."""
+        """Get the imports table of this table."""
         self.tx._rpc.features.check_imports_table()
         return Table(name=self.name, schema=self.schema, handle=int(self.handle), stats=self.stats, _imports_table=True)
 
