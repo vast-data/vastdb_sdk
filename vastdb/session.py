@@ -36,6 +36,10 @@ class Features:
             "Semi-sorted projection enforcement requires 5.1+ VAST release",
             vast_version >= (5, 1))
 
+        self.check_external_row_ids_allocation = self._check(
+            "External row IDs allocation requires 5.1+ VAST release",
+            vast_version >= (5, 1))
+
     def _check(self, msg, supported):
         log.debug("%s (current version is %s): supported=%s", msg, self.vast_version, supported)
         if not supported:
