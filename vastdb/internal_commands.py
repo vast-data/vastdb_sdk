@@ -771,14 +771,6 @@ class VastdbApi:
         _logger.critical(msg)
         raise NotImplementedError(msg)
 
-    def update_mgmt_session(self, access_key: str, secret_key: str, auth_type=AuthType.SIGV4):
-        if auth_type != AuthType.BASIC:
-            self.session.auth = AWSRequestsAuth(aws_access_key=access_key,
-                                                aws_secret_access_key=secret_key,
-                                                aws_host=self.aws_host,
-                                                aws_region='us-east-1',
-                                                aws_service='s3')
-
     def _api_prefix(self, bucket="", schema="", table="", command="", url_params={}):
         prefix_list = [self.url]
         if len(bucket):
@@ -987,30 +979,6 @@ class VastdbApi:
         res = self.session.post(self._api_prefix(bucket=bucket, schema=schema, table=name, command="table", url_params=url_params),
                                 data=serialized_schema, headers=headers)
         return self._check_res(res, "create_table", expected_retvals)
-
-    def create_table_from_parquet_schema(self, bucket, schema, name, parquet_path=None,
-                                         parquet_bucket_name=None, parquet_object_name=None,
-                                         txid=0, client_tags=[], expected_retvals=[]):
-
-        # Use pyarrow.parquet.ParquetDataset to open the Parquet file
-        if parquet_path:
-            parquet_ds = pq.ParquetDataset(parquet_path)
-        elif parquet_bucket_name and parquet_object_name:
-            s3fs = pa.fs.S3FileSystem(access_key=self.access_key, secret_key=self.secret_key, endpoint_override=self.url)
-            parquet_ds = pq.ParquetDataset('/'.join([parquet_bucket_name, parquet_object_name]), filesystem=s3fs)
-        else:
-            raise RuntimeError(f'invalid params parquet_path={parquet_path} parquet_bucket_name={parquet_bucket_name} parquet_object_name={parquet_object_name}')
-
-        # Get the schema of the Parquet file
-        if isinstance(parquet_ds.schema, pq.ParquetSchema):
-            arrow_schema = parquet_ds.schema.to_arrow_schema()
-        elif isinstance(parquet_ds.schema, pa.Schema):
-            arrow_schema = parquet_ds.schema
-        else:
-            raise RuntimeError(f'invalid type(parquet_ds.schema) = {type(parquet_ds.schema)}')
-
-        # create the table
-        return self.create_table(bucket, schema, name, arrow_schema, txid, client_tags, expected_retvals)
 
     def get_table_stats(self, bucket, schema, name, txid=0, client_tags=[], expected_retvals=[], imports_table_stats=False):
         """
@@ -1280,54 +1248,6 @@ class VastdbApi:
         res = self.session.get(self._api_prefix(command="transaction"), headers=headers)
         return self._check_res(res, "get_transaction", expected_retvals)
 
-    def select_row_ids(self, bucket, schema, table, params, txid=0, client_tags=[], expected_retvals=[],
-                       retry_count=0, enable_sorted_projections=True):
-        """
-        POST /mybucket/myschema/mytable?query-data=SelectRowIds HTTP/1.1
-        """
-
-        # add query option select-only and read-only
-        headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
-        headers['Content-Length'] = str(len(params))
-        headers['tabular-enable-sorted-projections'] = str(enable_sorted_projections)
-        if retry_count > 0:
-            headers['tabular-retry-count'] = str(retry_count)
-
-        res = self.session.post(self._api_prefix(bucket=bucket, schema=schema, table=table, command="query-data=SelectRowIds",),
-                                data=params, headers=headers, stream=True)
-        return self._check_res(res, "query_data", expected_retvals)
-
-    def read_columns_data(self, bucket, schema, table, params, txid=0, client_tags=[], expected_retvals=[], tenant_guid=None,
-                          retry_count=0, enable_sorted_projections=True):
-        """
-        POST /mybucket/myschema/mytable?query-data=ReadColumns HTTP/1.1
-        """
-
-        headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
-        headers['Content-Length'] = str(len(params))
-        headers['tabular-enable-sorted-projections'] = str(enable_sorted_projections)
-        if retry_count > 0:
-            headers['tabular-retry-count'] = str(retry_count)
-
-        res = self.session.post(self._api_prefix(bucket=bucket, schema=schema, table=table, command="query-data=ReadColumns",),
-                               data=params, headers=headers, stream=True)
-        return self._check_res(res, "query_data", expected_retvals)
-
-    def count_rows(self, bucket, schema, table, params, txid=0, client_tags=[], expected_retvals=[], tenant_guid=None,
-                   retry_count=0, enable_sorted_projections=True):
-        """
-        POST /mybucket/myschema/mytable?query-data=CountRows HTTP/1.1
-        """
-        headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
-        headers['Content-Length'] = str(len(params))
-        headers['tabular-enable-sorted-projections'] = str(enable_sorted_projections)
-        if retry_count > 0:
-            headers['tabular-retry-count'] = str(retry_count)
-
-        res = self.session.post(self._api_prefix(bucket=bucket, schema=schema, table=table, command="query-data=CountRows",),
-                               data=params, headers=headers, stream=True)
-        return self._check_res(res, "query_data", expected_retvals)
-
     def _build_query_data_headers(self, txid, client_tags, params, split, num_sub_splits, request_format, response_format,
                                   enable_sorted_projections, limit_rows, schedule_id, retry_count, search_path, tenant_guid,
                                   sub_split_start_row_ids):
@@ -1367,35 +1287,6 @@ class VastdbApi:
         elif projection:
             url_params['name'] = projection
         return url_params
-
-    def legacy_query_data(self, bucket, schema, table, params, split=(0, 1, 8), num_sub_splits=1, response_row_id=False,
-                      txid=0, client_tags=[], expected_retvals=[], limit_rows=0, schedule_id=None, retry_count=0,
-                      search_path=None, sub_split_start_row_ids=[], tenant_guid=None, projection='', enable_sorted_projections=True,
-                      request_format='string', response_format='string', query_imports_table=False):
-        """
-        POST /mybucket/myschema/mytable?query-data=LegacyQueryData HTTP/1.1
-        Content-Length: ContentLength
-        tabular-txid: TransactionId
-        tabular-client-tag: ClientTag
-        tabular-split: "split_id,total_splits,num_row_groups_per_split"
-        tabular-num-of-subsplits: "total"
-        tabular-request-format: "string"
-        tabular-response-format: "string" #arrow/trino
-        tabular-schedule-id: "schedule-id"
-
-        Request Body (flatbuf)
-        projections_chunk [expressions]
-        predicate_chunk "formatted_data", (required)
-
-        """
-        headers = self._build_query_data_headers(txid, client_tags, params, split, num_sub_splits, request_format, response_format,
-                                                  enable_sorted_projections, limit_rows, schedule_id, retry_count, search_path, tenant_guid,
-                                                  sub_split_start_row_ids)
-        url_params = self._build_query_data_url_params(projection, query_imports_table)
-
-        res = self.session.post(self._api_prefix(bucket=bucket, schema=schema, table=table, command="query-data=LegacyQueryData",
-                                                  url_params=url_params), data=params, headers=headers, stream=True)
-        return self._check_res(res, "legacy_query_data", expected_retvals)
 
     def query_data(self, bucket, schema, table, params, split=(0, 1, 8), num_sub_splits=1, response_row_id=False,
                    txid=0, client_tags=[], expected_retvals=[], limit_rows=0, schedule_id=None, retry_count=0,
@@ -2117,40 +2008,3 @@ def build_query_data_request(schema: 'pa.Schema' = pa.schema([]), predicate: ibi
     builder.Finish(relation)
 
     return QueryDataRequest(serialized=builder.Output(), response_schema=response_schema, response_parser=QueryDataParser(response_schema))
-
-
-def convert_column_types(table: 'pa.Table') -> 'pa.Table':
-    """
-    Adjusting table values
-
-    1. Because the timestamp resolution is too high it is necessary to trim it. ORION-96961
-    2. Since the values of nfs_mode_bits are returned in decimal, need to convert them to octal,
-    as in all representations, so that the mode of 448 turn into 700
-    3. for owner_name and group_owner_name 0 -> root, and 65534 -> nobody
-    """
-    ts_indexes = []
-    indexes_of_fields_to_change = {}
-    sid_to_name = {
-        '0': 'root',
-        '65534': 'nobody'  # NFSNOBODY_UID_16_BIT
-    }
-    column_matcher = {  # column_name: custom converting rule
-        'nfs_mode_bits': lambda val: int(oct(val).replace('0o', '')) if val is not None else val,
-        'owner_name': lambda val: sid_to_name.get(val, val),
-        'group_owner_name': lambda val: sid_to_name.get(val, val),
-    }
-    for index, field in enumerate(table.schema):
-        if isinstance(field.type, pa.TimestampType) and field.type.unit == 'ns':
-            ts_indexes.append(index)
-        if field.name in column_matcher:
-            indexes_of_fields_to_change[field.name] = index
-    for changing_index in ts_indexes:
-        field_name = table.schema[changing_index].name
-        new_column = table[field_name].cast(pa.timestamp('us'), safe=False)
-        table = table.set_column(changing_index, field_name, new_column)
-    for field_name, changing_index in indexes_of_fields_to_change.items():
-        new_column = table[field_name].to_pylist()
-        new_column = list(map(column_matcher[field_name], new_column))
-        new_column = pa.array(new_column, table[field_name].type)
-        table = table.set_column(changing_index, field_name, new_column)
-    return table
