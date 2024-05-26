@@ -5,9 +5,11 @@ import re
 import struct
 import urllib.parse
 from collections import defaultdict, namedtuple
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, Iterator, List, Optional, Union
+from typing import Any, Callable, Dict, Iterator, List, Optional, Union
 
+import backoff
 import flatbuffers
 import ibis
 import pyarrow as pa
@@ -720,11 +722,32 @@ def _parse_table_info(obj):
 TableStatsResult = namedtuple("TableStatsResult", ["num_rows", "size_in_bytes", "is_external_rowid_alloc", "endpoints"])
 
 
+@dataclass
+class BackoffConfig:
+
+    disconnect_backoff: Callable = field(default=backoff.on_exception(
+        wait_gen=backoff.expo,
+        exception=(requests.exceptions.ConnectionError,),
+        logger=_logger,
+        max_tries=10,
+        max_time=60))
+
+    unavailable_backoff: Callable = field(default=backoff.on_predicate(
+        wait_gen=backoff.expo,
+        predicate=lambda res: res.status_code == 503,
+        logger=_logger,
+        max_tries=10,
+        max_time=60))
+
+
 class VastdbApi:
     # we expect the vast version to be <major>.<minor>.<patch>.<protocol>
     VAST_VERSION_REGEX = re.compile(r'^vast (\d+\.\d+\.\d+\.\d+)$')
 
-    def __init__(self, endpoint, access_key, secret_key, auth_type=AuthType.SIGV4, ssl_verify=True):
+    def __init__(self, endpoint, access_key, secret_key,
+            auth_type=AuthType.SIGV4,
+            ssl_verify=True,
+            backoff_config=None):
         url = urllib3.util.parse_url(endpoint)
         self.access_key = access_key
         self.secret_key = secret_key
@@ -733,6 +756,15 @@ class VastdbApi:
         self._session = requests.Session()
         self._session.verify = ssl_verify
         self._session.headers['user-agent'] = "VastData Tabular API 1.0 - 2022 (c)"
+
+        if backoff_config is None:
+            backoff_config = BackoffConfig()
+
+        if backoff_config.unavailable_backoff is not None:
+            self._request = backoff_config.unavailable_backoff(self._request)
+
+        if backoff_config.disconnect_backoff is not None:
+            self._request = backoff_config.disconnect_backoff(self._request)
 
         if url.port in {80, 443, None}:
             self.aws_host = f'{url.host}'

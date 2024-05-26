@@ -80,7 +80,7 @@ class QueryConfig:
     # used for worker threads' naming
     query_id: str = ""
 
-    # allows retrying QueryData when the server is overloaded
+    # DEPRECATED: will be removed in a future release
     backoff_func: Any = field(default=backoff.on_exception(backoff.expo, RETRIABLE_ERRORS, max_tries=10))
 
 
@@ -108,8 +108,7 @@ class SelectSplitState:
         Can be called repeatedly, to allow pagination.
         """
         while not self.done:
-            query_with_backoff = self.config.backoff_func(api.query_data)
-            response = query_with_backoff(
+            response = api.query_data(
                             bucket=self.table.bucket.name,
                             schema=self.table.schema.name,
                             table=self.table.name,
