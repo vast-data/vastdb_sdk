@@ -81,6 +81,19 @@ def test_insert_wide_row(session, clean_bucket_name):
         assert actual == expected
 
 
+def test_insert_empty(session, clean_bucket_name):
+    columns = pa.schema([('a', pa.int8()), ('b', pa.float32())])
+    data = [[None] * 5, [None] * 5]
+    all_nulls = pa.table(schema=columns, data=data)
+    no_columns = all_nulls.select([])
+
+    with session.transaction() as tx:
+        t = tx.bucket(clean_bucket_name).create_schema('s').create_table('t', columns)
+        t.insert(all_nulls)
+        with pytest.raises(errors.NotImplemented):
+            t.insert(no_columns)
+
+
 def test_exists(session, clean_bucket_name):
     with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).create_schema('s1')
