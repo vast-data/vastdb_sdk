@@ -1,6 +1,9 @@
 """VAST Database Python SDK."""
 
 import functools
+import importlib.metadata
+
+__version__ = importlib.metadata.distribution(__package__).version
 
 from . import session
 

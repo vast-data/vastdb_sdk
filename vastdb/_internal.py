@@ -748,6 +748,10 @@ class VastdbApi:
             auth_type=AuthType.SIGV4,
             ssl_verify=True,
             backoff_config=None):
+
+        from . import __version__  # import lazily here (to avoid circular dependencies)
+        self.client_sdk_version = f"VAST Database Python SDK {__version__} - 2024 (c)"
+
         url = urllib3.util.parse_url(endpoint)
         self.access_key = access_key
         self.secret_key = secret_key
@@ -755,7 +759,7 @@ class VastdbApi:
         self.default_max_list_columns_page_size = 1000
         self._session = requests.Session()
         self._session.verify = ssl_verify
-        self._session.headers['user-agent'] = "VastData Tabular API 1.0 - 2022 (c)"
+        self._session.headers['user-agent'] = self.client_sdk_version
 
         if backoff_config is None:
             backoff_config = BackoffConfig()
