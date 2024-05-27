@@ -777,7 +777,7 @@ class VastdbApi:
         self._session.auth = AWSRequestsAuth(aws_access_key=access_key,
                                             aws_secret_access_key=secret_key,
                                             aws_host=self.aws_host,
-                                            aws_region='us-east-1',
+                                            aws_region='',
                                             aws_service='s3')
 
         # probe the cluster for its version
