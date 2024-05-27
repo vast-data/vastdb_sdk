@@ -89,8 +89,11 @@ MAX_QUERY_DATA_REQUEST_SIZE = int(0.9 * MAX_TABULAR_REQUEST_SIZE)
 
 def iter_serialized_slices(batch: Union[pa.RecordBatch, pa.Table], max_rows_per_slice=None):
     """Iterate over a list of record batch slices."""
+    if batch.nbytes:
+        rows_per_slice = int(0.9 * len(batch) * MAX_RECORD_BATCH_SLICE_SIZE / batch.nbytes)
+    else:
+        rows_per_slice = len(batch)  # if the batch has no buffers (no rows/columns)
 
-    rows_per_slice = int(0.9 * len(batch) * MAX_RECORD_BATCH_SLICE_SIZE / batch.nbytes)
     if max_rows_per_slice is not None:
         rows_per_slice = min(rows_per_slice, max_rows_per_slice)
 
