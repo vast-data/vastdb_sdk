@@ -208,6 +208,25 @@ def test_select_with_multisplits(session, clean_bucket_name):
         assert actual == expected
 
 
+def test_select_with_priority(session, clean_bucket_name):
+    columns = pa.schema([
+        ('a', pa.int32())
+    ])
+    expected = pa.table(schema=columns, data=[range(100)])
+    with prepare_data(session, clean_bucket_name, 's', 't', expected) as t:
+        config = QueryConfig()
+
+        config.queue_priority = 0
+        assert t.select(config=config).read_all() == expected
+
+        config.queue_priority = 12345
+        assert t.select(config=config).read_all() == expected
+
+        config.queue_priority = -1
+        with pytest.raises(errors.BadRequest):
+            t.select(config=config).read_all()
+
+
 def test_types(session, clean_bucket_name):
     columns = pa.schema([
         ('tb', pa.bool_()),

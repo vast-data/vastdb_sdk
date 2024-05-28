@@ -80,6 +80,11 @@ class QueryConfig:
     # used for worker threads' naming
     query_id: str = ""
 
+    # non-negative integer, used for server-side prioritization of queued requests:
+    # - requests with lower values will be served before requests with higher values.
+    # - if unset, the request will be added to the queue's end.
+    queue_priority: Optional[int] = None
+
     # DEPRECATED: will be removed in a future release
     backoff_func: Any = field(default=backoff.on_exception(backoff.expo, RETRIABLE_ERRORS, max_tries=10))
 
@@ -119,6 +124,7 @@ class SelectSplitState:
                             txid=self.table.tx.txid,
                             limit_rows=self.config.limit_rows_per_sub_split,
                             sub_split_start_row_ids=self.subsplits_state.items(),
+                            schedule_id=self.config.queue_priority,
                             enable_sorted_projections=self.config.use_semi_sorted_projections,
                             query_imports_table=self.table._imports_table,
                             projection=self.config.semi_sorted_projection_name)
