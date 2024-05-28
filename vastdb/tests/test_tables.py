@@ -169,6 +169,27 @@ def test_update_table(session, clean_bucket_name):
             'b': [0.5, 1.5, 2.5]
         }
 
+        # test update for not sorted rows:
+        rb = pa.record_batch(schema=columns_to_update, data=[
+            [2, 0],  # update rows 0,2
+            [231, 235]
+        ])
+        t.update(rb)
+        actual = t.select(columns=['a', 'b']).read_all()
+        assert actual.to_pydict() == {
+            'a': [235, 2222, 231],
+            'b': [0.5, 1.5, 2.5]
+        }
+
+        # test delete for not sorted rows:
+        rb = pa.record_batch(schema=pa.schema([(INTERNAL_ROW_ID, pa.uint64())]), data=[[2, 0]])
+        t.delete(rb)
+        actual = t.select(columns=['a', 'b']).read_all()
+        assert actual.to_pydict() == {
+            'a': [2222],
+            'b': [1.5]
+        }
+
 
 def test_select_with_multisplits(session, clean_bucket_name):
     columns = pa.schema([

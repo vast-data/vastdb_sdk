@@ -3,6 +3,7 @@ import re
 from typing import TYPE_CHECKING, Callable, List, Optional, Union
 
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 from .errors import InvalidArgument, TooWideRow
@@ -136,3 +137,18 @@ def expand_ip_ranges(endpoints):
         else:
             expanded_endpoints.append(endpoint)
     return expanded_endpoints
+
+
+def is_sorted(arr):
+    """Check if the array is sorted."""
+    return pc.all(pc.greater(arr[1:], arr[:-1])).as_py()
+
+
+def sort_record_batch_if_needed(record_batch, sort_column):
+    """Sort the RecordBatch by the specified column if it is not already sorted."""
+    column_data = record_batch[sort_column]
+
+    if not is_sorted(column_data):
+        return record_batch.sort_by(sort_column)
+    else:
+        return record_batch

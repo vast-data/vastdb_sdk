@@ -508,6 +508,8 @@ class Table:
         else:
             update_rows_rb = rows
 
+        update_rows_rb = util.sort_record_batch_if_needed(update_rows_rb, INTERNAL_ROW_ID)
+
         serialized_slices = util.iter_serialized_slices(update_rows_rb, MAX_ROWS_PER_BATCH)
         for slice in serialized_slices:
             self.tx._rpc.api.update_rows(self.bucket.name, self.schema.name, self.name, record_batch=slice,
@@ -526,6 +528,8 @@ class Table:
             raise errors.MissingRowIdColumn
         delete_rows_rb = pa.record_batch(schema=pa.schema([(INTERNAL_ROW_ID, pa.uint64())]),
                                          data=[_combine_chunks(rows_chunk)])
+
+        delete_rows_rb = util.sort_record_batch_if_needed(delete_rows_rb, INTERNAL_ROW_ID)
 
         serialized_slices = util.iter_serialized_slices(delete_rows_rb, MAX_ROWS_PER_BATCH)
         for slice in serialized_slices:
