@@ -725,13 +725,6 @@ TableStatsResult = namedtuple("TableStatsResult", ["num_rows", "size_in_bytes", 
 @dataclass
 class BackoffConfig:
 
-    disconnect_backoff: Callable = field(default=backoff.on_exception(
-        wait_gen=backoff.expo,
-        exception=(requests.exceptions.ConnectionError,),
-        logger=_logger,
-        max_tries=10,
-        max_time=60))
-
     unavailable_backoff: Callable = field(default=backoff.on_predicate(
         wait_gen=backoff.expo,
         predicate=lambda res: res.status_code == 503,
@@ -766,9 +759,6 @@ class VastdbApi:
 
         if backoff_config.unavailable_backoff is not None:
             self._request = backoff_config.unavailable_backoff(self._request)
-
-        if backoff_config.disconnect_backoff is not None:
-            self._request = backoff_config.disconnect_backoff(self._request)
 
         if url.port in {80, 443, None}:
             self.aws_host = f'{url.host}'
