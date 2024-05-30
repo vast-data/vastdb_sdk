@@ -219,7 +219,7 @@ class Table:
                 break
         return [_parse_projection_info(projection, self) for projection in projections]
 
-    def import_files(self, files_to_import: List[str], config: Optional[ImportConfig] = None) -> None:
+    def import_files(self, files_to_import: Iterable[str], config: Optional[ImportConfig] = None) -> None:
         """Import a list of Parquet files into this table.
 
         The files must be on VAST S3 server and be accessible using current credentials.
