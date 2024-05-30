@@ -7,7 +7,7 @@ import queue
 from dataclasses import dataclass, field
 from math import ceil
 from threading import Event
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
 import backoff
 import ibis
@@ -192,14 +192,14 @@ class Table:
         """Get a specific semi-sorted projection of this table."""
         if self._imports_table:
             raise errors.NotSupportedCommand(self.bucket.name, self.schema.name, self.name)
-        projs = self.projections(projection_name=name)
+        projs = tuple(self.projections(projection_name=name))
         if not projs:
             raise errors.MissingProjection(self.bucket.name, self.schema.name, self.name, name)
         assert len(projs) == 1, f"Expected to receive only a single projection, but got: {len(projs)}. projections: {projs}"
         log.debug("Found projection: %s", projs[0])
         return projs[0]
 
-    def projections(self, projection_name=None) -> List["Projection"]:
+    def projections(self, projection_name=None) -> Iterable["Projection"]:
         """List all semi-sorted projections of this table."""
         if self._imports_table:
             raise errors.NotSupportedCommand(self.bucket.name, self.schema.name, self.name)

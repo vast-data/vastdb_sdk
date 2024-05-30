@@ -6,7 +6,7 @@ It is possible to list and access VAST snapshots generated over a bucket.
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Iterable, List, Optional
 
 import pyarrow as pa
 
@@ -62,7 +62,7 @@ class Schema:
         assert len(names) == 1, f"Expected to receive only a single schema, but got {len(schemas)}: ({schemas})"
         return schema.Schema(name=self._subschema_full_name(names[0]), bucket=self.bucket)
 
-    def schemas(self, batch_size=None) -> List["Schema"]:
+    def schemas(self, batch_size=None) -> Iterable["Schema"]:
         """List child schemas."""
         next_key = 0
         if not batch_size:

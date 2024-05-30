@@ -8,7 +8,7 @@ A transcation is used as a context manager, since every Database-related operati
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Iterable, Optional
 
 import botocore
 
@@ -72,7 +72,7 @@ class Transaction:
             raise
         return bucket.Bucket(name, self)
 
-    def catalog_snapshots(self) -> List["Bucket"]:
+    def catalog_snapshots(self) -> Iterable["Bucket"]:
         """Return VAST Catalog bucket snapshots."""
         return bucket.Bucket(VAST_CATALOG_BUCKET_NAME, self).snapshots()
 

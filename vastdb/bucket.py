@@ -6,7 +6,7 @@ It is possible to list and access VAST snapshots generated over a bucket.
 
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Iterable, Optional
 
 from . import errors, schema, transaction
 
@@ -55,7 +55,7 @@ class Bucket:
 
         return Bucket(name=f'{self.name}/{expected_name}', tx=self.tx)
 
-    def snapshots(self) -> List["Bucket"]:
+    def snapshots(self) -> Iterable["Bucket"]:
         """List bucket's snapshots."""
         snapshots = []
         next_key = 0
