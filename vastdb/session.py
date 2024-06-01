@@ -9,10 +9,12 @@ For more details see:
 
 import logging
 import os
+from typing import Optional
 
 import boto3
 
 from . import _internal, errors, transaction
+from ._internal import BackoffConfig
 
 log = logging.getLogger()
 
@@ -55,7 +57,10 @@ class Features:
 class Session:
     """VAST database session."""
 
-    def __init__(self, access=None, secret=None, endpoint=None, ssl_verify=True):
+    def __init__(self, access=None, secret=None, endpoint=None,
+                 *,
+                 ssl_verify=True,
+                 backoff_config: Optional[BackoffConfig] = None):
         """Connect to a VAST Database endpoint, using specified credentials."""
         if access is None:
             access = os.environ['AWS_ACCESS_KEY_ID']
@@ -64,7 +69,12 @@ class Session:
         if endpoint is None:
             endpoint = os.environ['AWS_S3_ENDPOINT_URL']
 
-        self.api = _internal.VastdbApi(endpoint, access, secret, ssl_verify=ssl_verify)
+        self.api = _internal.VastdbApi(
+            endpoint=endpoint,
+            access_key=access,
+            secret_key=secret,
+            ssl_verify=ssl_verify,
+            backoff_config=backoff_config)
         self.features = Features(self.api.vast_version)
         self.s3 = boto3.client('s3',
             aws_access_key_id=access,

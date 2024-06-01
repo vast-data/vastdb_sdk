@@ -722,15 +722,26 @@ def _parse_table_info(obj):
 TableStatsResult = namedtuple("TableStatsResult", ["num_rows", "size_in_bytes", "is_external_rowid_alloc", "endpoints"])
 
 
+def _backoff_giveup(exc: Exception) -> bool:
+
+    if isinstance(exc, errors.Slowdown):
+        # the server is overloaded, retry later
+        return False
+
+    if isinstance(exc, requests.exceptions.ConnectionError):
+        if exc.request.method == "GET":
+            # low-level connection issue, it is safe to retry only read-only requests
+            return False
+
+    return True  # giveup in case of other exceptions
+
+
 @dataclass
 class BackoffConfig:
-
-    unavailable_backoff: Callable = field(default=backoff.on_predicate(
-        wait_gen=backoff.expo,
-        predicate=lambda res: res.status_code == 503,
-        logger=_logger,
-        max_tries=10,
-        max_time=60))
+    wait_gen: Callable = field(default=backoff.expo)
+    max_tries: int = 10
+    max_time: float = 60.0  # in seconds
+    backoff_log_level: int = logging.DEBUG
 
 
 class VastdbApi:
@@ -738,9 +749,10 @@ class VastdbApi:
     VAST_VERSION_REGEX = re.compile(r'^vast (\d+\.\d+\.\d+\.\d+)$')
 
     def __init__(self, endpoint, access_key, secret_key,
+            *,
             auth_type=AuthType.SIGV4,
             ssl_verify=True,
-            backoff_config=None):
+            backoff_config: Optional[BackoffConfig] = None):
 
         from . import __version__  # import lazily here (to avoid circular dependencies)
         self.client_sdk_version = f"VAST Database Python SDK {__version__} - 2024 (c)"
@@ -754,11 +766,15 @@ class VastdbApi:
         self._session.verify = ssl_verify
         self._session.headers['user-agent'] = self.client_sdk_version
 
-        if backoff_config is None:
-            backoff_config = BackoffConfig()
-
-        if backoff_config.unavailable_backoff is not None:
-            self._request = backoff_config.unavailable_backoff(self._request)
+        backoff_config = backoff_config or BackoffConfig()
+        backoff_decorator = backoff.on_exception(
+            wait_gen=backoff_config.wait_gen,
+            exception=(requests.exceptions.ConnectionError, errors.Slowdown),
+            giveup=_backoff_giveup,
+            max_tries=backoff_config.max_tries,
+            max_time=backoff_config.max_time,
+            backoff_log_level=backoff_config.backoff_log_level)
+        self._request = backoff_decorator(self._single_request)
 
         if url.port in {80, 443, None}:
             self.aws_host = f'{url.host}'
@@ -795,7 +811,7 @@ class VastdbApi:
         _logger.critical(msg)
         raise NotImplementedError(msg)
 
-    def _request(self, *, method, url, skip_status_check=False, **kwargs):
+    def _single_request(self, *, method, url, skip_status_check=False, **kwargs):
         res = self._session.request(method=method, url=url, **kwargs)
         if not skip_status_check:
             if exc := errors.from_response(res):
