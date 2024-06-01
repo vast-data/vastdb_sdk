@@ -65,8 +65,7 @@ class Session:
             endpoint = os.environ['AWS_S3_ENDPOINT_URL']
 
         self.api = _internal.VastdbApi(endpoint, access, secret, ssl_verify=ssl_verify)
-        version_tuple = tuple(int(part) for part in self.api.vast_version.split('.'))
-        self.features = Features(version_tuple)
+        self.features = Features(self.api.vast_version)
         self.s3 = boto3.client('s3',
             aws_access_key_id=access,
             aws_secret_access_key=secret,

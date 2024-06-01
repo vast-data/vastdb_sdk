@@ -36,7 +36,7 @@ def test_version_extraction():
             ("5", None),                                    # major
             ("5.2", None),                                  # major.minor
             ("5.2.0", None),                                # major.minor.patch
-            ("5.2.0.10", "5.2.0.10"),                       # major.minor.patch.protocol
+            ("5.2.0.10", (5, 2, 0, 10)),                    # major.minor.patch.protocol
             ("5.2.0.10 some other things", None),           # suffix
             ("5.2.0.10.20", None),                          # extra version
     ]

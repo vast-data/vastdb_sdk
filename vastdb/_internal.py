@@ -7,7 +7,7 @@ import urllib.parse
 from collections import defaultdict, namedtuple
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, Iterator, List, Optional, Union
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
 
 import backoff
 import flatbuffers
@@ -775,7 +775,6 @@ class VastdbApi:
                                             aws_service='s3')
 
         # probe the cluster for its version
-        self.vast_version = None
         res = self._request(method="GET", url=self._url(command="transaction"), skip_status_check=True)  # used only for the response headers
         _logger.debug("headers=%s code=%s content=%s", res.headers, res.status_code, res.content)
         server_header = res.headers.get("Server")
@@ -783,7 +782,7 @@ class VastdbApi:
             _logger.error("Response doesn't contain 'Server' header")
         else:
             if m := self.VAST_VERSION_REGEX.match(server_header):
-                self.vast_version, = m.groups()
+                self.vast_version: Tuple[int, ...] = tuple(int(v) for v in m.group(1).split("."))
                 return
             else:
                 _logger.error("'Server' header '%s' doesn't match the expected pattern", server_header)
