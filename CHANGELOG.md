@@ -4,6 +4,32 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.1.7] (2024-06-03)
+[0.1.7]: https://github.com/vast-data/vastdb_sdk/compare/v0.1.6...v0.1.7
+
+## Added
+ - Retry idempotent requests in case of retriable errors
+ - Allow setting `Table.select()` RPC queue priority
+ - Send SDK version via Tabular RPC
+ - Support external row IDs allocation
+ - Document required VAST release
+ - Add a helper function for defining a range of VIPs
+
+## Changed
+ - Update `ibis-framework` dependency to 9.0.0
+ - Refactor internal RPC client to support retries
+ - Refactor request invocation and result handling
+
+## Fixed
+ - Sort record batch according to internal row ID column for updates/deletes
+ - Don't use `ListBuckets` RPC to probe for server's version
+ - Don't fail on an empty batch
+ - Don't use 'us-east-1' region name
+
+## Removed
+ - Remove unused internal methods
+
+
 ## [0.1.6] (2024-05-23)
 [0.1.6]: https://github.com/vast-data/vastdb_sdk/compare/v0.1.5...v0.1.6
 
