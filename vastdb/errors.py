@@ -175,6 +175,12 @@ class NotSupportedVersion(NotSupported):
     version: str
 
 
+@dataclass
+class ConnectionError(Exception):
+    cause: Exception
+    may_retry: bool
+
+
 def handle_unavailable(**kwargs):
     if kwargs['code'] == 'SlowDown':
         raise Slowdown(**kwargs)

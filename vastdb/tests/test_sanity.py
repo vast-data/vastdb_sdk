@@ -5,9 +5,8 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from itertools import cycle
 
 import pytest
-import requests
 
-import vastdb
+import vastdb.errors
 
 log = logging.getLogger(__name__)
 
@@ -26,7 +25,7 @@ def test_bad_credentials(session):
 
 def test_bad_endpoint(session):
     backoff_config = vastdb.session.BackoffConfig(max_tries=3)
-    with pytest.raises(requests.exceptions.ConnectionError):
+    with pytest.raises(vastdb.errors.ConnectionError):
         vastdb.connect(access='BAD', secret='BAD', endpoint='http://invalid-host-name-for-tests:12345', backoff_config=backoff_config)
 
 

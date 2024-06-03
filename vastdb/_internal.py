@@ -722,23 +722,30 @@ def _parse_table_info(obj):
 TableStatsResult = namedtuple("TableStatsResult", ["num_rows", "size_in_bytes", "is_external_rowid_alloc", "endpoints"])
 
 
+_RETRIABLE_EXCEPTIONS = (
+    errors.ConnectionError,  # only if 'may_retry' is True
+    errors.Slowdown,
+)
+
+
 def _backoff_giveup(exc: Exception) -> bool:
+    """Exception types below MUST be part of `_RETRIABLE_EXCEPTIONS` above."""
 
+    _logger.info("Backoff giveup: %r", exc)
     if isinstance(exc, errors.Slowdown):
-        # the server is overloaded, retry later
-        return False
+        return False  # the server is overloaded, don't give up
 
-    if isinstance(exc, requests.exceptions.ConnectionError):
-        if exc.request.method == "GET":
-            # low-level connection issue, it is safe to retry only read-only requests
-            return False
+    if isinstance(exc, errors.ConnectionError):
+        if exc.may_retry:
+            return False  # don't give up of retriable connection errors
 
-    return True  # giveup in case of other exceptions
+    return True  # give up in case of other exceptions
 
 
 @dataclass
 class BackoffConfig:
     wait_gen: Callable = field(default=backoff.expo)
+    max_value: Optional[float] = None  # max duration for a single wait period
     max_tries: int = 10
     max_time: float = 60.0  # in seconds
     backoff_log_level: int = logging.DEBUG
@@ -767,14 +774,15 @@ class VastdbApi:
         self._session.headers['user-agent'] = self.client_sdk_version
 
         backoff_config = backoff_config or BackoffConfig()
-        backoff_decorator = backoff.on_exception(
+        self._backoff_decorator = backoff.on_exception(
             wait_gen=backoff_config.wait_gen,
-            exception=(requests.exceptions.ConnectionError, errors.Slowdown),
+            exception=_RETRIABLE_EXCEPTIONS,
             giveup=_backoff_giveup,
             max_tries=backoff_config.max_tries,
             max_time=backoff_config.max_time,
+            max_value=backoff_config.max_value,  # passed to `backoff_config.wait_gen`
             backoff_log_level=backoff_config.backoff_log_level)
-        self._request = backoff_decorator(self._single_request)
+        self._request = self._backoff_decorator(self._single_request)
 
         if url.port in {80, 443, None}:
             self.aws_host = f'{url.host}'
@@ -812,7 +820,14 @@ class VastdbApi:
         raise NotImplementedError(msg)
 
     def _single_request(self, *, method, url, skip_status_check=False, **kwargs):
-        res = self._session.request(method=method, url=url, **kwargs)
+        _logger.debug("Sending request: %s %s %s", method, url, kwargs)
+        try:
+            res = self._session.request(method=method, url=url, **kwargs)
+        except requests.exceptions.ConnectionError as err:
+            # low-level connection issue, it is safe to retry only read-only requests
+            may_retry = (method == "GET")
+            raise errors.ConnectionError(cause=err, may_retry=may_retry) from err
+
         if not skip_status_check:
             if exc := errors.from_response(res):
                 raise exc  # application-level error
@@ -1380,7 +1395,8 @@ class VastdbApi:
 
         url_params = self._build_query_data_url_params(projection, query_imports_table)
 
-        return self._request(
+        # The retries will be done during SelectSplitState processing:
+        return self._single_request(
             method="GET",
             url=self._url(bucket=bucket, schema=schema, table=table, command="data", url_params=url_params),
             data=params, headers=headers, stream=True)
@@ -1796,15 +1812,12 @@ def _iter_query_data_response_columns(fileobj, stream_ids=None):
             yield (stream_id, next_row_id, table)
 
 
-def parse_query_data_response(conn, schema, stream_ids=None, start_row_ids=None, debug=False, parser: Optional[QueryDataParser] = None):
+def parse_query_data_response(conn, schema, stream_ids=None, debug=False, parser: Optional[QueryDataParser] = None):
     """
     Generates pyarrow.Table objects from QueryData API response stream.
 
     A pyarrow.Table is a helper class that combines a Schema with multiple RecordBatches and allows easy data access.
     """
-    if start_row_ids is None:
-        start_row_ids = {}
-
     is_empty_projection = (len(schema) == 0)
     if parser is None:
         parser = QueryDataParser(schema, debug=debug)
@@ -1823,8 +1836,7 @@ def parse_query_data_response(conn, schema, stream_ids=None, start_row_ids=None,
 
             _logger.debug("stream_id=%d rows=%d next_row_id=%d table=%s",
                           stream_id, len(parsed_table), next_row_id, parsed_table)
-            start_row_ids[stream_id] = next_row_id
-            yield parsed_table  # the result of a single "select_rows()" cycle
+            yield stream_id, next_row_id, parsed_table
 
     if states:
         raise EOFError(f'all streams should be done before EOF. {states}')

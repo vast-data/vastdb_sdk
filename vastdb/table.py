@@ -7,12 +7,11 @@ import queue
 from dataclasses import dataclass, field
 from math import ceil
 from threading import Event
-from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 
-import backoff
 import ibis
 import pyarrow as pa
-import requests
+import urllib3
 
 from . import _internal, errors, schema, util
 
@@ -38,12 +37,6 @@ class TableStats:
     size_in_bytes: int
     is_external_rowid_alloc: bool = False
     endpoints: Tuple[str, ...] = ()
-
-
-RETRIABLE_ERRORS = (
-    errors.Slowdown,
-    requests.exceptions.ConnectionError,
-)
 
 
 @dataclass
@@ -85,9 +78,6 @@ class QueryConfig:
     # - if unset, the request will be added to the queue's end.
     queue_priority: Optional[int] = None
 
-    # DEPRECATED: will be removed in a future release
-    backoff_func: Any = field(default=backoff.on_exception(backoff.expo, RETRIABLE_ERRORS, max_tries=10))
-
 
 @dataclass
 class ImportConfig:
@@ -107,37 +97,53 @@ class SelectSplitState:
         self.query_data_request = query_data_request
         self.table = table
 
-    def batches(self, api: _internal.VastdbApi):
-        """Execute QueryData request, and yield parsed RecordBatch objects.
+    def process_split(self, api: _internal.VastdbApi, record_batches_queue: queue.Queue[pa.RecordBatch], check_stop: Callable):
+        """Execute a sequence of QueryData requests, and queue the parsed RecordBatch objects.
 
-        Can be called repeatedly, to allow pagination.
+        Can be called repeatedly, to support resuming the query after a disconnection / retriable error.
         """
-        while not self.done:
-            response = api.query_data(
-                            bucket=self.table.bucket.name,
-                            schema=self.table.schema.name,
-                            table=self.table.name,
-                            params=self.query_data_request.serialized,
-                            split=(self.split_id, self.config.num_splits, self.config.num_row_groups_per_sub_split),
-                            num_sub_splits=self.config.num_sub_splits,
-                            response_row_id=False,
-                            txid=self.table.tx.txid,
-                            limit_rows=self.config.limit_rows_per_sub_split,
-                            sub_split_start_row_ids=self.subsplits_state.items(),
-                            schedule_id=self.config.queue_priority,
-                            enable_sorted_projections=self.config.use_semi_sorted_projections,
-                            query_imports_table=self.table._imports_table,
-                            projection=self.config.semi_sorted_projection_name)
-            pages_iter = _internal.parse_query_data_response(
-                conn=response.raw,
-                schema=self.query_data_request.response_schema,
-                start_row_ids=self.subsplits_state,
-                parser=self.query_data_request.response_parser)
+        try:
+            # contains RecordBatch parts received from the server, must be re-created in case of a retry
+            while not self.done:
+                # raises if request parsing fails or throttled due to server load, and will be externally retried
+                response = api.query_data(
+                                bucket=self.table.bucket.name,
+                                schema=self.table.schema.name,
+                                table=self.table.name,
+                                params=self.query_data_request.serialized,
+                                split=(self.split_id, self.config.num_splits, self.config.num_row_groups_per_sub_split),
+                                num_sub_splits=self.config.num_sub_splits,
+                                response_row_id=False,
+                                txid=self.table.tx.txid,
+                                limit_rows=self.config.limit_rows_per_sub_split,
+                                sub_split_start_row_ids=self.subsplits_state.items(),
+                                schedule_id=self.config.queue_priority,
+                                enable_sorted_projections=self.config.use_semi_sorted_projections,
+                                query_imports_table=self.table._imports_table,
+                                projection=self.config.semi_sorted_projection_name)
 
-            for page in pages_iter:
-                for batch in page.to_batches():
-                    if len(batch) > 0:
-                        yield batch
+                # can raise during response parsing (e.g. due to disconnections), and will be externally retried
+                # the pagination state is stored in `self.subsplits_state` and must be correct in case of a reconnection
+                # the partial RecordBatch chunks are managed internally in `parse_query_data_response`
+                response_iter = _internal.parse_query_data_response(
+                    conn=response.raw,
+                    schema=self.query_data_request.response_schema,
+                    parser=self.query_data_request.response_parser)
+
+                for stream_id, next_row_id, table_chunk in response_iter:
+                    # in case of I/O error, `response_iter` will be closed and an appropriate exception will be thrown.
+                    self.subsplits_state[stream_id] = next_row_id
+                    # we have parsed a pyarrow.Table successfully, self.subsplits_state is now correctly updated
+                    # if the below loop fails, the query is not retried
+                    for batch in table_chunk.to_batches():
+                        check_stop()  # may raise StoppedException to early-exit the query (without retries)
+                        if batch:
+                            record_batches_queue.put(batch)
+        except urllib3.exceptions.ProtocolError as err:
+            log.warning("Failed parsing QueryData response table=%r split=%s/%s offsets=%s cause=%s",
+                        self.table, self.split_id, self.config.num_splits, self.subsplits_state, err)
+            # since this is a read-only idempotent operation, it is safe to retry
+            raise errors.ConnectionError(cause=err, may_retry=True)
 
     @property
     def done(self):
@@ -382,6 +388,7 @@ class Table:
         def single_endpoint_worker(endpoint: str):
             try:
                 host_api = _internal.VastdbApi(endpoint=endpoint, access_key=self.tx._rpc.api.access_key, secret_key=self.tx._rpc.api.secret_key)
+                backoff_decorator = self.tx._rpc.api._backoff_decorator
                 while True:
                     check_stop()
                     try:
@@ -395,9 +402,9 @@ class Table:
                                                    split_id=split,
                                                    config=config)
 
-                    for batch in split_state.batches(host_api):
-                        check_stop()
-                        record_batches_queue.put(batch)
+                    process_with_retries = backoff_decorator(split_state.process_split)
+                    process_with_retries(host_api, record_batches_queue, check_stop)
+
             except StoppedException:
                 log.debug("stop signal.", exc_info=True)
                 return
