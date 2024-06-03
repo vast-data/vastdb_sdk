@@ -1460,6 +1460,10 @@ class VastdbApi:
                 else:
                     _logger.debug("import_data of object name '%s' is in progress. "
                                   "status: %s", chunk_dict['object_name'], chunk_dict['res'])
+                    if chunk_dict['res'] == 'Success':
+                        _logger.info("imported /%s/%s into table=/%s/%s/%s",
+                                     chunk_dict['bucket_name'], chunk_dict['object_name'],
+                                     bucket, schema, table)
             return response
 
         headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
