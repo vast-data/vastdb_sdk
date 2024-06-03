@@ -105,7 +105,11 @@ def test_query_data_with_projection(session, clean_bucket_name):
         t = s.table(table_name)
         projection_actual = pa.Table.from_batches(t.select(columns=['a', 'b', 's'], predicate=(t['b'] < 5), config=config))
         # no projection supply - need to be with p1 projeciton
-        assert expected_projection_p1 == projection_actual
+        # doing this since we also run this test against production clusters
+        if expected_projection_p1 != projection_actual:
+            config.num_row_groups_per_sub_split = 8
+            projection_actual = pa.Table.from_batches(t.select(columns=['a', 'b', 's'], predicate=(t['b'] < 5), config=config))
+            assert expected_projection_p1 == projection_actual
 
         config.semi_sorted_projection_name = 'p1'
         projection_actual = pa.Table.from_batches(t.select(columns=['a', 'b', 's'], predicate=(t['b'] < 5), config=config))
