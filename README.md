@@ -176,18 +176,27 @@ batches = snaps[0].schema('schema-name').table('table-name').select()
 [VAST Catalog](https://vastdata.com/blog/vast-catalog-treat-your-file-system-like-a-database) can be queried as a regular table:
 
 ```python
-table = pa.Table.from_batches(tx.catalog.select(['element_type']))
-df = table.to_pandas()
+import pyarrow as pa
+import vastdb
 
-total_elements = len(df)
-print(f"Total elements in the catalog: {total_elements}")
+session = vastdb.connect(
+    endpoint='http://vip-pool.v123-xy.VastENG.lab',
+    access=AWS_ACCESS_KEY_ID,
+    secret=AWS_SECRET_ACCESS_KEY)
 
-file_count = (df['element_type'] == 'FILE').sum()
-print(f"Number of files/objects: {file_count}")
+with session.transaction() as tx:
+    table = pa.Table.from_batches(tx.catalog.select(['element_type']))
+    df = table.to_pandas()
 
-distinct_elements = df['element_type'].unique()
-print("Distinct element types on the system:")
-print(distinct_elements)
+    total_elements = len(df)
+    print(f"Total elements in the catalog: {total_elements}")
+
+    file_count = (df['element_type'] == 'FILE').sum()
+    print(f"Number of files/objects: {file_count}")
+
+    distinct_elements = df['element_type'].unique()
+    print("Distinct element types on the system:")
+    print(distinct_elements)
 ```
 
 See the following blog posts for more examples:
