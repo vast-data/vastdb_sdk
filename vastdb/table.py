@@ -321,14 +321,12 @@ class Table:
         if config is None:
             config = QueryConfig()
 
-        # Take a snapshot of enpoints
-        stats = self.get_stats()
-        log.debug("stats: %s", stats)
-        endpoints = stats.endpoints if config.data_endpoints is None else config.data_endpoints
+        # Allow overriding endpoints from config
+        endpoints = [self.tx._rpc.api.url] if config.data_endpoints is None else config.data_endpoints
         log.debug("endpoints: %s", endpoints)
 
         if config.num_splits is None:
-            config.num_splits = max(1, stats.num_rows // config.rows_per_split)
+            config.num_splits = 1
         log.debug("config: %s", config)
 
         if config.semi_sorted_projection_name:
