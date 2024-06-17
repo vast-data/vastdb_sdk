@@ -327,10 +327,15 @@ class Table:
         if config is None:
             config = QueryConfig()
 
-        # Take a snapshot of enpoints
-        stats = self.get_stats()
-        log.debug("stats: %s", stats)
-        endpoints = stats.endpoints if config.data_endpoints is None else config.data_endpoints
+        # Retrieve snapshots only if needed
+        if config.data_endpoints is None or config.num_splits is None:
+            stats = self.get_stats()
+            log.debug("stats: %s", stats)
+
+        if config.data_endpoints is None:
+            endpoints = stats.endpoints
+        else:
+            endpoints = tuple(config.data_endpoints)
         log.debug("endpoints: %s", endpoints)
 
         if config.num_splits is None:
