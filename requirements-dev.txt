@@ -1,0 +1,12 @@
+-r requirements.txt
+
+exchange-calendars
+fsspec
+black
+mypy
+pandas-stubs
+pytest
+pytest-cov
+pytest-xdist
+ruff
+typer
