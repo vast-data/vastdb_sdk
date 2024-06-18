@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.1.8] (2024-06-26)
+[0.1.8]: https://github.com/vast-data/vastdb_sdk/compare/v0.1.7...v0.1.8
+
+ - Allow retries also during query response parsing
+ - Don't retrieve stats during Table.select() if not needed
+ - Log successful server-side file import
+
 ## [0.1.7] (2024-06-03)
 [0.1.7]: https://github.com/vast-data/vastdb_sdk/compare/v0.1.6...v0.1.7
 
