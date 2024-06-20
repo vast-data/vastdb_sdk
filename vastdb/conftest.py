@@ -9,11 +9,15 @@ import vastdb
 
 def pytest_addoption(parser):
     parser.addoption("--tabular-bucket-name", help="Name of the S3 bucket with Tabular enabled", default="vastdb")
-    parser.addoption("--tabular-access-key", help="Access key with Tabular permissions (AWS_ACCESS_KEY_ID)", default=os.environ.get("AWS_ACCESS_KEY_ID", None))
-    parser.addoption("--tabular-secret-key", help="Secret key with Tabular permissions (AWS_SECRET_ACCESS_KEY)", default=os.environ.get("AWS_SECRET_ACCESS_KEY", None))
+    parser.addoption("--tabular-access-key", help="Access key with Tabular permissions (AWS_ACCESS_KEY_ID)",
+                     default=os.environ.get("AWS_ACCESS_KEY_ID", None))
+    parser.addoption("--tabular-secret-key", help="Secret key with Tabular permissions (AWS_SECRET_ACCESS_KEY)",
+                     default=os.environ.get("AWS_SECRET_ACCESS_KEY", None))
     parser.addoption("--tabular-endpoint-url", help="Tabular server endpoint", default="http://localhost:9090")
     parser.addoption("--data-path", help="Data files location", default=None)
     parser.addoption("--crater-path", help="Save benchmark results in a dedicated location", default=None)
+    parser.addoption("--schema-name", help="Name of schema for the test to operate on", default=None)
+    parser.addoption("--table-name", help="Name of table for the test to operate on", default=None)
 
 
 @pytest.fixture(scope="session")
@@ -67,3 +71,13 @@ def parquets_path(request):
 @pytest.fixture(scope="function")
 def crater_path(request):
     return request.config.getoption("--crater-path")
+
+
+@pytest.fixture(scope="function")
+def schema_name(request):
+    return request.config.getoption("--schema-name")
+
+
+@pytest.fixture(scope="function")
+def table_name(request):
+    return request.config.getoption("--table-name")
