@@ -65,7 +65,7 @@ with session.transaction() as tx:
 
     # run `SELECT * FROM t`
     reader = table.select()  # return a `pyarrow.RecordBatchReader`
-    result = pa.Table.from_batches(reader)  # build an PyArrow Table from the `pyarrow.RecordBatch` objects read from VAST
+    result = reader.read_all()  # build an PyArrow Table from the `pyarrow.RecordBatch` objects read from VAST
     assert result == arrow_table
 
     # the transaction is automatically committed when exiting the context
@@ -176,7 +176,7 @@ batches = snaps[0].schema('schema-name').table('table-name').select()
 [VAST Catalog](https://vastdata.com/blog/vast-catalog-treat-your-file-system-like-a-database) can be queried as a regular table:
 
 ```python
-table = pa.Table.from_batches(tx.catalog.select(['element_type']))
+table = tx.catalog().select(['element_type']).read_all()
 df = table.to_pandas()
 
 total_elements = len(df)
