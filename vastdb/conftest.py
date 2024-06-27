@@ -13,25 +13,41 @@ def pytest_addoption(parser):
                      default=os.environ.get("AWS_ACCESS_KEY_ID", None))
     parser.addoption("--tabular-secret-key", help="Secret key with Tabular permissions (AWS_SECRET_ACCESS_KEY)",
                      default=os.environ.get("AWS_SECRET_ACCESS_KEY", None))
-    parser.addoption("--tabular-endpoint-url", help="Tabular server endpoint", default="http://localhost:9090")
+    parser.addoption("--tabular-endpoint-url", help="Tabular server endpoint", default=[], action="append")
     parser.addoption("--data-path", help="Data files location", default=None)
     parser.addoption("--crater-path", help="Save benchmark results in a dedicated location", default=None)
     parser.addoption("--schema-name", help="Name of schema for the test to operate on", default=None)
     parser.addoption("--table-name", help="Name of table for the test to operate on", default=None)
+    parser.addoption("--num-workers", help="Number of concurrent workers", default=1)
 
 
 @pytest.fixture(scope="session")
-def session(request):
-    return vastdb.connect(
+def session_kwargs(request, tabular_endpoint_urls):
+    return dict(
         access=request.config.getoption("--tabular-access-key"),
         secret=request.config.getoption("--tabular-secret-key"),
-        endpoint=request.config.getoption("--tabular-endpoint-url"),
+        endpoint=tabular_endpoint_urls[0],
     )
+
+
+@pytest.fixture(scope="session")
+def session(session_kwargs):
+    return vastdb.connect(**session_kwargs)
+
+
+@pytest.fixture(scope="session")
+def num_workers(request):
+    return int(request.config.getoption("--num-workers"))
 
 
 @pytest.fixture(scope="session")
 def test_bucket_name(request):
     return request.config.getoption("--tabular-bucket-name")
+
+
+@pytest.fixture(scope="session")
+def tabular_endpoint_urls(request):
+    return request.config.getoption("--tabular-endpoint-url") or ["http://localhost:9090"]
 
 
 def iter_schemas(s):
@@ -55,12 +71,12 @@ def clean_bucket_name(request, test_bucket_name, session):
 
 
 @pytest.fixture(scope="session")
-def s3(request):
+def s3(request, tabular_endpoint_urls):
     return boto3.client(
         's3',
         aws_access_key_id=request.config.getoption("--tabular-access-key"),
         aws_secret_access_key=request.config.getoption("--tabular-secret-key"),
-        endpoint_url=request.config.getoption("--tabular-endpoint-url"))
+        endpoint_url=tabular_endpoint_urls[0])
 
 
 @pytest.fixture(scope="function")
