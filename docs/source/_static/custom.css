@@ -1,0 +1,9 @@
+/* Target the attribute name specifically */
+dl.py > dt {
+    font-weight: bold; /* Make attribute names bold */
+}
+
+/* Optional: Customize description style */
+dl.py > dd {
+    margin-bottom: 10px;  /* Add some spacing */
+}
