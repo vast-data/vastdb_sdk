@@ -12,7 +12,7 @@ sha256sum * | tee SHA256SUMS
 pip3 install *.whl
 pip3 freeze
 
-
 cd ../docs
 pip3 install -r requirements.txt
-make clean html
+rm -rf build/
+sphinx-build -b html . build/html
