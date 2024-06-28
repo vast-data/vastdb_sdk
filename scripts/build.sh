@@ -15,4 +15,4 @@ pip3 freeze
 cd ../docs
 pip3 install -r requirements.txt
 rm -rf build/
-sphinx-build -b html . build/html
+sphinx-build -b html source/ build/html
