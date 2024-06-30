@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 @pytest.mark.ha
-def test_ha_query(session, crater_path, test_bucket_name, schema_name, table_name):
+def test_ha_query(session, test_bucket_name, schema_name, table_name):
     # runs in parallel to ha scenario
     times_to_query, records_in_table = 50, 100_000_000
     arrow_array = pa.array(range(0, records_in_table), type=pa.int64())
