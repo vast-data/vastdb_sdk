@@ -6,7 +6,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
-from .errors import InvalidArgument, NotSupportedType, TooWideRow
+from .errors import InvalidArgument, TooWideRow
 
 log = logging.getLogger(__name__)
 
@@ -152,10 +152,3 @@ def sort_record_batch_if_needed(record_batch, sort_column):
         return record_batch.sort_by(sort_column)
     else:
         return record_batch
-
-
-def check_supported_types(fields: pa.Schema):
-    for f in fields:
-        if isinstance(f.type, pa.TimestampType):
-            if f.type.tz:
-                raise NotSupportedType(f)

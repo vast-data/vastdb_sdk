@@ -311,46 +311,6 @@ def test_types(session, clean_bucket_name):
             assert select(t['ts9'] == ts_literal) == expected.filter(pc.field('ts9') == ts_literal)
 
 
-TIMESTAMP_UNITS = ['s', 'ms', 'us', 'ns']
-
-
-def test_unsupported_timezone(session, clean_bucket_name):
-    with session.transaction() as tx:
-        s = tx.bucket(clean_bucket_name).create_schema('s1')
-        for unit in TIMESTAMP_UNITS:
-            col_type = pa.timestamp(unit, 'UTC')
-            with pytest.raises(errors.NotSupportedType):
-                s.create_table('t1', pa.schema([('ts', col_type)]))
-            assert s.tables() == []
-
-        cols = [('c', pa.int64())]
-        t1 = s.create_table('t1', pa.schema(cols))
-        for unit in TIMESTAMP_UNITS:
-            col_type = pa.timestamp(unit, 'UTC')
-            with pytest.raises(errors.NotSupportedType):
-                t1.add_column(pa.schema([('ts', col_type)]))
-
-        cols = [(f'c_{unit}', pa.timestamp(unit)) for unit in TIMESTAMP_UNITS]
-        t2 = s.create_table('t2', pa.schema(cols))
-
-        for unit in TIMESTAMP_UNITS:
-            col_type = pa.timestamp(unit, 'UTC')
-
-            rb = pa.record_batch(
-                data=[[None]],
-                schema=pa.schema([(f'c_{unit}', col_type)]))
-            with pytest.raises(errors.NotSupportedType):
-                t2.insert(rb)
-
-            rb = pa.record_batch(
-                data=[[0], [None]],
-                schema=pa.schema([
-                    (INTERNAL_ROW_ID, pa.uint64()),
-                    (f'c_{unit}', col_type)]))
-            with pytest.raises(errors.NotSupportedType):
-                t2.update(rb)
-
-
 def test_filters(session, clean_bucket_name):
     columns = pa.schema([
         ('a', pa.int32()),

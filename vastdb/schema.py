@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Iterable, List, Optional
 
 import pyarrow as pa
 
-from . import bucket, errors, schema, table, util
+from . import bucket, errors, schema, table
 
 if TYPE_CHECKING:
     from .table import Table
@@ -86,7 +86,6 @@ class Schema:
         if use_external_row_ids_allocation:
             self.tx._rpc.features.check_external_row_ids_allocation()
 
-        util.check_supported_types(columns)
         self.tx._rpc.api.create_table(self.bucket.name, self.name, table_name, columns, txid=self.tx.txid,
                                       use_external_row_ids_allocation=use_external_row_ids_allocation)
         log.info("Created table: %s", table_name)

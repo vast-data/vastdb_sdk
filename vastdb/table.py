@@ -445,7 +445,6 @@ class Table:
             raise errors.NotSupportedCommand(self.bucket.name, self.schema.name, self.name)
         try:
             row_ids = []
-            util.check_supported_types(rows.schema)
             serialized_slices = util.iter_serialized_slices(rows, MAX_INSERT_ROWS_PER_PATCH)
             for slice in serialized_slices:
                 res = self.tx._rpc.api.insert_rows(self.bucket.name, self.schema.name, self.name, record_batch=slice,
@@ -488,7 +487,6 @@ class Table:
 
         update_rows_rb = util.sort_record_batch_if_needed(update_rows_rb, INTERNAL_ROW_ID)
 
-        util.check_supported_types(update_rows_rb.schema)
         serialized_slices = util.iter_serialized_slices(update_rows_rb, MAX_ROWS_PER_BATCH)
         for slice in serialized_slices:
             self.tx._rpc.api.update_rows(self.bucket.name, self.schema.name, self.name, record_batch=slice,
@@ -533,7 +531,6 @@ class Table:
         """Add a new column."""
         if self._imports_table:
             raise errors.NotSupportedCommand(self.bucket.name, self.schema.name, self.name)
-        util.check_supported_types(new_column)
         self.tx._rpc.api.add_columns(self.bucket.name, self.schema.name, self.name, new_column, txid=self.tx.txid)
         log.info("Added column(s): %s", new_column)
         self.arrow_schema = self.columns()
