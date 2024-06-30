@@ -3,6 +3,7 @@ import xml.etree.ElementTree
 from dataclasses import dataclass
 from enum import Enum
 
+import pyarrow as pa
 import requests
 
 
@@ -167,6 +168,11 @@ class NotSupportedCommand(NotSupported):
     bucket: str
     schema: str
     table: str
+
+
+@dataclass
+class NotSupportedType(NotSupported):
+    field: pa.Field
 
 
 @dataclass
