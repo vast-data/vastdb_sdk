@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.1.9] (2024-07-01)
+[0.1.9]: https://github.com/vast-data/vastdb_sdk/compare/v0.1.8...v0.1.9
+
+## Fixed
+ - Don't drop timezone information when creating a table
+ - Clarify the catalog example
+
 ## [0.1.8] (2024-06-26)
 [0.1.8]: https://github.com/vast-data/vastdb_sdk/compare/v0.1.7...v0.1.8
 
