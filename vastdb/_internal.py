@@ -1807,7 +1807,7 @@ def _iter_query_data_response_columns(fileobj, stream_ids=None):
             batches.append(batch)
         except StopIteration:  # we got an end-of-stream IPC message for a given stream ID
             reader, batches = readers.pop(stream_id)  # end of column
-            table = pa.Table.from_batches(batches)  # concatenate all column chunks (as a single)
+            table = pa.Table.from_batches(batches=batches, schema=reader.schema)  # concatenate all column chunks (as a single)
             _logger.debug("stream_id=%d rows=%d column=%s", stream_id, len(table), table)
             yield (stream_id, next_row_id, table)
 
