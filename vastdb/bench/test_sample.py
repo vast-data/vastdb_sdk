@@ -19,6 +19,8 @@ logging.basicConfig(
 
 log = logging.getLogger()
 
+log.info("Python SDK version: %s", vastdb.util.version())
+
 NUM_COLUMNS = 10_000
 COLUMNS_BATCH = 10
 
