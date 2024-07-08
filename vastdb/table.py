@@ -167,8 +167,13 @@ class Table:
         """Also, load columns' metadata."""
         self.arrow_schema = self.columns()
 
-        table_path = f'{self.schema.bucket.name}/{self.schema.name}/{self.name}'
-        self._ibis_table = ibis.table(ibis.Schema.from_pyarrow(self.arrow_schema), table_path)
+        self._table_path = f'{self.schema.bucket.name}/{self.schema.name}/{self.name}'
+        self._ibis_table = ibis.table(ibis.Schema.from_pyarrow(self.arrow_schema), self._table_path)
+
+    @property
+    def path(self):
+        """Return table's path."""
+        return self._table_path
 
     @property
     def tx(self):

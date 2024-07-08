@@ -1,4 +1,5 @@
 import os
+import sqlite3
 from pathlib import Path
 
 import boto3
@@ -97,3 +98,8 @@ def schema_name(request):
 @pytest.fixture(scope="function")
 def table_name(request):
     return request.config.getoption("--table-name")
+
+
+@pytest.fixture(scope="function")
+def perf_metrics_db(crater_path):
+    return sqlite3.connect(f"{crater_path}/metrics.sqlite")

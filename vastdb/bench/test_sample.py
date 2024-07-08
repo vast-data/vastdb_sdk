@@ -3,7 +3,9 @@
 import functools
 import itertools
 import logging
+import os
 import random
+import threading
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
@@ -12,6 +14,7 @@ import pyarrow as pa
 
 import vastdb.errors
 from vastdb.table import INTERNAL_ROW_ID
+from vastdb.tests import metrics
 
 logging.basicConfig(
     level="INFO",
@@ -40,7 +43,6 @@ SCHEMA_ARROW = pa.schema(
 
 
 def load_batch(bucket, session_kwargs, offset, limit):
-
     log.info('loading into [%d..%d)', offset, limit)
 
     # Iterate over all row-groups in this file
@@ -48,6 +50,7 @@ def load_batch(bucket, session_kwargs, offset, limit):
     rowids = pa.array(rowids_range, INTERNAL_ROWID_FIELD.type)
 
     session = vastdb.connect(**session_kwargs)
+    metrics_rows = []
 
     with session.transaction() as tx:
         table = tx.bucket(bucket).schema(SCHEMA).table(TABLE)
@@ -60,9 +63,9 @@ def load_batch(bucket, session_kwargs, offset, limit):
             # skip already loaded rows
             log.info('skipping [%d..%d)', offset, limit)
 
-        t0 = time.time()
-        nbytes = 0
+        total_nbytes = 0
         calls = 0
+        t0 = time.time()
         # Insert/update every chunk of columns in this rowgroup
         for j in range(0, len(SCHEMA_ARROW), COLUMNS_BATCH):
             cols_batch = list(SCHEMA_ARROW)[j:j + COLUMNS_BATCH]
@@ -71,29 +74,40 @@ def load_batch(bucket, session_kwargs, offset, limit):
                 for _ in cols_batch
             ]
             chunk = pa.table(data=arrays, schema=pa.schema(cols_batch))
+            nbytes = chunk.get_total_buffer_size()
+            start = time.perf_counter()
             if j == 0:
                 chunk = chunk.add_column(0, EXTERNAL_ROWID_FIELD, rowids.cast(EXTERNAL_ROWID_FIELD.type))
-                op = 'inserted'
+                op = 'insert'
                 table.insert(chunk)
             else:
                 chunk = chunk.add_column(0, INTERNAL_ROWID_FIELD, rowids)
-                op = 'updated'
+                op = 'update'
                 table.update(chunk)
+            finish = time.perf_counter()
 
-            nbytes += chunk.get_total_buffer_size()
+            metrics_rows.append(metrics.Row(
+                start=start, finish=finish, table_path=table.path, op=op,
+                nbytes=nbytes, rows=len(chunk), cols=len(cols_batch),
+                pid=os.getpid(), tid=threading.get_native_id()))
+
+            total_nbytes += nbytes
             calls += 1
-            log.debug("%s at %s: %d rows x %d cols, %.3f MB",
+            log.debug("%s into %s: %d rows x %d cols, %.3f MB",
                 op, rowids_range, len(chunk), len(chunk.schema),
                 chunk.get_total_buffer_size() / 1e6)
 
         dt = time.time() - t0
 
     log.info('loaded into [%d..%d): %d rows x %d cols, %.3f MB, %d RPCs, %.3f seconds',
-             offset, limit, limit - offset, NUM_COLUMNS, nbytes / 1e6, calls, dt)
+             offset, limit, limit - offset, NUM_COLUMNS, total_nbytes / 1e6, calls, dt)
+    return metrics_rows
 
 
-def test_ingest(clean_bucket_name, session_kwargs, tabular_endpoint_urls, num_workers):
+def test_ingest(clean_bucket_name, session_kwargs, tabular_endpoint_urls, num_workers, perf_metrics_db):
     session = vastdb.connect(**session_kwargs)
+    metrics_table = metrics.Table(perf_metrics_db, "ingest")
+
     with session.transaction() as tx:
         b = tx.bucket(clean_bucket_name)
         try:
@@ -118,7 +132,7 @@ def test_ingest(clean_bucket_name, session_kwargs, tabular_endpoint_urls, num_wo
         ]
         log.info("spawned %d futures", len(futures))
         for future in as_completed(futures):
-            future.result()
+            metrics_table.insert(future.result())
 
     with session.transaction() as tx:
         t = tx.bucket(clean_bucket_name).schema(SCHEMA).table(TABLE)
