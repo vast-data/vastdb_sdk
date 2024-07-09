@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.1.10] (2024-07-09)
+[0.1.10]: https://github.com/vast-data/vastdb_sdk/compare/v0.1.9...v0.1.10
+
+## Fixed
+ - Support responses with no record batches
+ - Document supported Arrow data types
+
 ## [0.1.9] (2024-07-01)
 [0.1.9]: https://github.com/vast-data/vastdb_sdk/compare/v0.1.8...v0.1.9
 
