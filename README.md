@@ -19,6 +19,11 @@
 - [S3 access & secret keys on VAST cluster](https://support.vastdata.com/s/article/UUID-4d2e7e23-b2fb-7900-d98f-96c31a499626)
 - [Tabular identity policy with the proper permissions](https://support.vastdata.com/s/article/UUID-14322b60-d6a2-89ac-3df0-3dfbb6974182)
 
+### Required VAST release
+
+Currently, VAST DB Python SDK requires `5.0.0-sp10` or later VAST release.
+
+If the cluster is running an older VAST release, please contact customer.support@vastdata.com for more details.
 
 ### Installation
 
@@ -203,10 +208,3 @@ See the following blog posts for more examples:
 
 - https://vastdata.com/blog/the-vast-catalog-in-action-part-1
 - https://vastdata.com/blog/the-vast-catalog-in-action-part-2
-
-
-## Required VAST release
-
-Currently, VAST DB Python SDK requires `5.0.0-sp10` or later VAST release.
-
-If the cluster is running an older VAST release, please contact customer.support@vastdata.com for more details.
