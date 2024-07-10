@@ -22,7 +22,8 @@ logging.basicConfig(
 
 log = logging.getLogger()
 
-log.info("Python SDK version: %s", vastdb.util.version())
+sdk_version = vastdb.util.version()
+log.info("Python SDK version: %s", sdk_version)
 
 NUM_COLUMNS = 10_000
 COLUMNS_BATCH = 10
@@ -63,6 +64,8 @@ def load_batch(bucket, session_kwargs, offset, limit):
             # skip already loaded rows
             log.info('skipping [%d..%d)', offset, limit)
 
+        pid = os.getpid()
+        tid = threading.get_native_id()
         total_nbytes = 0
         calls = 0
         t0 = time.time()
@@ -89,7 +92,7 @@ def load_batch(bucket, session_kwargs, offset, limit):
             metrics_rows.append(metrics.Row(
                 start=start, finish=finish, table_path=table.path, op=op,
                 nbytes=nbytes, rows=len(chunk), cols=len(cols_batch),
-                pid=os.getpid(), tid=threading.get_native_id()))
+                pid=pid, tid=tid, sdk_version=sdk_version))
 
             total_nbytes += nbytes
             calls += 1
@@ -154,6 +157,10 @@ def run_query(session_kwargs, i, bucket_name, endpoint_url):
     r = random.Random(i)
     r.shuffle(row_group_indices)
 
+    pid = os.getpid()
+    tid = threading.get_native_id()
+    metrics_rows = []
+
     session = vastdb.connect(**(session_kwargs | {"endpoint": endpoint_url}))
     with session.transaction() as tx:
         t = tx.bucket(bucket_name).schema(SCHEMA).table(TABLE)
@@ -174,23 +181,37 @@ def run_query(session_kwargs, i, bucket_name, endpoint_url):
 
         for j, pred in enumerate(preds):
             log.info("%d) starting query #%d on %s", i, j, endpoint_url)
-            t0 = time.time()
+
+            start = time.perf_counter()
             res = t.select(columns=cols, predicate=pred, config=config)
             rows = 0
             data = 0
             for rb in res:
                 rows += len(rb)
                 data += rb.nbytes
-                dt = time.time() - t0
+                dt = time.perf_counter() - start
                 log.info("%d) got query #%d batch %.3f[s], %.3f[GB] %.3f[MB/s], %.3f[Mrows]", i, j, dt, data / 1e9, data / 1e6 / dt, rows / 1e6)
 
-            dt = time.time() - t0
+            finish = time.perf_counter()
+            dt = finish - start
             log.info("%d) finished query #%d %.3f[s], %.3f[GB], %.3f[MB/s], %.3f[Mrows]", i, j, dt, data / 1e9, data / 1e6 / dt, rows / 1e6)
 
+            metrics_rows.append(metrics.Row(
+                start=start, finish=finish, table_path=t.path, op="select",
+                nbytes=data, rows=rows, cols=len(cols),
+                pid=pid, tid=tid, sdk_version=sdk_version))
 
-def test_scan(test_bucket_name, session, num_workers, session_kwargs, tabular_endpoint_urls):
+
+def test_scan(test_bucket_name, session, num_workers, session_kwargs, tabular_endpoint_urls, perf_metrics_db):
+    metrics_table = metrics.Table(perf_metrics_db, "query")
+
     log.info("starting %d workers, endpoints=%s", num_workers, tabular_endpoint_urls)
     with ProcessPoolExecutor(max_workers=num_workers) as executor:
-        for i, url in zip(range(num_workers), itertools.cycle(tabular_endpoint_urls)):
+        futures = [
             executor.submit(run_query, session_kwargs, i, test_bucket_name, url)
+            for i, url in zip(range(num_workers), itertools.cycle(tabular_endpoint_urls))
+        ]
+        for future in as_completed(futures):
+            metrics_table.insert(future.result())
+
     log.info("finished %d workers", num_workers)

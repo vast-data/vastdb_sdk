@@ -20,6 +20,7 @@ class Row:
     cols: int
     pid: int
     tid: int
+    sdk_version: str
 
 
 class Table:
