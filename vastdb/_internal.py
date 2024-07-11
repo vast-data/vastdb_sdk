@@ -5,9 +5,8 @@ import re
 import struct
 import urllib.parse
 from collections import defaultdict, namedtuple
-from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 import backoff
 import flatbuffers
@@ -104,6 +103,7 @@ from vast_flatbuf.tabular.ListSchemasResponse import ListSchemasResponse as list
 from vast_flatbuf.tabular.ListTablesResponse import ListTablesResponse as list_tables
 
 from . import errors
+from .config import BackoffConfig
 
 UINT64_MAX = 18446744073709551615
 
@@ -742,15 +742,6 @@ def _backoff_giveup(exc: Exception) -> bool:
     return True  # give up in case of other exceptions
 
 
-@dataclass
-class BackoffConfig:
-    wait_gen: Callable = field(default=backoff.expo)
-    max_value: Optional[float] = None  # max duration for a single wait period
-    max_tries: int = 10
-    max_time: float = 60.0  # in seconds
-    backoff_log_level: int = logging.DEBUG
-
-
 class VastdbApi:
     # we expect the vast version to be <major>.<minor>.<patch>.<protocol>
     VAST_VERSION_REGEX = re.compile(r'^vast (\d+\.\d+\.\d+\.\d+)$')
@@ -762,8 +753,8 @@ class VastdbApi:
             timeout=None,
             backoff_config: Optional[BackoffConfig] = None):
 
-        from . import __version__  # import lazily here (to avoid circular dependencies)
-        self.client_sdk_version = f"VAST Database Python SDK {__version__} - 2024 (c)"
+        from . import version  # import lazily here (to avoid circular dependencies)
+        self.client_sdk_version = f"VAST Database Python SDK {version()} - 2024 (c)"
 
         url = urllib3.util.parse_url(endpoint)
         self.access_key = access_key

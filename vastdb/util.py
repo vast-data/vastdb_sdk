@@ -1,4 +1,3 @@
-import importlib
 import logging
 import re
 from typing import TYPE_CHECKING, Callable, List, Optional, Union
@@ -160,7 +159,3 @@ def check_supported_types(fields: pa.Schema):
         if isinstance(f.type, pa.TimestampType):
             if f.type.tz:
                 raise NotSupportedType(f)
-
-
-def version():
-    return importlib.metadata.distribution('vastdb').version

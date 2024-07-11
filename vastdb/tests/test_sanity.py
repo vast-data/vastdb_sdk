@@ -24,7 +24,7 @@ def test_bad_credentials(session):
 
 
 def test_bad_endpoint(session):
-    backoff_config = vastdb.session.BackoffConfig(max_tries=3)
+    backoff_config = vastdb.config.BackoffConfig(max_tries=3)
     with pytest.raises(vastdb.errors.ConnectionError):
         vastdb.connect(access='BAD', secret='BAD', endpoint='http://invalid-host-name-for-tests:12345', backoff_config=backoff_config)
 

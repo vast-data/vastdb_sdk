@@ -22,7 +22,7 @@ logging.basicConfig(
 
 log = logging.getLogger()
 
-sdk_version = vastdb.util.version()
+sdk_version = vastdb.version()
 log.info("Python SDK version: %s", sdk_version)
 
 NUM_COLUMNS = 10_000

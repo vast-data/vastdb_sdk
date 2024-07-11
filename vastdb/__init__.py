@@ -1,9 +1,6 @@
 """VAST Database Python SDK."""
 
 import functools
-import importlib.metadata
-
-__version__ = importlib.metadata.distribution(__package__).version
 
 from . import session
 
@@ -12,3 +9,9 @@ from . import session
 @functools.wraps(session.Session)
 def connect(*args, **kwargs):  # noqa: D103
     return session.Session(*args, **kwargs)
+
+
+def version():
+    """Return VAST DB SDK version."""
+    import importlib
+    return importlib.metadata.distribution(__package__).version
