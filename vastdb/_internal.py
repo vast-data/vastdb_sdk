@@ -759,6 +759,7 @@ class VastdbApi:
             *,
             auth_type=AuthType.SIGV4,
             ssl_verify=True,
+            timeout=None,
             backoff_config: Optional[BackoffConfig] = None):
 
         from . import __version__  # import lazily here (to avoid circular dependencies)
@@ -768,6 +769,7 @@ class VastdbApi:
         self.access_key = access_key
         self.secret_key = secret_key
 
+        self.timeout = timeout
         self.default_max_list_columns_page_size = 1000
         self._session = requests.Session()
         self._session.verify = ssl_verify
@@ -820,9 +822,9 @@ class VastdbApi:
         raise NotImplementedError(msg)
 
     def _single_request(self, *, method, url, skip_status_check=False, **kwargs):
-        _logger.debug("Sending request: %s %s %s", method, url, kwargs)
+        _logger.debug("Sending request: %s %s %s timeout=%s", method, url, kwargs, self.timeout)
         try:
-            res = self._session.request(method=method, url=url, **kwargs)
+            res = self._session.request(method=method, url=url, timeout=self.timeout, **kwargs)
         except requests.exceptions.ConnectionError as err:
             # low-level connection issue, it is safe to retry only read-only requests
             may_retry = (method == "GET")

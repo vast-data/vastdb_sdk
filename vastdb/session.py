@@ -60,6 +60,7 @@ class Session:
     def __init__(self, access=None, secret=None, endpoint=None,
                  *,
                  ssl_verify=True,
+                 timeout=None,
                  backoff_config: Optional[BackoffConfig] = None):
         """Connect to a VAST Database endpoint, using specified credentials."""
         if access is None:
@@ -74,6 +75,7 @@ class Session:
             access_key=access,
             secret_key=secret,
             ssl_verify=ssl_verify,
+            timeout=timeout,
             backoff_config=backoff_config)
         self.features = Features(self.api.vast_version)
         self.s3 = boto3.client('s3',
