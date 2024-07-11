@@ -11,13 +11,13 @@ def test_concurrent_query(session, test_bucket_name, schema_name, table_name):
     """
     This test runs several selective queries in parallel. It is used to check various internal VAST scenarios.
     """
-    amount_of_queries_in_parallel = 15
+    amount_of_queries_in_parallel = 10  # due to limit on requests connection-pool
     config = QueryConfig(num_splits=1, num_sub_splits=1)
 
     def _execute_single_query():
         with session.transaction() as tx:
             t = tx.bucket(test_bucket_name).schema(schema_name).table(table_name)
-            pred = (t["a"] == 0)
+            pred = (t["a"] == 0)  # 0 is in the min-max range
             s = time.time()
             t.select(config=config, predicate=pred).read_all()
             e = time.time()
