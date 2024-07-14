@@ -107,12 +107,12 @@ def load_batch(bucket, session_kwargs, offset, limit):
     return metrics_rows
 
 
-def test_ingest(clean_bucket_name, session_kwargs, tabular_endpoint_urls, num_workers, perf_metrics_db):
+def test_ingest(bucket_name, session_kwargs, tabular_endpoint_urls, num_workers, perf_metrics_db):
     session = vastdb.connect(**session_kwargs)
     metrics_table = metrics.Table(perf_metrics_db, "ingest")
 
     with session.transaction() as tx:
-        b = tx.bucket(clean_bucket_name)
+        b = tx.bucket(bucket_name)
         try:
             s = b.schema(SCHEMA)
         except vastdb.errors.MissingSchema:
@@ -130,7 +130,7 @@ def test_ingest(clean_bucket_name, session_kwargs, tabular_endpoint_urls, num_wo
 
     with ProcessPoolExecutor(max_workers=num_workers) as executor:
         futures = [
-            executor.submit(load_batch, clean_bucket_name, session_kwargs | {'endpoint': url}, offset, limit)
+            executor.submit(load_batch, bucket_name, session_kwargs | {'endpoint': url}, offset, limit)
             for (offset, limit), url in zip(ranges, itertools.cycle(tabular_endpoint_urls))
         ]
         log.info("spawned %d futures", len(futures))
@@ -138,7 +138,7 @@ def test_ingest(clean_bucket_name, session_kwargs, tabular_endpoint_urls, num_wo
             metrics_table.insert(future.result())
 
     with session.transaction() as tx:
-        t = tx.bucket(clean_bucket_name).schema(SCHEMA).table(TABLE)
+        t = tx.bucket(bucket_name).schema(SCHEMA).table(TABLE)
         count = sum(len(rb) for rb in t.select([]))
         log.info("%s has %d rows: %s", t, count, t.stats)
 
