@@ -16,3 +16,4 @@ cd ../docs
 pip3 install -r requirements.txt
 rm -rf build/
 sphinx-build -b html source/ build/html
+tar cvfz ../dist/docs-html.tgz -C build html
