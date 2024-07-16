@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.1.11] (2024-07-17)
+[0.1.11]: https://github.com/vast-data/vastdb_sdk/compare/v0.1.10...v0.1.11
+
+## Fixed
+ - Revert timezone check to keep previous SDK behaviour
+
+## Added
+ - Use Sphinx for building documentation
+
+## Changed
+ - Defer imports to optimize initial import latency
+
 ## [0.1.10] (2024-07-09)
 [0.1.10]: https://github.com/vast-data/vastdb_sdk/compare/v0.1.9...v0.1.10
 
