@@ -227,6 +227,35 @@ def test_select_with_priority(session, clean_bucket_name):
             t.select(config=config).read_all()
 
 
+def test_timezones(session, clean_bucket_name):
+    columns_with_tz = pa.schema([
+        ('ts0', pa.timestamp('s', tz='+00:00')),
+        ('ts3', pa.timestamp('ms', tz='UTC')),
+        ('ts6', pa.timestamp('us', tz='GMT')),
+        ('ts9', pa.timestamp('ns', tz='Universal')),
+    ])
+
+    # currently timezone information is not stored
+    columns_without_tz = pa.schema([
+        ('ts0', pa.timestamp('s')),
+        ('ts3', pa.timestamp('ms')),
+        ('ts6', pa.timestamp('us')),
+        ('ts9', pa.timestamp('ns')),
+    ])
+
+    data = [
+        [dt.datetime(2024, 4, 10, 12, 34, 56), dt.datetime(2025, 4, 10, 12, 34, 56), dt.datetime(2026, 4, 10, 12, 34, 56)],
+        [dt.datetime(2024, 4, 10, 12, 34, 56, 789000), dt.datetime(2025, 4, 10, 12, 34, 56, 789000), dt.datetime(2026, 4, 10, 12, 34, 56, 789000)],
+        [dt.datetime(2024, 4, 10, 12, 34, 56, 789789), dt.datetime(2025, 4, 10, 12, 34, 56, 789789), dt.datetime(2026, 4, 10, 12, 34, 56, 789789)],
+        [dt.datetime(2024, 4, 10, 12, 34, 56, 789789), dt.datetime(2025, 4, 10, 12, 34, 56, 789789), dt.datetime(2026, 4, 10, 12, 34, 56, 789789)],
+    ]
+
+    inserted = pa.table(schema=columns_with_tz, data=data)
+    with prepare_data(session, clean_bucket_name, 's', 't', inserted) as table:
+        assert table.arrow_schema == columns_without_tz
+        assert table.select().read_all() == pa.table(schema=columns_without_tz, data=data)
+
+
 def test_types(session, clean_bucket_name):
     columns = pa.schema([
         ('tb', pa.bool_()),
