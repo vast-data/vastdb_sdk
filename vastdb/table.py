@@ -253,7 +253,7 @@ class Table:
                 max_workers=config.import_concurrency, thread_name_prefix='import_thread') as pool:
             try:
                 for endpoint in endpoints:
-                    session = _internal.VastdbApi(endpoint, self.tx._rpc.api.access_key, self.tx._rpc.api.secret_key)
+                    session = self.tx._rpc.api.with_endpoint(endpoint)
                     futures.append(pool.submit(import_worker, files_queue, session))
 
                 log.debug("Waiting for import workers to finish")
@@ -351,7 +351,7 @@ class Table:
 
         def single_endpoint_worker(endpoint: str):
             try:
-                host_api = _internal.VastdbApi(endpoint=endpoint, access_key=self.tx._rpc.api.access_key, secret_key=self.tx._rpc.api.secret_key)
+                host_api = self.tx._rpc.api.with_endpoint(endpoint)
                 backoff_decorator = self.tx._rpc.api._backoff_decorator
                 while True:
                     check_stop()

@@ -748,7 +748,6 @@ class VastdbApi:
 
     def __init__(self, endpoint, access_key, secret_key,
             *,
-            auth_type=AuthType.SIGV4,
             ssl_verify=True,
             timeout=None,
             backoff_config: Optional[BackoffConfig] = None):
@@ -766,15 +765,15 @@ class VastdbApi:
         self._session.verify = ssl_verify
         self._session.headers['user-agent'] = self.client_sdk_version
 
-        backoff_config = backoff_config or BackoffConfig()
+        self.backoff_config = backoff_config or BackoffConfig()
         self._backoff_decorator = backoff.on_exception(
-            wait_gen=backoff_config.wait_gen,
+            wait_gen=self.backoff_config.wait_gen,
             exception=_RETRIABLE_EXCEPTIONS,
             giveup=_backoff_giveup,
-            max_tries=backoff_config.max_tries,
-            max_time=backoff_config.max_time,
-            max_value=backoff_config.max_value,  # passed to `backoff_config.wait_gen`
-            backoff_log_level=backoff_config.backoff_log_level)
+            max_tries=self.backoff_config.max_tries,
+            max_time=self.backoff_config.max_time,
+            max_value=self.backoff_config.max_value,  # passed to `self.backoff_config.wait_gen`
+            backoff_log_level=self.backoff_config.backoff_log_level)
         self._request = self._backoff_decorator(self._single_request)
 
         if url.port in {80, 443, None}:
@@ -811,6 +810,14 @@ class VastdbApi:
         )
         _logger.critical(msg)
         raise NotImplementedError(msg)
+
+    def with_endpoint(self, endpoint):
+        return VastdbApi(endpoint=endpoint,
+            access_key=self.access_key,
+            secret_key=self.secret_key,
+            ssl_verify=self._session.verify,
+            timeout=self.timeout,
+            backoff_config=self.backoff_config)
 
     def _single_request(self, *, method, url, skip_status_check=False, **kwargs):
         _logger.debug("Sending request: %s %s %s timeout=%s", method, url, kwargs, self.timeout)
