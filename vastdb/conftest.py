@@ -102,4 +102,4 @@ def table_name(request):
 
 @pytest.fixture(scope="function")
 def perf_metrics_db(crater_path):
-    return sqlite3.connect(f"{crater_path}/metrics.sqlite")
+    return sqlite3.connect(f"{crater_path}/metrics.sqlite" if crater_path else ":memory:")
