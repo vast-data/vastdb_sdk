@@ -201,6 +201,8 @@ def run_query(session_kwargs, i, bucket_name, endpoint_url):
                 nbytes=data, rows=rows, cols=len(cols),
                 pid=pid, tid=tid, sdk_version=sdk_version))
 
+    return metrics_rows
+
 
 def test_scan(test_bucket_name, session, num_workers, session_kwargs, tabular_endpoint_urls, perf_metrics_db):
     metrics_table = metrics.Table(perf_metrics_db, "query")
