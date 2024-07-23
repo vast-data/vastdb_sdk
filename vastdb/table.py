@@ -227,22 +227,23 @@ class Table:
         stop_event = Event()
         num_files_in_batch = min(ceil(len(source_files) / len(endpoints)), max_batch_size)
 
-        def import_worker(q, session):
+        def import_worker(q, endpoint):
             try:
-                while not q.empty():
-                    if stop_event.is_set():
-                        log.debug("stop_event is set, exiting")
-                        break
-                    files_batch = {}
-                    try:
-                        for _ in range(num_files_in_batch):
-                            files_batch.update({q.get(block=False)})
-                    except queue.Empty:
-                        pass
-                    if files_batch:
-                        log.debug("Starting import batch of %s files", len(files_batch))
-                        session.import_data(
-                            self.bucket.name, self.schema.name, self.name, files_batch, txid=self.tx.txid)
+                with self.tx._rpc.api.with_endpoint(endpoint) as session:
+                    while not q.empty():
+                        if stop_event.is_set():
+                            log.debug("stop_event is set, exiting")
+                            break
+                        files_batch = {}
+                        try:
+                            for _ in range(num_files_in_batch):
+                                files_batch.update({q.get(block=False)})
+                        except queue.Empty:
+                            pass
+                        if files_batch:
+                            log.debug("Starting import batch of %s files", len(files_batch))
+                            session.import_data(
+                                self.bucket.name, self.schema.name, self.name, files_batch, txid=self.tx.txid)
             except (Exception, KeyboardInterrupt) as e:
                 stop_event.set()
                 log.error("Got exception inside import_worker. exception: %s", e)
@@ -253,8 +254,7 @@ class Table:
                 max_workers=config.import_concurrency, thread_name_prefix='import_thread') as pool:
             try:
                 for endpoint in endpoints:
-                    session = self.tx._rpc.api.with_endpoint(endpoint)
-                    futures.append(pool.submit(import_worker, files_queue, session))
+                    futures.append(pool.submit(import_worker, files_queue, endpoint))
 
                 log.debug("Waiting for import workers to finish")
                 for future in concurrent.futures.as_completed(futures):
@@ -351,23 +351,23 @@ class Table:
 
         def single_endpoint_worker(endpoint: str):
             try:
-                host_api = self.tx._rpc.api.with_endpoint(endpoint)
-                backoff_decorator = self.tx._rpc.api._backoff_decorator
-                while True:
-                    check_stop()
-                    try:
-                        split = splits_queue.get_nowait()
-                    except queue.Empty:
-                        log.debug("splits queue is empty")
-                        break
+                with self.tx._rpc.api.with_endpoint(endpoint) as host_api:
+                    backoff_decorator = self.tx._rpc.api._backoff_decorator
+                    while True:
+                        check_stop()
+                        try:
+                            split = splits_queue.get_nowait()
+                        except queue.Empty:
+                            log.debug("splits queue is empty")
+                            break
 
-                    split_state = SelectSplitState(query_data_request=query_data_request,
-                                                   table=self,
-                                                   split_id=split,
-                                                   config=config)
+                        split_state = SelectSplitState(query_data_request=query_data_request,
+                                                       table=self,
+                                                       split_id=split,
+                                                       config=config)
 
-                    process_with_retries = backoff_decorator(split_state.process_split)
-                    process_with_retries(host_api, record_batches_queue, check_stop)
+                        process_with_retries = backoff_decorator(split_state.process_split)
+                        process_with_retries(host_api, record_batches_queue, check_stop)
 
             except StoppedException:
                 log.debug("stop signal.", exc_info=True)

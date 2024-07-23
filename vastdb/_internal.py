@@ -824,7 +824,16 @@ class VastdbApi:
         _logger.critical(msg)
         raise NotImplementedError(msg)
 
+    def __enter__(self):
+        """Allow using this session as a context manager."""
+        return self
+
+    def __exit__(self, *args):
+        """Make sure that the connections closed."""
+        self._session.close()
+
     def with_endpoint(self, endpoint):
+        """Open a new session for targeting a specific endpoint."""
         return VastdbApi(endpoint=endpoint,
             access_key=self.access_key,
             secret_key=self.secret_key,
