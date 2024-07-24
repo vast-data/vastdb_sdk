@@ -100,3 +100,57 @@ def test_nested_unsupported_filter(session, clean_bucket_name):
 
         with pytest.raises(NotImplementedError):
             list(t.select(predicate=(t['s'].isnull())))
+
+
+def test_nested_subfields_predicate_pushdown(session, clean_bucket_name):
+    columns = pa.schema([
+        ('x', pa.int64()),
+        ('l', pa.list_(pa.int8())),
+        ('y', pa.int64()),
+        ('m', pa.map_(pa.utf8(), pa.float64())),
+        ('z', pa.int64()),
+        ('s', pa.struct([
+            ('x', pa.int16()),
+            ('y', pa.int32()),
+            ('q', pa.struct([
+                ('q1', pa.utf8()),
+                ('q2', pa.float32())
+            ]))
+        ])),
+        ('w', pa.int64()),
+    ])
+    expected = pa.table(schema=columns, data=[
+        [1, 2, 3, None],
+        [[1], [], [2, 3], None],
+        [1, 2, None, 3],
+        [None, {'a': 2.5}, {'b': 0.25, 'c': 0.025}, {}],
+        [1, None, 2, 3],
+        [
+            {'x': 1, 'y': None, 'q': {'q1': 'AAA', 'q2': 1.0}},
+            None,
+            {'x': 2, 'y': 3, 'q': {'q1': 'B', 'q2': 2.0}},
+            {'x': None, 'y': 4, 'q': {'q1': 'CC', 'q2': 2.0}}],
+        [None, 1, 2, 3],
+    ])
+
+    with prepare_data(session, clean_bucket_name, 's', 't', expected) as t:
+
+        assert t.select(predicate=(t['s']['x'] == 1)).read_all() == expected.take([0])
+        assert t.select(predicate=(t['s']['y'].isnull())).read_all() == expected.take([0, 1])
+        assert t.select(predicate=(t['s']['q']['q1'] == 'AAA')).read_all() == expected.take([0])
+        assert t.select(predicate=(t['s']['q']['q2'] == 1.0)).read_all() == expected.take([0])
+
+        assert t.select(predicate=(t['s']['q']['q1'].isnull())).read_all() == expected.take([1])
+        assert t.select(predicate=(t['s']['q']['q2'].isnull())).read_all() == expected.take([1])
+
+        assert t.select(predicate=(t['s']['x'] == 2)).read_all() == expected.take([2])
+        assert t.select(predicate=(t['s']['y'] == 3)).read_all() == expected.take([2])
+        assert t.select(predicate=(t['s']['q']['q1'] == 'B')).read_all() == expected.take([2])
+        assert t.select(predicate=(t['s']['q']['q2'] == 2.0)).read_all() == expected.take([2, 3])
+
+        assert t.select(predicate=(t['s']['x'].isnull())).read_all() == expected.take([1, 3])
+        assert t.select(predicate=(t['s']['y'] == 4)).read_all() == expected.take([3])
+        assert t.select(predicate=(t['s']['q']['q1'] == 'CC')).read_all() == expected.take([3])
+
+        assert t.select(predicate=(t['s']['x'] == 1) | (t['s']['x'] == 2)).read_all() == expected.take([0, 2])
+        assert t.select(predicate=(t['s']['x'].isnull()) & (t['s']['y'].isnull())).read_all() == expected.take([1])

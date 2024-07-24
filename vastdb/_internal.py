@@ -35,6 +35,7 @@ from ibis.expr.operations.logical import (
 )
 from ibis.expr.operations.relations import Field
 from ibis.expr.operations.strings import StringContains
+from ibis.expr.operations.structs import StructField
 
 import vast_flatbuf.org.apache.arrow.computeir.flatbuf.BinaryLiteral as fb_binary_lit
 import vast_flatbuf.org.apache.arrow.computeir.flatbuf.BooleanLiteral as fb_bool_lit
@@ -182,7 +183,7 @@ class Predicate:
                 _logger.debug('OR args: %s op %s', or_args, op)
                 inner_offsets = []
 
-                prev_field_name = None
+                prev_field_path = None
                 for inner_op in or_args:
                     _logger.debug('inner_op %s', inner_op)
                     op_type = type(inner_op)
@@ -216,28 +217,38 @@ class Predicate:
                             if not isinstance(literal, Literal):
                                 raise NotImplementedError(self.expr)
 
+                    field_path = []
+                    while isinstance(column, StructField):
+                        column, subfield_name = column.args
+                        field_path.append(subfield_name)
+
                     if not isinstance(column, Field):
                         raise NotImplementedError(self.expr)
 
-                    field_name = column.name
-                    if prev_field_name is None:
-                        prev_field_name = field_name
-                    elif prev_field_name != field_name:
+                    field_path.append(column.name)
+                    field_path.reverse()  # first entry should be the top-level column name
+
+                    if prev_field_path is None:
+                        prev_field_path = field_path
+                    elif prev_field_path != field_path:
                         raise NotImplementedError(self.expr)
 
-                    node = self.nodes_map[field_name]
+                    nodes_map = self.nodes_map
+                    for name in field_path:
+                        node = nodes_map[name]
+                        nodes_map = node.children_map
+
                     # TODO: support predicate pushdown for leaf nodes (ORION-160338)
                     if node.children:
                         raise NotImplementedError(node.field)  # no predicate pushdown for nested columns
                     column_offset = self.build_column(position=node.index)
-                    field = self.schema.field(field_name)
                     for literal in literals:
                         args_offsets = [column_offset]
                         if literal is not None:
-                            args_offsets.append(self.build_literal(field=field, value=literal.value))
+                            args_offsets.append(self.build_literal(field=node.field, value=literal.value))
                         if builder_func == self.build_between:
-                            args_offsets.append(self.build_literal(field=field, value=lower.value))
-                            args_offsets.append(self.build_literal(field=field, value=upper.value))
+                            args_offsets.append(self.build_literal(field=node.field, value=lower.value))
+                            args_offsets.append(self.build_literal(field=node.field, value=upper.value))
 
                         inner_offsets.append(builder_func(*args_offsets))
 
@@ -571,6 +582,8 @@ class FieldNode:
             self.children = [FieldNode(field, index_iter, parent=self)]
         else:
             self.children = []  # for non-nested types
+
+        self.children_map = {c.field.name: c for c in self.children}
 
     def _iter_to_root(self) -> Iterator['FieldNode']:
         yield self
