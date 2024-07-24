@@ -138,6 +138,8 @@ def test_nested_subfields_predicate_pushdown(session, clean_bucket_name):
         assert t.select(predicate=(t['s']['x'] == 1)).read_all() == expected.take([0])
         assert t.select(predicate=(t['s']['y'].isnull())).read_all() == expected.take([0, 1])
         assert t.select(predicate=(t['s']['q']['q1'] == 'AAA')).read_all() == expected.take([0])
+        assert t.select(predicate=(t['s']['q']['q1'] < 'B')).read_all() == expected.take([0])
+        assert t.select(predicate=(t['s']['q']['q1'] <= 'B')).read_all() == expected.take([0, 2])
         assert t.select(predicate=(t['s']['q']['q2'] == 1.0)).read_all() == expected.take([0])
 
         assert t.select(predicate=(t['s']['q']['q1'].isnull())).read_all() == expected.take([1])
@@ -151,6 +153,8 @@ def test_nested_subfields_predicate_pushdown(session, clean_bucket_name):
         assert t.select(predicate=(t['s']['x'].isnull())).read_all() == expected.take([1, 3])
         assert t.select(predicate=(t['s']['y'] == 4)).read_all() == expected.take([3])
         assert t.select(predicate=(t['s']['q']['q1'] == 'CC')).read_all() == expected.take([3])
+        assert t.select(predicate=(t['s']['q']['q1'] > 'B')).read_all() == expected.take([3])
+        assert t.select(predicate=(t['s']['q']['q1'] >= 'B')).read_all() == expected.take([2, 3])
 
         assert t.select(predicate=(t['s']['x'] == 1) | (t['s']['x'] == 2)).read_all() == expected.take([0, 2])
         assert t.select(predicate=(t['s']['x'].isnull()) & (t['s']['y'].isnull())).read_all() == expected.take([1])
