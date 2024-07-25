@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.1.0] (2024-07-25)
+[1.1.0]: https://github.com/vast-data/vastdb_sdk/compare/v1.0.0...v1.1.0
+
+## Fixed
+ - Close internal sessions in `select` and `import`
+
+## Added
+ - VastDB/Parquet performance benchmark harness
+ - Support predicate pushdown over subfields
+
 ## [1.0.0] (2024-07-21)
 [1.0.0]: https://github.com/vast-data/vastdb_sdk/compare/v0.1.11...v1.0.0
 
