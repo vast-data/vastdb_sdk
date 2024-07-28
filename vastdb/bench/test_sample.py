@@ -109,7 +109,7 @@ def load_batch(bucket, session_kwargs, offset, limit):
 
 def test_ingest(test_bucket_name, session_kwargs, tabular_endpoint_urls, num_workers, perf_metrics_db):
     session = vastdb.connect(**session_kwargs)
-    metrics_table = metrics.Table(perf_metrics_db, "ingest")
+    metrics_table = metrics.Table(perf_metrics_db, "test_ingest")
 
     with session.transaction() as tx:
         b = tx.bucket(test_bucket_name)
@@ -205,7 +205,7 @@ def run_query(session_kwargs, i, bucket_name, endpoint_url):
 
 
 def test_scan(test_bucket_name, session, num_workers, session_kwargs, tabular_endpoint_urls, perf_metrics_db):
-    metrics_table = metrics.Table(perf_metrics_db, "query")
+    metrics_table = metrics.Table(perf_metrics_db, "test_scan")
 
     log.info("starting %d workers, endpoints=%s", num_workers, tabular_endpoint_urls)
     with ProcessPoolExecutor(max_workers=num_workers) as executor:
