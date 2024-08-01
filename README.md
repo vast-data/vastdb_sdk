@@ -174,6 +174,24 @@ snaps = bucket.list_snapshots()
 batches = snaps[0].schema('schema-name').table('table-name').select()
 ```
 
+## Multiple endpoints
+
+In order to split the query across multiple CNode connections, it is possible to explicitly list the CNodes URLs (both via VIPs and/or domain names) using [`QueryConfig.data_endpoints`](https://github.com/vast-data/vastdb_sdk/blob/main/vastdb/config.py):
+
+```python
+from .config import QueryConfig
+
+cfg = QueryConfig(data_endpoints=[
+    "http://cnode1-domain-name",
+    "http://cnode2-domain-name",
+    "http://cnode3-domain-name"
+])
+
+with session.transaction() as tx:
+    table = tx.bucket("bucket-name").schema("schema-name").table("table-name")
+    batches = table.select(columns=['c1'], predicate=(_.c2 > 2), config=cfg)
+```
+
 ## VAST Catalog
 
 [VAST Catalog](https://vastdata.com/blog/vast-catalog-treat-your-file-system-like-a-database) can be queried as a regular table:
