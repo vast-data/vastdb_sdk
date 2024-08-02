@@ -23,8 +23,6 @@ class Session:
                  timeout=None,
                  backoff_config: Optional["BackoffConfig"] = None):
         """Connect to a VAST Database endpoint, using specified credentials."""
-        import boto3
-
         from . import _internal, features
 
         if access is None:
@@ -42,10 +40,6 @@ class Session:
             timeout=timeout,
             backoff_config=backoff_config)
         self.features = features.Features(self.api.vast_version)
-        self.s3 = boto3.client('s3',
-            aws_access_key_id=access,
-            aws_secret_access_key=secret,
-            endpoint_url=endpoint)
 
     def __repr__(self):
         """Don't show the secret key."""

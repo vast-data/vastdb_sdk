@@ -1298,6 +1298,15 @@ class VastdbApi:
 
         return columns, next_key, is_truncated, count
 
+    def head_bucket(self, bucket_name):
+        """
+        Reimplemented, instead of depending on boto3 for checking the existence of a bucket.
+        https://docs.aws.amazon.com/AmazonS3/latest/API/API_HeadBucket.html
+        """
+        return self._request(
+            method="HEAD",
+            url=self._url(bucket=bucket_name))
+
     def begin_transaction(self, client_tags=[], expected_retvals=[]):
         """
         POST /?transaction HTTP/1.1

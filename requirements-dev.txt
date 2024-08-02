@@ -1,12 +1,18 @@
 -r requirements.txt
 
+black
+boto3
+coverage
+duckdb
 exchange-calendars
 fsspec
-black
+ipython
 mypy
 pandas-stubs
 pytest
 pytest-cov
+pytest-retry
 pytest-xdist
 ruff
+twine
 typer

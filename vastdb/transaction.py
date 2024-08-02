@@ -10,8 +10,6 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Iterable, Optional
 
-import botocore
-
 from . import bucket, errors, schema, session
 
 if TYPE_CHECKING:
@@ -64,12 +62,10 @@ class Transaction:
     def bucket(self, name: str) -> "Bucket":
         """Return a VAST Bucket, if exists."""
         try:
-            self._rpc.s3.head_bucket(Bucket=name)
-        except botocore.exceptions.ClientError as e:
-            log.warning("res: %s", e.response)
-            if e.response['Error']['Code'] == '404':
-                raise errors.MissingBucket(name) from e
-            raise
+            self._rpc.api.head_bucket(name)
+        except errors.NotFound as e:
+            raise errors.MissingBucket(name) from e
+
         return bucket.Bucket(name, self)
 
     def catalog_snapshots(self) -> Iterable["Bucket"]:

@@ -1,5 +1,4 @@
 aws-requests-auth
-boto3
 flatbuffers
 ibis-framework==9.0.0
 pyarrow
