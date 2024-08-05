@@ -114,6 +114,11 @@ def iter_serialized_slices(batch: Union[pa.RecordBatch, pa.Table], max_rows_per_
 
 def serialize_record_batch(batch: Union[pa.RecordBatch, pa.Table]):
     """Serialize a RecordBatch using Arrow IPC format."""
+    if isinstance(batch, pa.Table):
+        if len(batch.to_batches()) > 1:
+            # the server expects a single RecordBatch per request
+            batch = batch.combine_chunks()
+
     sink = pa.BufferOutputStream()
     with pa.ipc.new_stream(sink, batch.schema) as writer:
         writer.write(batch)

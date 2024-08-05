@@ -81,6 +81,19 @@ def test_insert_wide_row(session, clean_bucket_name):
         assert actual == expected
 
 
+def test_multi_batch_table(session, clean_bucket_name):
+    columns = pa.schema([pa.field('s', pa.utf8())])
+    expected = pa.Table.from_batches([
+        pa.record_batch(schema=columns, data=[['a']]),
+        pa.record_batch(schema=columns, data=[['b']]),
+        pa.record_batch(schema=columns, data=[['c']]),
+    ])
+
+    with prepare_data(session, clean_bucket_name, 's', 't', expected) as t:
+        actual = t.select().read_all()
+        assert actual == expected
+
+
 def test_insert_empty(session, clean_bucket_name):
     columns = pa.schema([('a', pa.int8()), ('b', pa.float32())])
     data = [[None] * 5, [None] * 5]

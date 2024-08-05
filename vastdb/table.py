@@ -439,7 +439,7 @@ class Table:
             self.update(rows=column_record_batch, columns=columns_name_chunk)
         return row_ids
 
-    def insert(self, rows: pa.RecordBatch):
+    def insert(self, rows: Union[pa.RecordBatch, pa.Table]):
         """Insert a RecordBatch into this table."""
         if self._imports_table:
             raise errors.NotSupportedCommand(self.bucket.name, self.schema.name, self.name)
