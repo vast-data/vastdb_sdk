@@ -76,6 +76,8 @@ with session.transaction() as tx:
     # the transaction is automatically committed when exiting the context
 ```
 
+For configuration examples, see [here](docs/config.md).
+
 Note: the transaction must be remain open while the returned [pyarrow.RecordBatchReader](https://arrow.apache.org/docs/python/generated/pyarrow.RecordBatchReader.html) generator is being used.
 
 ## Use Cases
@@ -148,23 +150,6 @@ snaps = bucket.list_snapshots()
 batches = snaps[0].schema('schema-name').table('table-name').select()
 ```
 
-### Multiple Endpoints
-
-You can split a query across multiple CNode connections, by explicitly listting the CNodes URLs (using VIPs and/or domain names), using [`QueryConfig.data_endpoints`](https://github.com/vast-data/vastdb_sdk/blob/main/vastdb/config.py):
-
-```python
-from .config import QueryConfig
-
-cfg = QueryConfig(data_endpoints=[
-    "http://cnode1-domain-name",
-    "http://cnode2-domain-name",
-    "http://cnode3-domain-name"
-])
-
-with session.transaction() as tx:
-    table = tx.bucket("bucket-name").schema("schema-name").table("table-name")
-    batches = table.select(columns=['c1'], predicate=(_.c2 > 2), config=cfg)
-```
 ## Post-processing
 
 ### Export
