@@ -4,24 +4,26 @@
 
 ## Introduction
 
-`vastdb` is a Python-based SDK designed for interacting with [VAST Database](https://vastdata.com/database) & [VAST Catalog](https://vastdata.com/blog/vast-catalog-treat-your-file-system-like-a-database), enabling schema and table management, efficient ingest, query and modification of columnar data. For more details, see [our whitepaper](https://vastdata.com/whitepaper/#TheVASTDataBase).
+`vastdb` is a Python-based SDK designed for interacting with a [VAST Database](https://vastdata.com/database) and the [VAST Catalog](https://vastdata.com/blog/vast-catalog-treat-your-file-system-like-a-database), enabling schema and table management, efficient ingest, query, and modification of columnar data. 
+
+For more details about the VAST Database, see [this whitepaper](https://vastdata.com/whitepaper/#TheVASTDataBase).
 
 [![vastdb](docs/vastdb.png)](https://vastdata.com/database)
 
-## Getting started
+## Getting Started
 
 ### Requirements
 
-- Linux client with Python 3.9+ and a network access to the VAST cluster
+- Linux client with Python 3.9 or later, and network access to the VAST Cluster
 - [Virtual IP pool configured with DNS service](https://support.vastdata.com/s/topic/0TOV40000000FThOAM/configuring-network-access-v50)
-- [S3 access & secret keys on VAST cluster](https://support.vastdata.com/s/article/UUID-4d2e7e23-b2fb-7900-d98f-96c31a499626)
+- [S3 access & secret keys on the VAST cluster](https://support.vastdata.com/s/article/UUID-4d2e7e23-b2fb-7900-d98f-96c31a499626)
 - [Tabular identity policy with the proper permissions](https://support.vastdata.com/s/article/UUID-14322b60-d6a2-89ac-3df0-3dfbb6974182)
 
-### Required VAST release
+### Required VAST Cluster release
 
-Currently, VAST DB Python SDK requires `5.0.0-sp10` or later VAST release.
+VAST DB Python SDK requires VAST Cluster release `5.0.0-sp10` or later.
 
-If the cluster is running an older VAST release, please contact customer.support@vastdata.com for more details.
+If your VAST Cluster is running an older release, please contact customer.support@vastdata.com.
 
 ### Installation
 
@@ -29,11 +31,11 @@ If the cluster is running an older VAST release, please contact customer.support
 pip install vastdb
 ```
 
-Also, see [our release notes](CHANGELOG.md).
+See the [Release Notes](CHANGELOG.md) for the SDK.
 
-### Quickstart
+### Quick Start
 
-Creating schemas and tables + basic inserts and selects:
+Create schemas and tables, basic inserts, and selects:
 
 ```python
 import pyarrow as pa
@@ -76,9 +78,11 @@ with session.transaction() as tx:
 
 Note: the transaction must be remain open while the returned [pyarrow.RecordBatchReader](https://arrow.apache.org/docs/python/generated/pyarrow.RecordBatchReader.html) generator is being used.
 
-## Filters and projections
+## Use Cases
 
-Our SDK supports predicate and projection pushdown:
+### Filters and Projections
+
+The SDK supports predicate and projection pushdown:
 
 ```python
     from ibis import _
@@ -97,9 +101,9 @@ Our SDK supports predicate and projection pushdown:
 
 See [here for more details](docs/predicate.md).
 
-## Import a single Parquet file via S3 protocol
+### Import a single Parquet file via S3 protocol
 
-It is possible to efficiently create a table from a Parquet file (without copying it via the client):
+You can efficiently create tables from Parquet files (without copying them via the client):
 
 ```python
     with tempfile.NamedTemporaryFile() as f:
@@ -112,9 +116,9 @@ It is possible to efficiently create a table from a Parquet file (without copyin
         parquet_files=['/bucket-name/staging/file.parquet'])
 ```
 
-## Import multiple Parquet files concurrently via S3 protocol
+### Import multiple Parquet files concurrently via S3 protocol
 
-We can import multiple files concurrently into a table (by utilizing multiple CNodes' cores):
+Import multiple files concurrently into a table (by using multiple CNodes' cores):
 
 ```python
     schema = tx.bucket('bucket-name').schema('schema-name')
@@ -123,40 +127,10 @@ We can import multiple files concurrently into a table (by utilizing multiple CN
         parquet_files=[f'/bucket-name/staging/file{i}.parquet' for i in range(10)])
 ```
 
-## Post-processing
 
-### Export
+### Semi-sorted Projections
 
-`Table.select()` returns a stream of [PyArrow record batches](https://arrow.apache.org/docs/python/data.html#record-batches), which can be directly exported into a Parquet file:
-
-```python
-batches = table.select()
-with contextlib.closing(pa.parquet.ParquetWriter('/path/to/file.parquet', batches.schema)) as writer:
-    for batch in table_batches:
-        writer.write_batch(batch)
-```
-
-### DuckDB integration
-
-We can use [DuckDB](https://duckdb.org/docs/guides/python/sql_on_arrow.html) to post-process the resulting stream of [PyArrow record batches](https://arrow.apache.org/docs/python/data.html#record-batches):
-
-```python
-from ibis import _
-
-import duckdb
-conn = duckdb.connect()
-
-with session.transaction() as tx:
-    table = tx.bucket("bucket-name").schema("schema-name").table("table-name")
-    batches = table.select(columns=['c1'], predicate=(_.c2 > 2))
-    print(conn.execute("SELECT sum(c1) FROM batches").arrow())
-```
-
-Note: the transaction must be active while DuckDB query is executing and fetching results using the Python SDK.
-
-## Semi-sorted projections
-
-We can create, list and delete [available semi-sorted projections](https://support.vastdata.com/s/article/UUID-e4ca42ab-d15b-6b72-bd6b-f3c77b455de4):
+Create, list and delete [available semi-sorted projections](https://support.vastdata.com/s/article/UUID-e4ca42ab-d15b-6b72-bd6b-f3c77b455de4):
 
 ```python
 p = table.create_projection('proj', sorted=['c3'], unsorted=['c1'])
@@ -165,18 +139,18 @@ print(p.get_stats())
 p.drop()
 ```
 
-## Snapshots
+### Snapshots
 
-It is possible to use [snapshots](https://vastdata.com/blog/bringing-snapshots-to-vasts-element-store) for accessing the Database:
+You can access the VAST Database using [snapshots](https://vastdata.com/blog/bringing-snapshots-to-vasts-element-store):
 
 ```python
 snaps = bucket.list_snapshots()
 batches = snaps[0].schema('schema-name').table('table-name').select()
 ```
 
-## Multiple endpoints
+### Multiple Endpoints
 
-In order to split the query across multiple CNode connections, it is possible to explicitly list the CNodes URLs (both via VIPs and/or domain names) using [`QueryConfig.data_endpoints`](https://github.com/vast-data/vastdb_sdk/blob/main/vastdb/config.py):
+You can split a query across multiple CNode connections, by explicitly listting the CNodes URLs (using VIPs and/or domain names), using [`QueryConfig.data_endpoints`](https://github.com/vast-data/vastdb_sdk/blob/main/vastdb/config.py):
 
 ```python
 from .config import QueryConfig
@@ -191,10 +165,40 @@ with session.transaction() as tx:
     table = tx.bucket("bucket-name").schema("schema-name").table("table-name")
     batches = table.select(columns=['c1'], predicate=(_.c2 > 2), config=cfg)
 ```
+## Post-processing
+
+### Export
+
+`Table.select()` returns a stream of [PyArrow record batches](https://arrow.apache.org/docs/python/data.html#record-batches), which can be directly exported into a Parquet file:
+
+```python
+batches = table.select()
+with contextlib.closing(pa.parquet.ParquetWriter('/path/to/file.parquet', batches.schema)) as writer:
+    for batch in table_batches:
+        writer.write_batch(batch)
+```
+
+### DuckDB Integration
+
+Use [DuckDB](https://duckdb.org/docs/guides/python/sql_on_arrow.html) to post-process the resulting stream of [PyArrow record batches](https://arrow.apache.org/docs/python/data.html#record-batches):
+
+```python
+from ibis import _
+
+import duckdb
+conn = duckdb.connect()
+
+with session.transaction() as tx:
+    table = tx.bucket("bucket-name").schema("schema-name").table("table-name")
+    batches = table.select(columns=['c1'], predicate=(_.c2 > 2))
+    print(conn.execute("SELECT sum(c1) FROM batches").arrow())
+```
+
+Note: the transaction must be active while the DuckDB query is executing and fetching results using the Python SDK.
 
 ## VAST Catalog
 
-[VAST Catalog](https://vastdata.com/blog/vast-catalog-treat-your-file-system-like-a-database) can be queried as a regular table:
+The [VAST Catalog](https://vastdata.com/blog/vast-catalog-treat-your-file-system-like-a-database) can be queried as a regular table:
 
 ```python
 import pyarrow as pa
@@ -219,8 +223,11 @@ with session.transaction() as tx:
     print("Distinct element types on the system:")
     print(distinct_elements)
 ```
+## More Information
 
-See the following blog posts for more examples:
+See these blog posts for more examples:
 
 - https://vastdata.com/blog/the-vast-catalog-in-action-part-1
 - https://vastdata.com/blog/the-vast-catalog-in-action-part-2
+
+See also the [full Vast DB Python SDK documentation](https://vastdb-sdk.readthedocs.io/en/v1.1.0/)
