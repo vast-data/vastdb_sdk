@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.1.1] (2024-08-11)
+[1.1.1]: https://github.com/vast-data/vastdb_sdk/compare/v1.1.0...v1.1.1
+
+### Fixed
+ - Combine record batches when inserting `pyarrow.Table`
+
+### Changed
+ - Don't require `boto3` for checking bucket existence
+ - Improve documentation
+
+
 ## [1.1.0] (2024-07-25)
 [1.1.0]: https://github.com/vast-data/vastdb_sdk/compare/v1.0.0...v1.1.0
 
