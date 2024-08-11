@@ -5,7 +5,7 @@ RUN apt-get update -qqy && apt-get install -qqy git curl
 
 RUN pip3 install -U pip wheel
 
-COPY requirements.txt requirements-dev.txt .
+COPY requirements.txt requirements-dev.txt ./
 RUN pip3 install -r requirements-dev.txt
 
 WORKDIR /work
