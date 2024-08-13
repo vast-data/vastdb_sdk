@@ -3,14 +3,16 @@ variables:
   PYSDK_BUILDER_IMAGE: $DOCKER_REGISTRY/dev/infra:vastdb-python-sdk-builder-latest
   ORION_PREFIX: $DOCKER_REGISTRY/dev/orion
   PYSDK_IMAGE_PREFIX: $ORION_PREFIX:vastdb-python-sdk-pipe-$CI_PIPELINE_ID
+  VASTDB_PYTHON_SDK_REPO: $DOCKER_REGISTRY/dev/vastdb-python-sdk
   ORION_BRANCH: BUILD/roman.zeyde/2024-07-14-ci-sdk
+  BUILDER_DOCKER_BASE_IMAGE: $VASTDB_PYTHON_SDK_REPO:alonid-rockylinux-rpm-builder-8.6.20227707
 
 
 pre_build:
   stage: .pre
   script:
     - aws ecr get-login-password | docker login -u AWS --password-stdin https://$DOCKER_REGISTRY
-    - docker build -f Dockerfile.prebuild -t $PYSDK_BUILDER_IMAGE .
+    - docker build -f Dockerfile.prebuild -t $PYSDK_BUILDER_IMAGE --build-arg BASE_IMAGE=${BUILDER_DOCKER_BASE_IMAGE} .
     - docker push $PYSDK_BUILDER_IMAGE
   rules:
     - if: $CI_COMMIT_BRANCH =~ /^PREBUILD.*/
@@ -31,7 +33,7 @@ build:
 
   script:
     - echo "Building Docker image $PYSDK_IMAGE..."
-    - docker build -f Dockerfile --build-arg BASE_IMAGE=python:${PYTHON_VERSION}-slim -t $PYSDK_IMAGE .
+    - docker build -f Dockerfile --build-arg BASE_IMAGE=${VASTDB_PYTHON_SDK_REPO}:python-${PYTHON_VERSION}-slim -t $PYSDK_IMAGE .
     - docker inspect $PYSDK_IMAGE
 
     - echo "Checking Docker image $PYSDK_IMAGE..."

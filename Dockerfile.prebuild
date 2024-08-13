@@ -1,4 +1,9 @@
-FROM alonid/rockylinux-rpm-builder:8.6.20227707
+ARG BASE_IMAGE
+FROM $BASE_IMAGE
 
-RUN yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
-RUN yum install -y docker-ce
+RUN rm /etc/yum.repos.d/*
+COPY manifests/yum/x86_64.manifest.repo /etc/yum.repos.d/
+
+RUN yum clean all && \
+    yum makecache && \
+    yum install -y docker-ce

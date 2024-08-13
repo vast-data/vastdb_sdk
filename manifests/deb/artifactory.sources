@@ -1,0 +1,5 @@
+Types: deb
+URIs: https://artifactory.vastdata.com/artifactory/deb-vastdb-python-sdk
+Suites: bookworm
+Components: main
+Trusted: yes

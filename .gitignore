@@ -162,3 +162,5 @@ cython_debug/
 # Benchamrk generated files (dataset and results)
 vastdb/bench/perf_bench/dataset/test_dataset
 vastdb/bench/perf_bench/benchmark_results
+
+!manifests/**
