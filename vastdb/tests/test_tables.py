@@ -204,6 +204,26 @@ def test_update_table(session, clean_bucket_name):
         }
 
 
+def test_update_from_select(session, clean_bucket_name):
+    columns = pa.schema([
+        ('a', pa.int64()),
+        ('b', pa.float32()),
+        ('s', pa.utf8()),
+    ])
+    expected = pa.table(schema=columns, data=[
+        [111, 222, 333],
+        [0.5, 1.5, 2.5],
+        ['a', 'bb', 'ccc'],
+    ])
+    with prepare_data(session, clean_bucket_name, 's', 't', expected) as t:
+        for b in t.select(internal_row_id=True):
+            t.update(b)
+            t.update(pa.Table.from_batches([b]))
+
+        actual = t.select().read_all()
+        assert actual == expected
+
+
 def test_select_with_multisplits(session, clean_bucket_name):
     columns = pa.schema([
         ('a', pa.int32())

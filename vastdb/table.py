@@ -474,16 +474,17 @@ class Table:
             rows_chunk = rows[INTERNAL_ROW_ID]
         except KeyError:
             raise errors.MissingRowIdColumn
-        if columns is not None:
-            update_fields = [(INTERNAL_ROW_ID, pa.uint64())]
-            update_values = [_combine_chunks(rows_chunk)]
-            for col in columns:
-                update_fields.append(rows.field(col))
-                update_values.append(_combine_chunks(rows[col]))
 
-            update_rows_rb = pa.record_batch(schema=pa.schema(update_fields), data=update_values)
-        else:
-            update_rows_rb = rows
+        if columns is None:
+            columns = [name for name in rows.schema.names if name != INTERNAL_ROW_ID]
+
+        update_fields = [(INTERNAL_ROW_ID, pa.uint64())]
+        update_values = [_combine_chunks(rows_chunk)]
+        for col in columns:
+            update_fields.append(rows.field(col))
+            update_values.append(_combine_chunks(rows[col]))
+
+        update_rows_rb = pa.record_batch(schema=pa.schema(update_fields), data=update_values)
 
         update_rows_rb = util.sort_record_batch_if_needed(update_rows_rb, INTERNAL_ROW_ID)
 
