@@ -66,3 +66,26 @@ def test_table_stats(session, test_bucket_name, schema_name, table_name):
     logger.info("inserted to table")
     assert new_stat.size_in_bytes != initial_stat.size_in_bytes
     assert new_stat.num_rows - NUM_TIMES_TO_INSERT == initial_stat.num_rows
+
+
+def test_ndu_while_querying(session, test_bucket_name, schema_name, table_name):
+    """
+    Executing queries while a NDU takes place.
+    """
+    # TODO: Before merging run mypy and print query result
+
+    config = QueryConfig(num_splits=1, num_sub_splits=1)
+
+    logger.info(f'{test_bucket_name=}, {schema_name=}, {table_name=}')
+
+    for query in range(300):
+        with session.transaction() as tx:
+            t = tx.bucket(test_bucket_name).schema(schema_name).table(table_name)
+            s = time.time()
+            if query == 0:
+                res = t.select(config=config).read_all()
+                logger.info(f'{res=}')
+            else:
+                assert res == t.select(config=config).read_all()
+            e = time.time()
+            logger.info(f'{query=} took {e - s}')
