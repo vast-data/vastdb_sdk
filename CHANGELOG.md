@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.1.2] (2024-08-19)
+[1.1.2]: https://github.com/vast-data/vastdb_sdk/compare/v1.1.1...v1.1.2
+
+### Fixed
+ - Fix `Table.update()` when column names are not specified [#66]
+
+
 ## [1.1.1] (2024-08-11)
 [1.1.1]: https://github.com/vast-data/vastdb_sdk/compare/v1.1.0...v1.1.1
 
@@ -247,3 +254,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 [#43]: https://github.com/vast-data/vastdb_sdk/pull/43
 [#47]: https://github.com/vast-data/vastdb_sdk/pull/47
 [#50]: https://github.com/vast-data/vastdb_sdk/pull/50
+[#66]: https://github.com/vast-data/vastdb_sdk/issues/66
