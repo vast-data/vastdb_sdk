@@ -127,6 +127,21 @@ def test_exists(session, clean_bucket_name):
         assert s.tables() == [t]
 
 
+def test_list_tables(session, clean_bucket_name):
+    with session.transaction() as tx:
+        s = tx.bucket(clean_bucket_name).create_schema('s1')
+        assert s.tables() == []
+        assert s.tablenames() == []
+
+        tables = [
+            s.create_table(f't{i}', pa.schema([(f'x{i}', pa.int64())]))
+            for i in range(10)
+        ]
+        assert tables == s.tables()
+        tablenames = [t.name for t in tables]
+        assert s.tablenames() == tablenames
+
+
 def test_update_table(session, clean_bucket_name):
     columns = pa.schema([
         ('a', pa.int64()),

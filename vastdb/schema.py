@@ -103,9 +103,7 @@ class Schema:
         log.debug("Found table: %s", t[0])
         return t[0]
 
-    def tables(self, table_name=None) -> List["Table"]:
-        """List all tables under this schema."""
-        tables = []
+    def _iter_tables(self, table_name=None):
         next_key = 0
         name_prefix = table_name if table_name else ""
         exact_match = bool(table_name)
@@ -116,11 +114,20 @@ class Schema:
                     exact_match=exact_match, name_prefix=name_prefix, include_list_stats=exact_match)
             if not curr_tables:
                 break
-            tables.extend(curr_tables)
+            yield from curr_tables
             if not is_truncated:
                 break
 
-        return [_parse_table_info(table, self) for table in tables]
+    def tables(self, table_name=None) -> List["Table"]:
+        """List all tables under this schema."""
+        return [
+            _parse_table_info(table_info, self)
+            for table_info in self._iter_tables(table_name=table_name)
+        ]
+
+    def tablenames(self) -> List[str]:
+        """List all table names under this schema."""
+        return [table_info.name for table_info in self._iter_tables()]
 
     def drop(self) -> None:
         """Delete this schema."""
