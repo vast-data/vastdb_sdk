@@ -34,7 +34,7 @@ from ibis.expr.operations.logical import (
     Or,
 )
 from ibis.expr.operations.relations import Field
-from ibis.expr.operations.strings import StringContains
+from ibis.expr.operations.strings import StartsWith, StringContains
 from ibis.expr.operations.structs import StructField
 
 import vast_flatbuf.org.apache.arrow.computeir.flatbuf.BinaryLiteral as fb_binary_lit
@@ -103,7 +103,7 @@ from vast_flatbuf.tabular.ListProjectionsResponse import (
 from vast_flatbuf.tabular.ListSchemasResponse import ListSchemasResponse as list_schemas
 from vast_flatbuf.tabular.ListTablesResponse import ListTablesResponse as list_tables
 
-from . import errors
+from . import errors, util
 from .config import BackoffConfig
 
 UINT64_MAX = 18446744073709551615
@@ -168,6 +168,7 @@ class Predicate:
             IsNull: self.build_is_null,
             Not: self.build_is_not_null,
             StringContains: self.build_match_substring,
+            StartsWith: self.build_starts_with,
             Between: self.build_between,
         }
 
@@ -207,6 +208,14 @@ class Predicate:
                     elif builder_func == self.build_between:
                         column, lower, upper = inner_op.args
                         literals = (None,)
+                    elif builder_func == self.build_starts_with:
+                        column, prefix = inner_op.args
+                        literals = (None,)
+                        if prefix.value:
+                            lower_bytes, upper_bytes = util.prefix_to_range(prefix.value)
+                        else:
+                            # `col.starts_with('')` is equivalent to `col IS NOT NULL`
+                            builder_func = self.build_is_not_null
                     else:
                         column, arg = inner_op.args
                         if isinstance(arg, tuple):
@@ -249,6 +258,9 @@ class Predicate:
                         if builder_func == self.build_between:
                             args_offsets.append(self.build_literal(field=node.field, value=lower.value))
                             args_offsets.append(self.build_literal(field=node.field, value=upper.value))
+                        if builder_func == self.build_starts_with:
+                            args_offsets.append(self.build_literal(field=node.field, value=lower_bytes))
+                            args_offsets.append(self.build_literal(field=node.field, value=upper_bytes))
 
                         inner_offsets.append(builder_func(*args_offsets))
 
@@ -547,6 +559,13 @@ class Predicate:
         offsets = [
             self.build_greater_equal(column, lower),
             self.build_less_equal(column, upper),
+        ]
+        return self.build_and(offsets)
+
+    def build_starts_with(self, column: int, lower: int, upper: int):
+        offsets = [
+            self.build_greater_equal(column, lower),
+            self.build_less(column, upper),
         ]
         return self.build_and(offsets)
 

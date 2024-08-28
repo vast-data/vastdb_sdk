@@ -43,3 +43,16 @@ def _parse(bufs):
     for buf in bufs:
         with pa.ipc.open_stream(buf) as reader:
             yield from reader
+
+
+def test_prefix():
+    assert util.prefix_to_range('a') == (b'a', b'b')
+    assert util.prefix_to_range('abc') == (b'abc', b'abd')
+    assert util.prefix_to_range('abc\x00') == (b'abc\x00', b'abc\x01')
+    assert util.prefix_to_range('abc\x7f') == (b'abc\x7f', b'abc\x80')
+    assert util.prefix_to_range('/a/b/c') == (b'/a/b/c', b'/a/b/d')
+    assert util.prefix_to_range('/123α') == (b'/123\xce\xb1', b'/123\xce\xb2')
+    assert util.prefix_to_range('/123αA') == (b'/123\xce\xb1A', b'/123\xce\xb1B')
+    assert util.prefix_to_range('\U0010ffff') == (b'\xf4\x8f\xbf\xbf', b'\xf4\x8f\xbf\xc0')  # max unicode codepoint
+    with pytest.raises(AssertionError):
+        util.prefix_to_range('')

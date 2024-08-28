@@ -837,3 +837,48 @@ def test_catalog_snapshots_select(session, clean_bucket_name):
         rows = t.select().read_all()
         if not rows:
             raise NotReady
+
+
+def test_starts_with(session, clean_bucket_name):
+    columns = pa.schema([
+        ('s', pa.utf8()),
+        ('i', pa.int16()),
+    ])
+
+    expected = pa.table(schema=columns, data=[
+        ['a', 'ab', 'abc', None, 'abd', 'α', '', 'b'],
+        [0, 1, 2, 3, 4, 5, 6, 7],
+    ])
+
+    with prepare_data(session, clean_bucket_name, 's', 't', expected) as table:
+        def select(prefix):
+            res = table.select(predicate=table['s'].startswith(prefix)).read_all()
+            return res.to_pydict()
+
+        assert select('')['s'] == ['a', 'ab', 'abc', 'abd', 'α', '', 'b']
+        assert select('a')['s'] == ['a', 'ab', 'abc', 'abd']
+        assert select('b')['s'] == ['b']
+        assert select('ab')['s'] == ['ab', 'abc', 'abd']
+        assert select('abc')['s'] == ['abc']
+        assert select('α')['s'] == ['α']
+
+        res = table.select(predicate=(table['s'].startswith('ab') | (table['s'].isnull()))).read_all()
+        assert res.to_pydict()['s'] == ['ab', 'abc', None, 'abd']
+
+        res = table.select(predicate=(table['s'].startswith('ab') | (table['s'] == 'b'))).read_all()
+        assert res.to_pydict()['s'] == ['ab', 'abc', 'abd', 'b']
+
+        res = table.select(predicate=((table['s'] == 'b') | table['s'].startswith('ab'))).read_all()
+        assert res.to_pydict()['s'] == ['ab', 'abc', 'abd', 'b']
+
+        res = table.select(predicate=(table['s'].startswith('ab') & (table['s'] != 'abc'))).read_all()
+        assert res.to_pydict()['s'] == ['ab', 'abd']
+
+        res = table.select(predicate=((table['s'] != 'abc') & table['s'].startswith('ab'))).read_all()
+        assert res.to_pydict()['s'] == ['ab', 'abd']
+
+        res = table.select(predicate=((table['i'] > 3) & table['s'].startswith('ab'))).read_all()
+        assert res.to_pydict() == {'i': [4], 's': ['abd']}
+
+        res = table.select(predicate=(table['s'].startswith('ab')) & (table['i'] > 3)).read_all()
+        assert res.to_pydict() == {'i': [4], 's': ['abd']}

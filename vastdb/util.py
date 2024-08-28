@@ -157,3 +157,13 @@ def sort_record_batch_if_needed(record_batch, sort_column):
         return record_batch.sort_by(sort_column)
     else:
         return record_batch
+
+
+def prefix_to_range(prefix: str):
+    """Compute (L, U) such that `s.starts_with(prefix)` is equivalent to `L <= s.encode() < H`."""
+    assert prefix, "Empty prefix is not convertible to range predicate"
+    lower = prefix.encode()
+    upper = bytearray(lower)
+    # https://en.wikipedia.org/wiki/UTF-8#Encoding guarantees that the last byte is not 0xFF
+    upper[-1] = upper[-1] + 1
+    return (lower, bytes(upper))
