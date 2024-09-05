@@ -866,7 +866,7 @@ class VastdbApi:
             res = self._session.request(method=method, url=url, timeout=self.timeout, **kwargs)
         except requests.exceptions.ConnectionError as err:
             # low-level connection issue, it is safe to retry only read-only requests
-            may_retry = (method == "GET")
+            may_retry = (method in {"HEAD", "GET"})
             raise errors.ConnectionError(cause=err, may_retry=may_retry) from err
 
         if not skip_status_check:
