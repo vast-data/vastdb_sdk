@@ -72,20 +72,34 @@ def test_ndu_while_querying(session, test_bucket_name, schema_name, table_name):
     """
     Executing queries while a NDU takes place.
     """
-    # TODO: Before merging run mypy and print query result
-
+    amount_of_queries_in_parallel = 5
     config = QueryConfig(num_splits=1, num_sub_splits=1)
-
     logger.info(f'{test_bucket_name=}, {schema_name=}, {table_name=}')
 
-    for query in range(300):
+    seed = random.randint(0, 100)
+    logger.info(f'{seed=}')
+    r = random.Random(seed)
+
+    def _execute_single_query(res):
+        time.sleep(r.random())
         with session.transaction() as tx:
             t = tx.bucket(test_bucket_name).schema(schema_name).table(table_name)
             s = time.time()
-            if query == 0:
-                res = t.select(config=config).read_all()
-                logger.info(f'{res=}')
-            else:
-                assert res == t.select(config=config).read_all()
+            assert res == t.select(config=config).read_all()
             e = time.time()
-            logger.info(f'{query=} took {e - s}')
+            logger.info(f'query took {e - s}')
+
+    # first res
+    with session.transaction() as tx:
+        t = tx.bucket(test_bucket_name).schema(schema_name).table(table_name)
+        s = time.time()
+        res = t.select(config=config).read_all()
+        e = time.time()
+        logger.info(f'first query took {e - s}')
+
+    for _ in range(300):
+        with ThreadPoolExecutor() as executor:
+            futures = [executor.submit(_execute_single_query, res) for _ in range(amount_of_queries_in_parallel)]
+            for future in futures:
+                future.result()
+        logger.info(f"finished running {amount_of_queries_in_parallel} queries")
