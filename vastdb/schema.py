@@ -77,7 +77,11 @@ class Schema:
         return result
 
     def create_table(self, table_name: str, columns: pa.Schema, fail_if_exists=True, use_external_row_ids_allocation=False) -> "Table":
-        """Create a new table under this schema."""
+        """Create a new table under this schema.
+
+        A virtual `vastdb_rowid` column (of `int64` type) can be created to access and filter by internal VAST row IDs.
+        See https://support.vastdata.com/s/article/UUID-48d0a8cf-5786-5ef3-3fa3-9c64e63a0967 for more details.
+        """
         if current := self.table(table_name, fail_if_missing=False):
             if fail_if_exists:
                 raise errors.TableExists(self.bucket.name, self.name, table_name)
