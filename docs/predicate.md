@@ -21,6 +21,8 @@ Currently, VAST Database allows pushing down filter predicate `p` of the followi
   - NULL checking:
     - `t["x"].isnull()`
     - `~t["x"].isnull()`
+  - Prefix match:
+    - `t["x"].startswith("prefix")`
   - Substring match:
     - `t["x"].contains("substr")`
 
