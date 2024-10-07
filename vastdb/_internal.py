@@ -1088,7 +1088,8 @@ class VastdbApi:
 
         if topic_partitions > 0:
             table_props = self.encode_table_props(src_timestamp=src_timestamp, retention_in_mins=retention_in_mins, past_threshold_ts=past_threshold_ts, future_threshold_ts=future_threshold_ts)
-            url_params['table-props'] = table_props
+            if table_props is not None:
+                url_params['table-props'] = table_props
 
         self._request(
             method="POST",
@@ -1133,6 +1134,8 @@ class VastdbApi:
 
         if src_timestamp is not None or retention_in_mins is not None or past_threshold_ts is not None or future_threshold_ts is not None:
             table_properties = self.encode_table_props(src_timestamp=src_timestamp, retention_in_mins=retention_in_mins, past_threshold_ts=past_threshold_ts, future_threshold_ts=future_threshold_ts)
+            if table_properties is None:
+                table_properties = ""
 
         properties = builder.CreateString(table_properties)
         tabular_alter_table.Start(builder)
