@@ -1049,8 +1049,16 @@ class VastdbApi:
 
         return snapshots, is_truncated, marker
 
+    @staticmethod
+    def encode_table_props(**kwargs):
+        if all(v is None for v in kwargs.values()):
+            return None
+        else:
+            return "$".join([f"{k}={v}" for k, v in kwargs.items()])
+
     def create_table(self, bucket, schema, name, arrow_schema, txid=0, client_tags=[], expected_retvals=[],
-                     topic_partitions=0, create_imports_table=False, use_external_row_ids_allocation=False):
+                     topic_partitions=0, create_imports_table=False, use_external_row_ids_allocation=False,
+                     src_timestamp=None, retention_in_mins=None, past_threshold_ts=None, future_threshold_ts=None):
         """
         Create a table, use the following request
         POST /bucket/schema/table?table HTTP/1.1
@@ -1077,6 +1085,10 @@ class VastdbApi:
         url_params = {'topic_partitions': str(topic_partitions)} if topic_partitions else {}
         if create_imports_table:
             url_params['sub-table'] = IMPORTED_OBJECTS_TABLE_NAME
+
+        if topic_partitions > 0:
+            table_props = self.encode_table_props(src_timestamp=src_timestamp, retention_in_mins=retention_in_mins, past_threshold_ts=past_threshold_ts, future_threshold_ts=future_threshold_ts)
+            url_params['table-props'] = table_props
 
         self._request(
             method="POST",
@@ -1106,7 +1118,8 @@ class VastdbApi:
         return TableStatsResult(num_rows, size_in_bytes, is_external_rowid_alloc, tuple(endpoints))
 
     def alter_table(self, bucket, schema, name, txid=0, client_tags=[], table_properties="",
-                    new_name="", expected_retvals=[]):
+                    new_name="", expected_retvals=[],
+                    src_timestamp=None, retention_in_mins=None, past_threshold_ts=None, future_threshold_ts=None):
         """
         PUT /mybucket/myschema/mytable?table HTTP/1.1
         Content-Length: ContentLength
@@ -1117,6 +1130,9 @@ class VastdbApi:
         Table properties
         """
         builder = flatbuffers.Builder(1024)
+
+        if src_timestamp is not None or retention_in_mins is not None or past_threshold_ts is not None or future_threshold_ts is not None:
+            table_properties = self.encode_table_props(src_timestamp=src_timestamp, retention_in_mins=retention_in_mins, past_threshold_ts=past_threshold_ts, future_threshold_ts=future_threshold_ts)
 
         properties = builder.CreateString(table_properties)
         tabular_alter_table.Start(builder)
