@@ -14,7 +14,7 @@ For more details about the VAST Database, see [this whitepaper](https://vastdata
 
 ### Requirements
 
-- Linux client with Python 3.9 or later, and network access to the VAST Cluster
+- Linux client with Python 3.9 - 3.12, and network access to the VAST Cluster
 - [Virtual IP pool configured with DNS service](https://support.vastdata.com/s/topic/0TOV40000000FThOAM/configuring-network-access-v50)
 - [S3 access & secret keys on the VAST cluster](https://support.vastdata.com/s/article/UUID-4d2e7e23-b2fb-7900-d98f-96c31a499626)
 - [Tabular identity policy with the proper permissions](https://support.vastdata.com/s/article/UUID-14322b60-d6a2-89ac-3df0-3dfbb6974182)
