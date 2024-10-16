@@ -60,7 +60,14 @@ class ObjectDetails(object):
             return self._tab.Get(flatbuffers.number_types.Uint64Flags, o + self._tab.Pos)
         return 0
 
-def Start(builder): builder.StartObject(5)
+    # ObjectDetails
+    def NumPartitions(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(14))
+        if o != 0:
+            return self._tab.Get(flatbuffers.number_types.Uint64Flags, o + self._tab.Pos)
+        return 0
+
+def Start(builder): builder.StartObject(6)
 def ObjectDetailsStart(builder):
     """This method is deprecated. Please switch to Start."""
     return Start(builder)
@@ -84,6 +91,10 @@ def AddSizeInBytes(builder, sizeInBytes): builder.PrependUint64Slot(4, sizeInByt
 def ObjectDetailsAddSizeInBytes(builder, sizeInBytes):
     """This method is deprecated. Please switch to AddSizeInBytes."""
     return AddSizeInBytes(builder, sizeInBytes)
+def AddNumPartitions(builder, numPartitions): builder.PrependUint64Slot(5, numPartitions, 0)
+def ObjectDetailsAddNumPartitions(builder, numPartitions):
+    """This method is deprecated. Please switch to AddNumPartitions."""
+    return AddNumPartitions(builder, numPartitions)
 def End(builder): return builder.EndObject()
 def ObjectDetailsEnd(builder):
     """This method is deprecated. Please switch to End."""
