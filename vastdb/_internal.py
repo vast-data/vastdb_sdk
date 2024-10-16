@@ -735,17 +735,33 @@ def _iter_nested_arrays(column: pa.Array) -> Iterator[pa.Array]:
         yield from _iter_nested_arrays(column.values)  # Note: Map is serialized in VAST as a List<Struct<K, V>>
 
 
-TableInfo = namedtuple('TableInfo', 'name properties handle num_rows size_in_bytes')
+def _encode_table_props(**kwargs):
+    if all([v is None for v in kwargs.values()]):
+        return None
+    else:
+        return "$".join([f"{k}={v}" for k, v in kwargs.items()])
+
+
+def _decode_table_props(s):
+    if s.strip() == '':
+        return {}
+    else:
+        return {x[0]: int(x[1]) for x in [y.split('=') for y in s.strip().split("$")]}
+
+
+TableInfo = namedtuple('TableInfo', 'name properties handle num_rows size_in_bytes num_partitions')
 
 
 def _parse_table_info(obj):
-
     name = obj.Name().decode()
     properties = obj.Properties().decode()
     handle = obj.Handle().decode()
     num_rows = obj.NumRows()
     used_bytes = obj.SizeInBytes()
-    return TableInfo(name, properties, handle, num_rows, used_bytes)
+    num_partitions = obj.NumPartitions()
+    if num_partitions != 0:
+        properties = _decode_table_props(properties)
+    return TableInfo(name, properties, handle, num_rows, used_bytes, num_partitions)
 
 
 # Results that returns from tablestats
@@ -1049,13 +1065,6 @@ class VastdbApi:
 
         return snapshots, is_truncated, marker
 
-    @staticmethod
-    def encode_table_props(**kwargs):
-        if all(v is None for v in kwargs.values()):
-            return None
-        else:
-            return "$".join([f"{k}={v}" for k, v in kwargs.items()])
-
     def create_table(self, bucket, schema, name, arrow_schema, txid=0, client_tags=[], expected_retvals=[],
                      topic_partitions=0, create_imports_table=False, use_external_row_ids_allocation=False,
                      src_timestamp=None, retention_in_mins=None, past_threshold_ts=None, future_threshold_ts=None):
@@ -1087,7 +1096,7 @@ class VastdbApi:
             url_params['sub-table'] = IMPORTED_OBJECTS_TABLE_NAME
 
         if topic_partitions > 0:
-            table_props = self.encode_table_props(src_timestamp=src_timestamp, retention_in_mins=retention_in_mins, past_threshold_ts=past_threshold_ts, future_threshold_ts=future_threshold_ts)
+            table_props = _encode_table_props(src_timestamp=src_timestamp, retention_in_mins=retention_in_mins, past_threshold_ts=past_threshold_ts, future_threshold_ts=future_threshold_ts)
             if table_props is not None:
                 url_params['table-props'] = table_props
 
@@ -1133,7 +1142,7 @@ class VastdbApi:
         builder = flatbuffers.Builder(1024)
 
         if src_timestamp is not None or retention_in_mins is not None or past_threshold_ts is not None or future_threshold_ts is not None:
-            table_properties = self.encode_table_props(src_timestamp=src_timestamp, retention_in_mins=retention_in_mins, past_threshold_ts=past_threshold_ts, future_threshold_ts=future_threshold_ts)
+            table_properties = _encode_table_props(src_timestamp=src_timestamp, retention_in_mins=retention_in_mins, past_threshold_ts=past_threshold_ts, future_threshold_ts=future_threshold_ts)
             if table_properties is None:
                 table_properties = ""
 
