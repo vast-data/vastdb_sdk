@@ -1065,7 +1065,7 @@ class VastdbApi:
 
         return snapshots, is_truncated, marker
 
-    def create_table(self, bucket, schema, name, arrow_schema, txid=0, client_tags=[], expected_retvals=[],
+    def create_table(self, bucket, schema, name, arrow_schema=None, txid=0, client_tags=[], expected_retvals=[],
                      topic_partitions=0, create_imports_table=False, use_external_row_ids_allocation=False,
                      src_timestamp=None, retention_in_mins=None, past_threshold_ts=None, future_threshold_ts=None):
         """
@@ -1085,6 +1085,9 @@ class VastdbApi:
         POST /bucket/schema/table?table&sub-table=vastdb-imported-objects HTTP/1.1
         """
         headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
+
+        if arrow_schema is None:
+            arrow_schema = pa.schema([])
 
         serialized_schema = arrow_schema.serialize()
         headers['Content-Length'] = str(len(serialized_schema))
