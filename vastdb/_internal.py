@@ -735,19 +735,42 @@ def _iter_nested_arrays(column: pa.Array) -> Iterator[pa.Array]:
         yield from _iter_nested_arrays(column.values)  # Note: Map is serialized in VAST as a List<Struct<K, V>>
 
 
+class ValidateInList:
+    def __init__(self, *args):
+        self.candidates = [x.strip() for x in args]
+
+    def __call__(self, x):
+        x = x.strip()
+        if x not in self.candidates:
+            raise Exception(f'{x} is not in {self.candidates}')
+        return x
+
+    def __getitem__(self, x):
+        return self
+
+
+_int_coding = (lambda x: str(int(x)), lambda x: int(x))
+_prop_coding = {
+        "message.timestamp.type": ValidateInList('CreateTime', 'LogAppendTime'),
+        "retention.ms": _int_coding,
+        "message.timestamp.after.max.ms": _int_coding,
+        "message.timestamp.before.max.ms": _int_coding
+        }
+
+
 def _encode_table_props(**kwargs):
     if all([v is None for v in kwargs.values()]):
         return None
     else:
-        kwargs = {k.replate('_', '.'): v for k, v in kwargs.items()}
-        return "$".join([f"{k}={v}" for k, v in kwargs.items()])
+        pairs = [(k.replace("_", ".").strip(), v) for k, v in kwargs.items() if v is not None]
+        return "$".join([f"{k}={_prop_coding[k][0](v)}" for k, v in pairs])
 
 
 def _decode_table_props(s):
     if s.strip() == '':
         return {}
-    else:
-        return {x[0].replace('.', '_'): int(x[1]) for x in [y.split('=') for y in s.strip().split("$")]}
+    triplets = [(x.strip(), x.strip().replace(".", "_"), y.strip()) for x, y in [z.split('=') for z in s.strip().split("$")]]
+    return {y: _prop_coding[x][1](z) for x, y, z in triplets if z != ''}
 
 
 TableInfo = namedtuple('TableInfo', 'name properties handle num_rows size_in_bytes num_partitions')
