@@ -739,6 +739,7 @@ def _encode_table_props(**kwargs):
     if all([v is None for v in kwargs.values()]):
         return None
     else:
+        kwargs = {k.replate('_', '.'): v for k, v in kwargs.items()}
         return "$".join([f"{k}={v}" for k, v in kwargs.items()])
 
 
@@ -746,7 +747,7 @@ def _decode_table_props(s):
     if s.strip() == '':
         return {}
     else:
-        return {x[0]: int(x[1]) for x in [y.split('=') for y in s.strip().split("$")]}
+        return {x[0].replace('.', '_'): int(x[1]) for x in [y.split('=') for y in s.strip().split("$")]}
 
 
 TableInfo = namedtuple('TableInfo', 'name properties handle num_rows size_in_bytes num_partitions')
