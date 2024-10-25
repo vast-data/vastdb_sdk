@@ -1067,7 +1067,7 @@ class VastdbApi:
 
     def create_table(self, bucket, schema, name, arrow_schema=None, txid=0, client_tags=[], expected_retvals=[],
                      topic_partitions=0, create_imports_table=False, use_external_row_ids_allocation=False,
-                     src_timestamp=None, retention_in_mins=None, past_threshold_ts=None, future_threshold_ts=None):
+                     message_timestamp_type=None, retention_in_mins=None, past_threshold_ts=None, future_threshold_ts=None):
         """
         Create a table, use the following request
         POST /bucket/schema/table?table HTTP/1.1
@@ -1099,7 +1099,7 @@ class VastdbApi:
             url_params['sub-table'] = IMPORTED_OBJECTS_TABLE_NAME
 
         if topic_partitions > 0:
-            table_props = _encode_table_props(src_timestamp=src_timestamp, retention_in_mins=retention_in_mins, past_threshold_ts=past_threshold_ts, future_threshold_ts=future_threshold_ts)
+            table_props = _encode_table_props(message_timestamp_type=message_timestamp_type, retention_in_mins=retention_in_mins, past_threshold_ts=past_threshold_ts, future_threshold_ts=future_threshold_ts)
             if table_props is not None:
                 url_params['table-props'] = table_props
 
@@ -1132,7 +1132,7 @@ class VastdbApi:
 
     def alter_table(self, bucket, schema, name, txid=0, client_tags=[], table_properties="",
                     new_name="", expected_retvals=[],
-                    src_timestamp=None, retention_in_mins=None, past_threshold_ts=None, future_threshold_ts=None):
+                    message_timestamp_type=None, retention_in_mins=None, past_threshold_ts=None, future_threshold_ts=None):
         """
         PUT /mybucket/myschema/mytable?table HTTP/1.1
         Content-Length: ContentLength
@@ -1144,8 +1144,8 @@ class VastdbApi:
         """
         builder = flatbuffers.Builder(1024)
 
-        if src_timestamp is not None or retention_in_mins is not None or past_threshold_ts is not None or future_threshold_ts is not None:
-            table_properties = _encode_table_props(src_timestamp=src_timestamp, retention_in_mins=retention_in_mins, past_threshold_ts=past_threshold_ts, future_threshold_ts=future_threshold_ts)
+        if message_timestamp_type is not None or retention_in_mins is not None or past_threshold_ts is not None or future_threshold_ts is not None:
+            table_properties = _encode_table_props(message_timestamp_type=message_timestamp_type, retention_in_mins=retention_in_mins, past_threshold_ts=past_threshold_ts, future_threshold_ts=future_threshold_ts)
             if table_properties is None:
                 table_properties = ""
 
