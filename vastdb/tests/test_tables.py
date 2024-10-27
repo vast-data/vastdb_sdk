@@ -895,11 +895,15 @@ def test_external_row_id(session, clean_bucket_name):
         s = tx.bucket(clean_bucket_name).create_schema('s')
 
         t = s.create_table('t1', pa.schema(columns))
-        assert not t.get_stats().is_external_rowid_alloc
+        t = s.table('t1')
+        assert not t.stats.is_external_rowid_alloc
         t.insert(pa.record_batch(schema=pa.schema(columns), data=[[0], [1.5], ['ABC']]))
-        assert t.get_stats().is_external_rowid_alloc
+        t = s.table('t1')
+        assert t.stats.is_external_rowid_alloc
 
         t = s.create_table('t2', pa.schema(columns))
-        assert not t.get_stats().is_external_rowid_alloc
+        t = s.table('t2')
+        assert not t.stats.is_external_rowid_alloc
         t.insert(pa.record_batch(schema=pa.schema(columns[1:]), data=[[1.5], ['ABC']]))
-        assert not t.get_stats().is_external_rowid_alloc
+        t = s.table('t2')
+        assert not t.stats.is_external_rowid_alloc
