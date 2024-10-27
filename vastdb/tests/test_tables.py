@@ -882,3 +882,24 @@ def test_starts_with(session, clean_bucket_name):
 
         res = table.select(predicate=(table['s'].startswith('ab')) & (table['i'] > 3)).read_all()
         assert res.to_pydict() == {'i': [4], 's': ['abd']}
+
+
+def test_external_row_id(session, clean_bucket_name):
+    columns = [
+        ('vastdb_rowid', pa.int64()),
+        ('x', pa.float32()),
+        ('y', pa.utf8()),
+    ]
+
+    with session.transaction() as tx:
+        s = tx.bucket(clean_bucket_name).create_schema('s')
+
+        t = s.create_table('t1', pa.schema(columns))
+        assert not t.get_stats().is_external_rowid_alloc
+        t.insert(pa.record_batch(schema=pa.schema(columns), data=[[0], [1.5], ['ABC']]))
+        assert t.get_stats().is_external_rowid_alloc
+
+        t = s.create_table('t2', pa.schema(columns))
+        assert not t.get_stats().is_external_rowid_alloc
+        t.insert(pa.record_batch(schema=pa.schema(columns[1:]), data=[[1.5], ['ABC']]))
+        assert not t.get_stats().is_external_rowid_alloc
