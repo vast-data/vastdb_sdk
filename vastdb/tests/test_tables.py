@@ -452,8 +452,8 @@ def test_filters(session, clean_bucket_name):
             assert select((t['a'] > 111) | (t['a'] < 333) | (t['a'] == 777)) == expected.filter((pc.field('a') > 111) | (pc.field('a') < 333) | (pc.field('a') == 777))
 
             assert select(t['s'].isnull()) == expected.filter(pc.field('s').is_null())
-            assert select((t['s'].isnull()) | (t['s'] == 'bb'))  == expected.filter((pc.field('s').is_null()) | (pc.field('s') == 'bb'))
-            assert select((t['s'].isnull()) & (t['b'] == 3.5))  == expected.filter((pc.field('s').is_null()) & (pc.field('b') == 3.5))
+            assert select((t['s'].isnull()) | (t['s'] == 'bb')) == expected.filter((pc.field('s').is_null()) | (pc.field('s') == 'bb'))
+            assert select((t['s'].isnull()) & (t['b'] == 3.5)) == expected.filter((pc.field('s').is_null()) & (pc.field('b') == 3.5))
 
             assert select(~t['s'].isnull()) == expected.filter(~pc.field('s').is_null())
             assert select(t['s'].contains('b')) == expected.filter(pc.field('s') == 'bb')
