@@ -112,7 +112,6 @@ class Table:
     name: str
     schema: "schema.Schema"
     handle: int
-    stats: TableStats = field(init=False, compare=False, repr=False)
     arrow_schema: pa.Schema = field(init=False, compare=False, repr=False)
     _ibis_table: ibis.Schema = field(init=False, compare=False, repr=False)
     _imports_table: bool
@@ -120,7 +119,6 @@ class Table:
     def __post_init__(self):
         """Also, load columns' metadata."""
         self.arrow_schema = self.columns()
-        self.stats = self.get_stats()
 
         self._table_path = f'{self.schema.bucket.name}/{self.schema.name}/{self.name}'
         self._ibis_table = ibis.table(ibis.Schema.from_pyarrow(self.arrow_schema), self._table_path)
@@ -139,6 +137,11 @@ class Table:
     def bucket(self):
         """Return bucket."""
         return self.schema.bucket
+
+    @property
+    def stats(self):
+        """Fetch table's statistics from server."""
+        return self.get_stats()
 
     def columns(self) -> pa.Schema:
         """Return columns' metadata."""
