@@ -7,6 +7,7 @@ from itertools import cycle
 import pytest
 
 import vastdb.errors
+from vastdb._internal import UnsupportedServer
 
 log = logging.getLogger(__name__)
 
@@ -32,13 +33,14 @@ def test_bad_endpoint(session):
 def test_version_extraction():
     # A list of version and expected version parsed by API
     TEST_CASES = [
-            (None, None),                                   # vast server without version in header
-            ("5", None),                                    # major
-            ("5.2", None),                                  # major.minor
-            ("5.2.0", None),                                # major.minor.patch
-            ("5.2.0.10", (5, 2, 0, 10)),                    # major.minor.patch.protocol
-            ("5.2.0.10 some other things", None),           # suffix
-            ("5.2.0.10.20", None),                          # extra version
+            ("nginx", UnsupportedServer),                               # non-vast server
+            ("vast", NotImplementedError),                              # vast server without version in header
+            ("vast 5", NotImplementedError),                            # major
+            ("vast 5.2", NotImplementedError),                          # major.minor
+            ("vast 5.2.0", NotImplementedError),                        # major.minor.patch
+            ("vast 5.2.0.10", (5, 2, 0, 10)),                           # major.minor.patch.protocol
+            ("vast 5.2.0.10 some other things", NotImplementedError),   # suffix
+            ("vast 5.2.0.10.20", NotImplementedError),                  # extra version
     ]
 
     # Mock OPTIONS handle that cycles through the test cases response
@@ -53,8 +55,7 @@ def test_version_extraction():
             self.end_headers()
 
         def version_string(self):
-            version = next(self.versions_iterator)[0]
-            return f"vast {version}" if version else "vast"
+            return next(self.versions_iterator)[0]
 
         def log_message(self, format, *args):
             log.debug(format, *args)
@@ -74,7 +75,10 @@ def test_version_extraction():
 
     try:
         for _, expected in TEST_CASES:
-            with (pytest.raises(NotImplementedError) if expected is None else contextlib.nullcontext()):
+            manager = contextlib.nullcontext()
+            if isinstance(expected, type) and issubclass(expected, NotImplementedError):
+                manager = pytest.raises(expected)
+            with manager:
                 s = vastdb.connect(endpoint=f"http://localhost:{httpd.server_port}", access="abc", secret="abc")
                 assert s.api.vast_version == expected
     finally:

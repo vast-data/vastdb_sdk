@@ -814,7 +814,13 @@ def _backoff_giveup(exc: Exception) -> bool:
     return True  # give up in case of other exceptions
 
 
+class UnsupportedServer(NotImplementedError):
+    """Raised when the response comes back from non-VAST DB server."""
+    pass
+
+
 class VastdbApi:
+    VAST_SERVER_PREFIX = 'vast'
     # we expect the vast version to be <major>.<minor>.<patch>.<protocol>
     VAST_VERSION_REGEX = re.compile(r'^vast (\d+\.\d+\.\d+\.\d+)$')
 
@@ -869,6 +875,9 @@ class VastdbApi:
         if server_header is None:
             _logger.error("Response doesn't contain 'Server' header")
         else:
+            if not server_header.startswith(self.VAST_SERVER_PREFIX):
+                raise UnsupportedServer(f'{self.url} is not a VAST DB server endpoint ("{server_header}")')
+
             if m := self.VAST_VERSION_REGEX.match(server_header):
                 self.vast_version: Tuple[int, ...] = tuple(int(v) for v in m.group(1).split("."))
                 return
