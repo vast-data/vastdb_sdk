@@ -67,7 +67,14 @@ class ObjectDetails(object):
             return self._tab.Get(flatbuffers.number_types.Uint64Flags, o + self._tab.Pos)
         return 0
 
-def Start(builder): builder.StartObject(6)
+    # ObjectDetails
+    def SortingKeyEnabled(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(16))
+        if o != 0:
+            return bool(self._tab.Get(flatbuffers.number_types.BoolFlags, o + self._tab.Pos))
+        return False
+
+def Start(builder): builder.StartObject(7)
 def ObjectDetailsStart(builder):
     """This method is deprecated. Please switch to Start."""
     return Start(builder)
@@ -95,6 +102,10 @@ def AddNumPartitions(builder, numPartitions): builder.PrependUint64Slot(5, numPa
 def ObjectDetailsAddNumPartitions(builder, numPartitions):
     """This method is deprecated. Please switch to AddNumPartitions."""
     return AddNumPartitions(builder, numPartitions)
+def AddSortingKeyEnabled(builder, sortingKeyEnabled): builder.PrependBoolSlot(6, sortingKeyEnabled, 0)
+def ObjectDetailsAddSortingKeyEnabled(builder, sortingKeyEnabled):
+    """This method is deprecated. Please switch to AddSortingKeyEnabled."""
+    return AddSortingKeyEnabled(builder, sortingKeyEnabled)
 def End(builder): return builder.EndObject()
 def ObjectDetailsEnd(builder):
     """This method is deprecated. Please switch to End."""
