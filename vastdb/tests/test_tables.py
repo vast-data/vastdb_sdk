@@ -903,3 +903,63 @@ def test_external_row_id(session, clean_bucket_name):
         assert not t.stats.is_external_rowid_alloc
         t.insert(pa.record_batch(schema=pa.schema(columns[1:]), data=[[1.5], ['ABC']]))
         assert not t.stats.is_external_rowid_alloc
+
+
+def test_multiple_contains_clauses(session, clean_bucket_name):
+    columns = pa.schema([
+        ('theint', pa.int32()),
+        ('thestring', pa.string()),
+        ('theotherstring', pa.string()),
+    ])
+
+    expected = pa.table(schema=columns, data=[
+        [111, 222, 333, 444, 555],
+        ['abc', 'efg', 'hij', 'klm', 'nop'],
+        ['abcd', 'bcde', 'cdef', 'defg', 'efgh'],
+    ])
+    with (prepare_data(session, clean_bucket_name, 's', 't', expected) as t):
+        failed_preds = [
+            lambda t: (t["thestring"].contains("b") | t["theotherstring"].contains("a")),
+            lambda t: (~t["thestring"].contains("a")),
+        ]
+
+        assert t.select(predicate=t["thestring"].contains("b")).read_all() == expected.filter(pc.match_substring(expected["thestring"], "b"))
+        assert (t.select(predicate=(t["thestring"].contains("b")) & (t["theotherstring"].startswith("a"))).read_all() ==
+                expected.filter(pc.and_(
+                    pc.match_substring(expected["thestring"], "b"),
+                    pc.starts_with(expected["thestring"], "a")
+                    )))
+        assert (t.select(predicate=(t["thestring"].contains("b") & (t["thestring"].contains("y")))).read_all() ==
+        t.select(predicate=t["thestring"].contains("y") & (t["thestring"].contains("b"))).read_all())
+
+        assert (t.select(predicate=(t["thestring"].contains("o") & (t["theint"] > 500))).read_all() ==
+        pc.filter(expected, pc.and_(
+            pc.match_substring(expected["thestring"], "o"),
+            pc.greater(expected["theint"], 500)
+        )))
+        assert (t.select(predicate=((t["thestring"].contains("bc")) | (t["thestring"].contains("kl")) |
+                                   (t["thestring"] == "hi") | (t["thestring"].startswith("e")))).read_all() ==
+                expected.filter(
+                    pc.or_(pc.or_(pc.match_substring(expected["thestring"], "bc"),
+                                  pc.match_substring(expected["thestring"], "kl")),
+                            pc.or_(pc.equal(expected["thestring"], "hi"),
+                                   pc.starts_with(expected["thestring"], "e"))
+                )))
+        assert (t.select(predicate=((t["thestring"].contains("abc")) | (t["thestring"].contains("xyz")) |
+                                    (t["thestring"].startswith("z")) | (t["thestring"].isnull()))).read_all() ==
+                pc.filter(expected,
+                    pc.or_(pc.or_(pc.match_substring(expected["thestring"], "abc"),
+                                  pc.match_substring(expected["thestring"], "xyz")),
+                           pc.or_(pc.starts_with(expected["thestring"], "z"),
+                                  pc.is_null(expected["thestring"]))
+                    )))
+        assert (t.select(predicate=((t["thestring"].contains("k")) & (t["theotherstring"].contains("h")) &
+                                    (t["theint"] > 500))).read_all() ==
+                         pc.filter(expected, pc.and_(
+                             pc.and_(pc.match_substring(expected["thestring"], "k"),
+                             pc.match_substring(expected["theotherstring"], "h")),
+                             pc.greater(expected["theint"], 500)
+                         )))
+        for pred in failed_preds:
+            with pytest.raises(NotImplementedError):
+                t.select(predicate=pred(t)).read_all()
