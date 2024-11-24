@@ -105,6 +105,7 @@ upload_to_pypi:
 
 
 # Keep latest image built from 'dev' branch - to allow smoke testing not-yet-released SDK versions
+# '-latest-' is a special substring, that prevents Docker image deletion for 1 year
 keep_latest_dev:
   stage: deploy
   interruptible: true
@@ -131,6 +132,7 @@ keep_latest_dev:
 
 
 # Keep images of released SDK versions available (so we can run them from Orion's CI on demand)
+# '-latest-' is a special substring, that prevents Docker image deletion for 1 year
 keep_latest_release:
   stage: deploy
   interruptible: true
