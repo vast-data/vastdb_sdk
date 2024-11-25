@@ -58,6 +58,10 @@ import vast_flatbuf.org.apache.arrow.computeir.flatbuf.Source as fb_source
 import vast_flatbuf.org.apache.arrow.computeir.flatbuf.StringLiteral as fb_string_lit
 import vast_flatbuf.org.apache.arrow.computeir.flatbuf.TimeLiteral as fb_time_lit
 import vast_flatbuf.org.apache.arrow.computeir.flatbuf.TimestampLiteral as fb_timestamp_lit
+import vast_flatbuf.org.apache.arrow.computeir.flatbuf.UInt8Literal as fb_uint8_lit
+import vast_flatbuf.org.apache.arrow.computeir.flatbuf.UInt16Literal as fb_uint16_lit
+import vast_flatbuf.org.apache.arrow.computeir.flatbuf.UInt32Literal as fb_uint32_lit
+import vast_flatbuf.org.apache.arrow.computeir.flatbuf.UInt64Literal as fb_uint64_lit
 import vast_flatbuf.org.apache.arrow.flatbuf.Binary as fb_binary
 import vast_flatbuf.org.apache.arrow.flatbuf.Bool as fb_bool
 import vast_flatbuf.org.apache.arrow.flatbuf.Date as fb_date
@@ -341,50 +345,57 @@ class Predicate:
         fb_expression.AddImpl(self.builder, offset_call)
         return fb_expression.End(self.builder)
 
+    # see https://github.com/apache/arrow/blob/main/format/Schema.fbs
+    # https://github.com/apache/arrow/blob/apache-arrow-7.0.0/experimental/computeir/Expression.fbs
+    # https://github.com/apache/arrow/blob/apache-arrow-7.0.0/experimental/computeir/Literal.fbs
     def build_literal(self, field: pa.Field, value):
         literal_type: Any
 
-        if field.type.equals(pa.int64()):
-            literal_type = fb_int64_lit
-            literal_impl = LiteralImpl.Int64Literal
+        if field.type.equals(pa.int64()) or field.type.equals(pa.uint64()):
+            is_signed = field.type.equals(pa.int64())
+            literal_type = fb_int64_lit if is_signed else fb_uint64_lit
+            literal_impl = LiteralImpl.Int64Literal if is_signed else LiteralImpl.UInt64Literal
 
             field_type_type = Type.Int
             fb_int.Start(self.builder)
             fb_int.AddBitWidth(self.builder, field.type.bit_width)
-            fb_int.AddIsSigned(self.builder, True)
+            fb_int.AddIsSigned(self.builder, is_signed)
             field_type = fb_int.End(self.builder)
 
             value = int(value)
-        elif field.type.equals(pa.int32()):
-            literal_type = fb_int32_lit
-            literal_impl = LiteralImpl.Int32Literal
+        elif field.type.equals(pa.int32()) or field.type.equals(pa.uint32()):
+            is_signed = field.type.equals(pa.int32())
+            literal_type = fb_int32_lit if is_signed else fb_uint32_lit
+            literal_impl = LiteralImpl.Int32Literal if is_signed else LiteralImpl.UInt32Literal
 
             field_type_type = Type.Int
             fb_int.Start(self.builder)
             fb_int.AddBitWidth(self.builder, field.type.bit_width)
-            fb_int.AddIsSigned(self.builder, True)
+            fb_int.AddIsSigned(self.builder, is_signed)
             field_type = fb_int.End(self.builder)
 
             value = int(value)
-        elif field.type.equals(pa.int16()):
-            literal_type = fb_int16_lit
-            literal_impl = LiteralImpl.Int16Literal
+        elif field.type.equals(pa.int16()) or field.type.equals(pa.uint16()):
+            is_signed = field.type.equals(pa.int16())
+            literal_type = fb_int16_lit if is_signed else fb_uint16_lit
+            literal_impl = LiteralImpl.Int16Literal if is_signed else LiteralImpl.UInt16Literal
 
             field_type_type = Type.Int
             fb_int.Start(self.builder)
             fb_int.AddBitWidth(self.builder, field.type.bit_width)
-            fb_int.AddIsSigned(self.builder, True)
+            fb_int.AddIsSigned(self.builder, is_signed)
             field_type = fb_int.End(self.builder)
 
             value = int(value)
-        elif field.type.equals(pa.int8()):
-            literal_type = fb_int8_lit
-            literal_impl = LiteralImpl.Int8Literal
+        elif field.type.equals(pa.int8()) or field.type.equals(pa.uint8()):
+            is_signed = field.type.equals(pa.int8())
+            literal_type = fb_int8_lit if is_signed else fb_uint8_lit
+            literal_impl = LiteralImpl.Int8Literal if is_signed else LiteralImpl.UInt8Literal
 
             field_type_type = Type.Int
             fb_int.Start(self.builder)
             fb_int.AddBitWidth(self.builder, field.type.bit_width)
-            fb_int.AddIsSigned(self.builder, True)
+            fb_int.AddIsSigned(self.builder, is_signed)
             field_type = fb_int.End(self.builder)
 
             value = int(value)

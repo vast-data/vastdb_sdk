@@ -388,6 +388,33 @@ def test_types(session, clean_bucket_name):
             assert select(t['ts9'] == ts_literal) == expected.filter(pc.field('ts9') == ts_literal)
 
 
+def test_unsigned_filters(session, clean_bucket_name):
+    columns = pa.schema([
+        ('a', pa.uint8()),
+        ('b', pa.uint16()),
+        ('c', pa.uint32()),
+        ('d', pa.uint64()),
+    ])
+
+    expected = pa.table(schema=columns, data=[
+        [1, 2, 3],
+        [11, 22, 33],
+        [111, 222, 333],
+        [1111, 2222, 3333],
+    ])
+
+    with prepare_data(session, clean_bucket_name, 's', 't', expected) as table:
+        def select(predicate):
+            return table.select(predicate=predicate).read_all()
+
+        assert select(True) == expected
+        for t in [table, ibis._]:
+            assert select(t['a'] > 2) == expected.filter(pc.field('a') > 2)
+            assert select(t['b'] > 22) == expected.filter(pc.field('b') > 22)
+            assert select(t['c'] > 222) == expected.filter(pc.field('c') > 222)
+            assert select(t['d'] > 2222) == expected.filter(pc.field('d') > 2222)
+
+
 def test_filters(session, clean_bucket_name):
     columns = pa.schema([
         ('a', pa.int32()),
