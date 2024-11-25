@@ -13,6 +13,7 @@ unique_build=${unique_build%-py3-none-any.whl}
 echo "unique_build = $unique_build"
 popd
 
+# used to generate https://vastdb-sdk.readthedocs.io/
 pushd docs
 pip3 install -r requirements.txt
 rm -rf build/
