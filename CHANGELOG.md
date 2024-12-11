@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.3.4] (2024-12-11)
+[1.3.4]: https://github.com/vast-data/vastdb_sdk/compare/v1.3.3...v1.3.4
+
+### Added
+ - Support predicate pushdown on unsigned integers
+
+
 ## [1.3.3] (2024-11-18)
 [1.3.3]: https://github.com/vast-data/vastdb_sdk/compare/v1.3.2...v1.3.3
 
