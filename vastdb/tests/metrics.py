@@ -29,7 +29,7 @@ class Table:
         self.conn = conn
         self.name = name
         columns = ", ".join(
-            f"{f.name} {_MAP_SQLITE_TYPES[f.type]}"
+            f"{f.name} {_MAP_SQLITE_TYPES[f.type]}"  # type: ignore
             for f in self.fields
         )
         cmd = f"CREATE TABLE {self.name} ({columns})"
