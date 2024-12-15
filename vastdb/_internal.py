@@ -119,6 +119,8 @@ TABULAR_INVALID_ROW_ID = 0xFFFFFFFFFFFF  # (1<<48)-1
 ESTORE_INVALID_EHANDLE = UINT64_MAX
 IMPORTED_OBJECTS_TABLE_NAME = "vastdb-imported-objects"
 
+KAFKA_TOPICS_SCHEMA_NAME = 'kafka_topics'
+
 """
 S3 Tabular API
 """
@@ -787,15 +789,14 @@ def _decode_table_props(s):
 TableInfo = namedtuple('TableInfo', 'name properties handle num_rows size_in_bytes num_partitions')
 
 
-def _parse_table_info(obj):
+def _parse_table_info(obj, parse_properties):
     name = obj.Name().decode()
     properties = obj.Properties().decode()
     handle = obj.Handle().decode()
     num_rows = obj.NumRows()
     used_bytes = obj.SizeInBytes()
     num_partitions = obj.NumPartitions()
-    if num_partitions != 0:
-        properties = _decode_table_props(properties)
+    properties = parse_properties(properties)
     return TableInfo(name, properties, handle, num_rows, used_bytes, num_partitions)
 
 
@@ -1109,9 +1110,29 @@ class VastdbApi:
 
         return snapshots, is_truncated, marker
 
-    def create_table(self, bucket, schema, name, arrow_schema=None, txid=0, client_tags=[], expected_retvals=[],
-                     topic_partitions=0, create_imports_table=False, use_external_row_ids_allocation=False,
-                     message_timestamp_type=None, retention_ms=None, message_timestamp_after_max_ms=None, message_timestamp_before_max_ms=None):
+    def create_table(self, bucket, schema, name, arrow_schema=None,
+                     txid=0, client_tags=[], expected_retvals=[],
+                     create_imports_table=False, use_external_row_ids_allocation=False, table_props=None):
+        self._create_table_internal(bucket=bucket, schema=schema, name=name, arrow_schema=arrow_schema,
+                                    txid=txid, client_tags=client_tags, expected_retvals=expected_retvals,
+                                    create_imports_table=create_imports_table, use_external_row_ids_allocation=use_external_row_ids_allocation,
+                                    table_props=table_props)
+
+    def create_topic(self, bucket, name, topic_partitions, expected_retvals=[],
+                     message_timestamp_type=None, retention_ms=None, message_timestamp_after_max_ms=None,
+                     message_timestamp_before_max_ms=None):
+        table_props = _encode_table_props(message_timestamp_type=message_timestamp_type,
+                                          retention_ms=retention_ms,
+                                          message_timestamp_after_max_ms=message_timestamp_after_max_ms,
+                                          message_timestamp_before_max_ms=message_timestamp_before_max_ms)
+
+        self._create_table_internal(bucket=bucket, schema=KAFKA_TOPICS_SCHEMA_NAME, name=name, arrow_schema=None,
+                                    expected_retvals=expected_retvals, topic_partitions=topic_partitions,
+                                    table_props=table_props)
+
+    def _create_table_internal(self, bucket, schema, name, arrow_schema=None,
+                               txid=0, client_tags=[], expected_retvals=[], topic_partitions=0,
+                               create_imports_table=False, use_external_row_ids_allocation=False, table_props=None):
         """
         Create a table, use the following request
         POST /bucket/schema/table?table HTTP/1.1
@@ -1142,10 +1163,8 @@ class VastdbApi:
         if create_imports_table:
             url_params['sub-table'] = IMPORTED_OBJECTS_TABLE_NAME
 
-        if topic_partitions > 0:
-            table_props = _encode_table_props(message_timestamp_type=message_timestamp_type, retention_ms=retention_ms, message_timestamp_after_max_ms=message_timestamp_after_max_ms, message_timestamp_before_max_ms=message_timestamp_before_max_ms)
-            if table_props is not None:
-                url_params['table-props'] = table_props
+        if table_props is not None:
+            url_params['table-props'] = table_props
 
         self._request(
             method="POST",
@@ -1174,9 +1193,22 @@ class VastdbApi:
         endpoints = [self.url]  # we cannot replace the host by a VIP address in HTTPS-based URLs
         return TableStatsResult(num_rows, size_in_bytes, is_external_rowid_alloc, tuple(endpoints))
 
-    def alter_table(self, bucket, schema, name, txid=0, client_tags=[], table_properties="",
+    def alter_topic(self, bucket, name,
                     new_name="", expected_retvals=[],
-                    message_timestamp_type=None, retention_ms=None, message_timestamp_after_max_ms=None, message_timestamp_before_max_ms=None):
+                    message_timestamp_type=None, retention_ms=None, message_timestamp_after_max_ms=None,
+                    message_timestamp_before_max_ms=None):
+        table_properties = _encode_table_props(message_timestamp_type=message_timestamp_type,
+                                               retention_ms=retention_ms,
+                                               message_timestamp_after_max_ms=message_timestamp_after_max_ms,
+                                               message_timestamp_before_max_ms=message_timestamp_before_max_ms)
+        if table_properties is None:
+            table_properties = ""
+
+        self.alter_table(bucket=bucket, schema=KAFKA_TOPICS_SCHEMA_NAME, name=name,
+                         table_properties=table_properties, expected_retvals=expected_retvals)
+
+    def alter_table(self, bucket, schema, name, txid=0, client_tags=[], table_properties="",
+                    new_name="", expected_retvals=[]):
         """
         PUT /mybucket/myschema/mytable?table HTTP/1.1
         Content-Length: ContentLength
@@ -1188,10 +1220,8 @@ class VastdbApi:
         """
         builder = flatbuffers.Builder(1024)
 
-        if message_timestamp_type is not None or retention_ms is not None or message_timestamp_after_max_ms is not None or message_timestamp_before_max_ms is not None:
-            table_properties = _encode_table_props(message_timestamp_type=message_timestamp_type, retention_ms=retention_ms, message_timestamp_after_max_ms=message_timestamp_after_max_ms, message_timestamp_before_max_ms=message_timestamp_before_max_ms)
-            if table_properties is None:
-                table_properties = ""
+        if table_properties is None:
+            table_properties = ""
 
         properties = builder.CreateString(table_properties)
         tabular_alter_table.Start(builder)
@@ -1211,6 +1241,10 @@ class VastdbApi:
             url=self._url(bucket=bucket, schema=schema, table=name, command="table", url_params=url_params),
             data=alter_table_req, headers=headers)
 
+    def drop_topic(self, bucket, name, expected_retvals=[]):
+        self.drop_table(bucket=bucket, schema=KAFKA_TOPICS_SCHEMA_NAME, name=name,
+                        expected_retvals=expected_retvals)
+
     def drop_table(self, bucket, schema, name, txid=0, client_tags=[], expected_retvals=[], remove_imports_table=False):
         """
         DELETE /mybucket/schema_path/mytable?table HTTP/1.1
@@ -1227,8 +1261,26 @@ class VastdbApi:
             url=self._url(bucket=bucket, schema=schema, table=name, command="table", url_params=url_params),
             headers=headers)
 
+    def list_topics(self, bucket, max_keys=1000, next_key=0, name_prefix="",
+                    exact_match=False, expected_retvals=[], include_list_stats=False, count_only=False):
+        return self._list_tables_internal(bucket=bucket, schema=KAFKA_TOPICS_SCHEMA_NAME,
+                                          parse_properties=_decode_table_props, max_keys=max_keys,
+                                          next_key=next_key, name_prefix=name_prefix, exact_match=exact_match,
+                                          expected_retvals=expected_retvals,
+                                          include_list_stats=include_list_stats, count_only=count_only)
+
     def list_tables(self, bucket, schema, txid=0, client_tags=[], max_keys=1000, next_key=0, name_prefix="",
                     exact_match=False, expected_retvals=[], include_list_stats=False, count_only=False):
+        def parse_properties(x):
+            return x
+        return self._list_tables_internal(bucket=bucket, schema=schema, txid=txid, client_tags=client_tags,
+                                          parse_properties=parse_properties, max_keys=max_keys, next_key=next_key,
+                                          name_prefix=name_prefix, exact_match=exact_match,
+                                          expected_retvals=expected_retvals,
+                                          include_list_stats=include_list_stats, count_only=count_only)
+
+    def _list_tables_internal(self, bucket, schema, parse_properties, txid=0, client_tags=[], max_keys=1000, next_key=0, name_prefix="",
+                              exact_match=False, expected_retvals=[], include_list_stats=False, count_only=False):
         """
         GET /mybucket/schema_path?table HTTP/1.1
         tabular-txid: TransactionId
@@ -1265,7 +1317,7 @@ class VastdbApi:
         tables_length = lists.TablesLength()
         count = int(res_headers['tabular-list-count']) if 'tabular-list-count' in res_headers else tables_length
         for i in range(tables_length):
-            tables.append(_parse_table_info(lists.Tables(i)))
+            tables.append(_parse_table_info(lists.Tables(i), parse_properties))
 
         return bucket_name, schema_name, tables, next_key, is_truncated, count
 
@@ -1837,7 +1889,7 @@ class VastdbApi:
             raise ValueError(f'bucket: {bucket} did not start from {bucket_name}')
         projections_length = lists.ProjectionsLength()
         for i in range(projections_length):
-            projections.append(_parse_table_info(lists.Projections(i)))
+            projections.append(_parse_table_info(lists.Projections(i), lambda x: x))
 
         return bucket_name, schema_name, table_name, projections, next_key, is_truncated, count
 
