@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.3.5] (2024-12-16)
+[1.3.5]: https://github.com/vast-data/vastdb_sdk/compare/v1.3.4...v1.3.5
+
+### Added
+ - Separated Kafka Topic specific APIs
+
 ## [1.3.4] (2024-12-11)
 [1.3.4]: https://github.com/vast-data/vastdb_sdk/compare/v1.3.3...v1.3.4
 
