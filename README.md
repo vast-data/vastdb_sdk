@@ -78,6 +78,8 @@ with session.transaction() as tx:
 
 For configuration examples, see [here](docs/config.md).
 
+The list of supported data types can be found [here](docs/types.md).
+
 Note: the transaction must be remain open while the returned [pyarrow.RecordBatchReader](https://arrow.apache.org/docs/python/generated/pyarrow.RecordBatchReader.html) generator is being used.
 
 ## Use Cases
