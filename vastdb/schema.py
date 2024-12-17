@@ -122,8 +122,11 @@ class Schema:
             if not is_truncated:
                 break
 
-    def tables(self, table_name=None) -> List["Table"]:
-        """List all tables under this schema."""
+    def tables(self, table_name: str = "") -> List["Table"]:
+        """List all tables under this schema if `table_name` is empty.
+
+        Otherwise, list only the specific table (if exists).
+        """
         return [
             _parse_table_info(table_info, self)
             for table_info in self._iter_tables(table_name=table_name)

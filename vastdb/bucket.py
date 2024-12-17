@@ -40,7 +40,7 @@ class Bucket:
         """List bucket's schemas."""
         return self._root_schema.schemas(batch_size=batch_size)
 
-    def snapshot(self, name, fail_if_missing=True) -> Optional["Bucket"]:
+    def snapshot(self, name: str, fail_if_missing=True) -> Optional["Bucket"]:
         """Get snapshot by name (if exists)."""
         snapshots, _is_truncated, _next_key = \
             self.tx._rpc.api.list_snapshots(bucket=self.name, name_prefix=name, max_keys=1)

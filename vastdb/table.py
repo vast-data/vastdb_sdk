@@ -168,8 +168,11 @@ class Table:
         log.debug("Found projection: %s", projs[0])
         return projs[0]
 
-    def projections(self, projection_name=None) -> Iterable["Projection"]:
-        """List all semi-sorted projections of this table."""
+    def projections(self, projection_name: str = "") -> Iterable["Projection"]:
+        """List all semi-sorted projections of this table if `projection_name` is empty.
+
+        Otherwise, list only the specific projection (if exists).
+        """
         if self._imports_table:
             raise errors.NotSupportedCommand(self.bucket.name, self.schema.name, self.name)
         projections = []
@@ -523,7 +526,7 @@ class Table:
         self.tx._rpc.api.drop_table(self.bucket.name, self.schema.name, self.name, txid=self.tx.txid, remove_imports_table=self._imports_table)
         log.info("Dropped table: %s", self.name)
 
-    def rename(self, new_name) -> None:
+    def rename(self, new_name: str) -> None:
         """Rename this table."""
         if self._imports_table:
             raise errors.NotSupportedCommand(self.bucket.name, self.schema.name, self.name)
@@ -582,7 +585,7 @@ class Table:
         self.tx._rpc.features.check_imports_table()
         return Table(name=self.name, schema=self.schema, handle=int(self.handle), _imports_table=True)
 
-    def __getitem__(self, col_name):
+    def __getitem__(self, col_name: str):
         """Allow constructing ibis-like column expressions from this table.
 
         It is useful for constructing expressions for predicate pushdown in `Table.select()` method.
@@ -630,7 +633,7 @@ class Projection:
         self.arrow_schema = pa.schema([(col[0], col[1]) for col in columns])
         return self.arrow_schema
 
-    def rename(self, new_name) -> None:
+    def rename(self, new_name: str) -> None:
         """Rename this projection."""
         self.tx._rpc.api.alter_projection(self.bucket.name, self.schema.name,
                                                 self.table.name, self.name, txid=self.tx.txid, new_name=new_name)
