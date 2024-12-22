@@ -1205,7 +1205,7 @@ class VastdbApi:
             table_properties = ""
 
         self.alter_table(bucket=bucket, schema=KAFKA_TOPICS_SCHEMA_NAME, name=name,
-                         table_properties=table_properties, expected_retvals=expected_retvals)
+                         table_properties=table_properties, new_name=new_name, expected_retvals=expected_retvals)
 
     def alter_table(self, bucket, schema, name, txid=0, client_tags=[], table_properties="",
                     new_name="", expected_retvals=[]):
