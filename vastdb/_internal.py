@@ -1171,6 +1171,9 @@ class VastdbApi:
             url=self._url(bucket=bucket, schema=schema, table=name, command="table", url_params=url_params),
             data=serialized_schema, headers=headers)
 
+    def get_topic_stats(self, bucket, name, expected_retvals=[]):
+        return self.get_table_stats(bucket=bucket, schema=KAFKA_TOPICS_SCHEMA_NAME, name=name, expected_retvals=expected_retvals)
+
     def get_table_stats(self, bucket, schema, name, txid=0, client_tags=[], expected_retvals=[], imports_table_stats=False):
         """
         GET /mybucket/myschema/mytable?stats HTTP/1.1
