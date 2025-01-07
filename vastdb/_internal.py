@@ -238,7 +238,7 @@ class Predicate:
                         field_path.append(subfield_name)
 
                     if not isinstance(column, Field):
-                        raise NotImplementedError(self.expr)
+                        raise NotImplementedError("predicates not supported for column types ", column, "expr=", self.expr)
 
                     field_path.append(column.name)
                     field_path.reverse()  # first entry should be the top-level column name
