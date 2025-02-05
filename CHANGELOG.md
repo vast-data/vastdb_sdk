@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.3.7] (2024-12-23)
+[1.3.2]: https://github.com/vast-data/vastdb_sdk/compare/v1.3.1...v1.3.2
+
+### Fixed
+ - Fix creating kafka schema before calling create table.
+
 ## [1.3.6] (2024-12-23)
 [1.3.2]: https://github.com/vast-data/vastdb_sdk/compare/v1.3.1...v1.3.2
 
