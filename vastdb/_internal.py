@@ -3,6 +3,7 @@ import json
 import logging
 import re
 import struct
+import time
 import urllib.parse
 from collections import defaultdict, namedtuple
 from enum import Enum
@@ -1110,6 +1111,15 @@ class VastdbApi:
 
         return snapshots, is_truncated, marker
 
+    def _make_sure_schema_exists(self, bucket, schema, timeout_sec=3):
+        start_time = time.time()
+        while time.time() - start_time < timeout_sec:
+            _, schemas, _, _, _ = self.list_schemas(bucket)
+            if schema in (x[0] for x in schemas):
+                return
+            self.create_schema(bucket, schema)
+        raise Exception(f"Failed to find or create schema {schema} in {timeout_sec} seconds.")
+
     def create_table(self, bucket, schema, name, arrow_schema=None,
                      txid=0, client_tags=[], expected_retvals=[],
                      create_imports_table=False, use_external_row_ids_allocation=False, table_props=None):
@@ -1121,6 +1131,7 @@ class VastdbApi:
     def create_topic(self, bucket, name, topic_partitions, expected_retvals=[],
                      message_timestamp_type=None, retention_ms=None, message_timestamp_after_max_ms=None,
                      message_timestamp_before_max_ms=None):
+        self._make_sure_schema_exists(bucket, KAFKA_TOPICS_SCHEMA_NAME)
         table_props = _encode_table_props(message_timestamp_type=message_timestamp_type,
                                           retention_ms=retention_ms,
                                           message_timestamp_after_max_ms=message_timestamp_after_max_ms,
