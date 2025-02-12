@@ -38,75 +38,81 @@ from ibis.expr.operations.relations import Field
 from ibis.expr.operations.strings import StartsWith, StringContains
 from ibis.expr.operations.structs import StructField
 
-import vast_flatbuf.org.apache.arrow.computeir.flatbuf.BinaryLiteral as fb_binary_lit
-import vast_flatbuf.org.apache.arrow.computeir.flatbuf.BooleanLiteral as fb_bool_lit
-import vast_flatbuf.org.apache.arrow.computeir.flatbuf.Call as fb_call
-import vast_flatbuf.org.apache.arrow.computeir.flatbuf.DateLiteral as fb_date32_lit
-import vast_flatbuf.org.apache.arrow.computeir.flatbuf.DecimalLiteral as fb_decimal_lit
-import vast_flatbuf.org.apache.arrow.computeir.flatbuf.Expression as fb_expression
-import vast_flatbuf.org.apache.arrow.computeir.flatbuf.FieldIndex as fb_field_index
-import vast_flatbuf.org.apache.arrow.computeir.flatbuf.FieldRef as fb_field_ref
-import vast_flatbuf.org.apache.arrow.computeir.flatbuf.Float32Literal as fb_float32_lit
-import vast_flatbuf.org.apache.arrow.computeir.flatbuf.Float64Literal as fb_float64_lit
-import vast_flatbuf.org.apache.arrow.computeir.flatbuf.Int8Literal as fb_int8_lit
-import vast_flatbuf.org.apache.arrow.computeir.flatbuf.Int16Literal as fb_int16_lit
-import vast_flatbuf.org.apache.arrow.computeir.flatbuf.Int32Literal as fb_int32_lit
-import vast_flatbuf.org.apache.arrow.computeir.flatbuf.Int64Literal as fb_int64_lit
-import vast_flatbuf.org.apache.arrow.computeir.flatbuf.Literal as fb_literal
-import vast_flatbuf.org.apache.arrow.computeir.flatbuf.Relation as fb_relation
-import vast_flatbuf.org.apache.arrow.computeir.flatbuf.RelationImpl as rel_impl
-import vast_flatbuf.org.apache.arrow.computeir.flatbuf.Source as fb_source
-import vast_flatbuf.org.apache.arrow.computeir.flatbuf.StringLiteral as fb_string_lit
-import vast_flatbuf.org.apache.arrow.computeir.flatbuf.TimeLiteral as fb_time_lit
-import vast_flatbuf.org.apache.arrow.computeir.flatbuf.TimestampLiteral as fb_timestamp_lit
-import vast_flatbuf.org.apache.arrow.computeir.flatbuf.UInt8Literal as fb_uint8_lit
-import vast_flatbuf.org.apache.arrow.computeir.flatbuf.UInt16Literal as fb_uint16_lit
-import vast_flatbuf.org.apache.arrow.computeir.flatbuf.UInt32Literal as fb_uint32_lit
-import vast_flatbuf.org.apache.arrow.computeir.flatbuf.UInt64Literal as fb_uint64_lit
-import vast_flatbuf.org.apache.arrow.flatbuf.Binary as fb_binary
-import vast_flatbuf.org.apache.arrow.flatbuf.Bool as fb_bool
-import vast_flatbuf.org.apache.arrow.flatbuf.Date as fb_date
-import vast_flatbuf.org.apache.arrow.flatbuf.Decimal as fb_decimal
-import vast_flatbuf.org.apache.arrow.flatbuf.Field as fb_field
-import vast_flatbuf.org.apache.arrow.flatbuf.FixedSizeBinary as fb_fixed_size_binary
-import vast_flatbuf.org.apache.arrow.flatbuf.FloatingPoint as fb_floating_point
-import vast_flatbuf.org.apache.arrow.flatbuf.Int as fb_int
-import vast_flatbuf.org.apache.arrow.flatbuf.List as fb_list
-import vast_flatbuf.org.apache.arrow.flatbuf.Map as fb_map
-import vast_flatbuf.org.apache.arrow.flatbuf.Schema as fb_schema
-import vast_flatbuf.org.apache.arrow.flatbuf.Struct_ as fb_struct
-import vast_flatbuf.org.apache.arrow.flatbuf.Time as fb_time
-import vast_flatbuf.org.apache.arrow.flatbuf.Timestamp as fb_timestamp
-import vast_flatbuf.org.apache.arrow.flatbuf.Utf8 as fb_utf8
-import vast_flatbuf.tabular.AlterColumnRequest as tabular_alter_column
-import vast_flatbuf.tabular.AlterProjectionTableRequest as tabular_alter_projection
-import vast_flatbuf.tabular.AlterSchemaRequest as tabular_alter_schema
-import vast_flatbuf.tabular.AlterTableRequest as tabular_alter_table
-import vast_flatbuf.tabular.Column as tabular_projecion_column
-import vast_flatbuf.tabular.ColumnType as tabular_proj_column_type
-import vast_flatbuf.tabular.CreateProjectionRequest as tabular_create_projection
-import vast_flatbuf.tabular.CreateSchemaRequest as tabular_create_schema
-import vast_flatbuf.tabular.ImportDataRequest as tabular_import_data
-import vast_flatbuf.tabular.S3File as tabular_s3_file
-from vast_flatbuf.org.apache.arrow.computeir.flatbuf.Deref import Deref
-from vast_flatbuf.org.apache.arrow.computeir.flatbuf.ExpressionImpl import (
+import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.BinaryLiteral as fb_binary_lit
+import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.BooleanLiteral as fb_bool_lit
+import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.Call as fb_call
+import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.DateLiteral as fb_date32_lit
+import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.DecimalLiteral as fb_decimal_lit
+import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.Expression as fb_expression
+import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.FieldIndex as fb_field_index
+import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.FieldRef as fb_field_ref
+import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.Float32Literal as fb_float32_lit
+import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.Float64Literal as fb_float64_lit
+import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.Int8Literal as fb_int8_lit
+import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.Int16Literal as fb_int16_lit
+import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.Int32Literal as fb_int32_lit
+import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.Int64Literal as fb_int64_lit
+import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.Literal as fb_literal
+import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.Relation as fb_relation
+import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.RelationImpl as rel_impl
+import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.Source as fb_source
+import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.StringLiteral as fb_string_lit
+import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.TimeLiteral as fb_time_lit
+import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.TimestampLiteral as fb_timestamp_lit
+import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.UInt8Literal as fb_uint8_lit
+import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.UInt16Literal as fb_uint16_lit
+import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.UInt32Literal as fb_uint32_lit
+import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.UInt64Literal as fb_uint64_lit
+import vastdb.vast_flatbuf.org.apache.arrow.flatbuf.Binary as fb_binary
+import vastdb.vast_flatbuf.org.apache.arrow.flatbuf.Bool as fb_bool
+import vastdb.vast_flatbuf.org.apache.arrow.flatbuf.Date as fb_date
+import vastdb.vast_flatbuf.org.apache.arrow.flatbuf.Decimal as fb_decimal
+import vastdb.vast_flatbuf.org.apache.arrow.flatbuf.Field as fb_field
+import vastdb.vast_flatbuf.org.apache.arrow.flatbuf.FixedSizeBinary as fb_fixed_size_binary
+import vastdb.vast_flatbuf.org.apache.arrow.flatbuf.FloatingPoint as fb_floating_point
+import vastdb.vast_flatbuf.org.apache.arrow.flatbuf.Int as fb_int
+import vastdb.vast_flatbuf.org.apache.arrow.flatbuf.List as fb_list
+import vastdb.vast_flatbuf.org.apache.arrow.flatbuf.Map as fb_map
+import vastdb.vast_flatbuf.org.apache.arrow.flatbuf.Schema as fb_schema
+import vastdb.vast_flatbuf.org.apache.arrow.flatbuf.Struct_ as fb_struct
+import vastdb.vast_flatbuf.org.apache.arrow.flatbuf.Time as fb_time
+import vastdb.vast_flatbuf.org.apache.arrow.flatbuf.Timestamp as fb_timestamp
+import vastdb.vast_flatbuf.org.apache.arrow.flatbuf.Utf8 as fb_utf8
+import vastdb.vast_flatbuf.tabular.AlterColumnRequest as tabular_alter_column
+import vastdb.vast_flatbuf.tabular.AlterProjectionTableRequest as tabular_alter_projection
+import vastdb.vast_flatbuf.tabular.AlterSchemaRequest as tabular_alter_schema
+import vastdb.vast_flatbuf.tabular.AlterTableRequest as tabular_alter_table
+import vastdb.vast_flatbuf.tabular.Column as tabular_projecion_column
+import vastdb.vast_flatbuf.tabular.ColumnType as tabular_proj_column_type
+import vastdb.vast_flatbuf.tabular.CreateProjectionRequest as tabular_create_projection
+import vastdb.vast_flatbuf.tabular.CreateSchemaRequest as tabular_create_schema
+import vastdb.vast_flatbuf.tabular.ImportDataRequest as tabular_import_data
+import vastdb.vast_flatbuf.tabular.S3File as tabular_s3_file
+from vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.Deref import Deref
+from vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.ExpressionImpl import (
     ExpressionImpl,
 )
-from vast_flatbuf.org.apache.arrow.computeir.flatbuf.LiteralImpl import LiteralImpl
-from vast_flatbuf.org.apache.arrow.flatbuf.DateUnit import DateUnit
-from vast_flatbuf.org.apache.arrow.flatbuf.TimeUnit import TimeUnit
-from vast_flatbuf.org.apache.arrow.flatbuf.Type import Type
-from vast_flatbuf.tabular.GetProjectionTableStatsResponse import (
+from vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.LiteralImpl import (
+    LiteralImpl,
+)
+from vastdb.vast_flatbuf.org.apache.arrow.flatbuf.DateUnit import DateUnit
+from vastdb.vast_flatbuf.org.apache.arrow.flatbuf.TimeUnit import TimeUnit
+from vastdb.vast_flatbuf.org.apache.arrow.flatbuf.Type import Type
+from vastdb.vast_flatbuf.tabular.GetProjectionTableStatsResponse import (
     GetProjectionTableStatsResponse as get_projection_table_stats,
 )
-from vast_flatbuf.tabular.GetTableStatsResponse import (
+from vastdb.vast_flatbuf.tabular.GetTableStatsResponse import (
     GetTableStatsResponse as get_table_stats,
 )
-from vast_flatbuf.tabular.ListProjectionsResponse import (
+from vastdb.vast_flatbuf.tabular.ListProjectionsResponse import (
     ListProjectionsResponse as list_projections,
 )
-from vast_flatbuf.tabular.ListSchemasResponse import ListSchemasResponse as list_schemas
-from vast_flatbuf.tabular.ListTablesResponse import ListTablesResponse as list_tables
+from vastdb.vast_flatbuf.tabular.ListSchemasResponse import (
+    ListSchemasResponse as list_schemas,
+)
+from vastdb.vast_flatbuf.tabular.ListTablesResponse import (
+    ListTablesResponse as list_tables,
+)
 
 from . import errors, util
 from .config import BackoffConfig

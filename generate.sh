@@ -14,7 +14,7 @@ flatc --python -o $WORKDIR src/tabular/flatbuf/*.fbs
 ARROW_FBS=$(find src/tabular/arrow/flatbuf -name '*.fbs')
 flatc --python -o $WORKDIR/vast_flatbuf $ARROW_FBS
 # unfortunately, Arrow-vendored flatbuffers are using `org.apache.arrow.*` namespace :(
-# so we fixup the generated `import`s by prefixing all imports with the `vast_flatbuf.` namespace prefix.
+# so we fixup the generated `import`s by prefixing all imports with the `vastdb.vast_flatbuf.` namespace prefix.
 # TODO: a better solution will be to patch flatc to generate relative imports.
 ARROW_GENERATED=$(find $WORKDIR/vast_flatbuf/org/apache/arrow -name '*.py')
-sed -i 's/from org.apache.arrow./from vast_flatbuf.org.apache.arrow./g' $ARROW_GENERATED
+sed -i 's/from org.apache.arrow./from vastdb.vast_flatbuf.org.apache.arrow./g' $ARROW_GENERATED
