@@ -17,6 +17,7 @@ class HttpStatus(Enum):
     INTERNAL_SERVER_ERROR = 500
     NOT_IMPLEMENTED = 501
     SERVICE_UNAVAILABLE = 503
+    INSUFFICIENT_CAPACITY = 507
 
 
 log = logging.getLogger(__name__)
@@ -76,6 +77,10 @@ class Slowdown(ServiceUnavailable):
 
 
 class UnexpectedError(HttpError):
+    pass
+
+
+class InsufficientCapacity(HttpError):
     pass
 
 
@@ -197,6 +202,7 @@ ERROR_TYPES_MAP = {
     HttpStatus.INTERNAL_SERVER_ERROR: InternalServerError,
     HttpStatus.NOT_IMPLEMENTED: NotImplemented,
     HttpStatus.SERVICE_UNAVAILABLE: handle_unavailable,
+    HttpStatus.INSUFFICIENT_CAPACITY: InsufficientCapacity,
 }
 
 
