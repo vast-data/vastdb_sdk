@@ -962,12 +962,12 @@ class VastdbApi:
         prefix += '&'.join(params_list)
         return prefix
 
-    def _fill_common_headers(self, txid=0, client_tags=[], version_id=1):
+    def _fill_common_headers(self, txid=0, client_tags=[], version_id=1, sorting_key=[]):
         common_headers = {
             'tabular-txid': str(txid),
             'tabular-api-version-id': str(version_id),
             'tabular-client-name': 'tabular-api'
-        }
+        } | {f"tabular-sorted-column-{i}": str(k) for i, k in enumerate(sorting_key)}
 
         return common_headers | {f'tabular-client-tags-{index}': tag for index, tag in enumerate(client_tags)}
 
@@ -1122,11 +1122,12 @@ class VastdbApi:
 
     def create_table(self, bucket, schema, name, arrow_schema=None,
                      txid=0, client_tags=[], expected_retvals=[],
-                     create_imports_table=False, use_external_row_ids_allocation=False, table_props=None):
+                     create_imports_table=False, use_external_row_ids_allocation=False, table_props=None,
+                     sorting_key=[]):
         self._create_table_internal(bucket=bucket, schema=schema, name=name, arrow_schema=arrow_schema,
                                     txid=txid, client_tags=client_tags, expected_retvals=expected_retvals,
                                     create_imports_table=create_imports_table, use_external_row_ids_allocation=use_external_row_ids_allocation,
-                                    table_props=table_props)
+                                    table_props=table_props, sorting_key=sorting_key)
 
     def create_topic(self, bucket, name, topic_partitions, expected_retvals=[],
                      message_timestamp_type=None, retention_ms=None, message_timestamp_after_max_ms=None,
@@ -1143,7 +1144,8 @@ class VastdbApi:
 
     def _create_table_internal(self, bucket, schema, name, arrow_schema=None,
                                txid=0, client_tags=[], expected_retvals=[], topic_partitions=0,
-                               create_imports_table=False, use_external_row_ids_allocation=False, table_props=None):
+                               create_imports_table=False, use_external_row_ids_allocation=False, table_props=None,
+                               sorting_key=[]):
         """
         Create a table, use the following request
         POST /bucket/schema/table?table HTTP/1.1
@@ -1160,8 +1162,7 @@ class VastdbApi:
         The request will look like:
         POST /bucket/schema/table?table&sub-table=vastdb-imported-objects HTTP/1.1
         """
-        headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
-
+        headers = self._fill_common_headers(txid=txid, client_tags=client_tags, sorting_key=sorting_key)
         if arrow_schema is None:
             arrow_schema = pa.schema([])
 
@@ -1222,7 +1223,7 @@ class VastdbApi:
                          table_properties=table_properties, new_name=new_name, expected_retvals=expected_retvals)
 
     def alter_table(self, bucket, schema, name, txid=0, client_tags=[], table_properties="",
-                    new_name="", expected_retvals=[]):
+                    new_name="", expected_retvals=[], sorting_key=[]):
         """
         PUT /mybucket/myschema/mytable?table HTTP/1.1
         Content-Length: ContentLength
@@ -1246,7 +1247,7 @@ class VastdbApi:
         builder.Finish(params)
         alter_table_req = builder.Output()
 
-        headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
+        headers = self._fill_common_headers(txid=txid, client_tags=client_tags, sorting_key=sorting_key)
         headers['Content-Length'] = str(len(alter_table_req))
         url_params = {'tabular-new-table-name': schema + "/" + new_name} if len(new_name) else {}
 
@@ -1415,9 +1416,9 @@ class VastdbApi:
             url=self._url(bucket=bucket, schema=schema, table=table, command="column"),
             data=serialized_schema, headers=headers)
 
-    def list_columns(self, bucket, schema, table, *, txid=0, client_tags=None, max_keys=None, next_key=0,
-                     count_only=False, name_prefix="", exact_match=False,
-                     expected_retvals=None, bc_list_internals=False, list_imports_table=False):
+    def _list_columns_internal(self, command, bucket, schema, table, txid, client_tags, max_keys, next_key,
+                               count_only, name_prefix, exact_match, expected_retvals, bc_list_internals,
+                               list_imports_table):
         """
         GET /mybucket/myschema/mytable?columns HTTP/1.1
         tabular-txid: TransactionId
@@ -1447,7 +1448,7 @@ class VastdbApi:
         url_params = {'sub-table': IMPORTED_OBJECTS_TABLE_NAME} if list_imports_table else {}
         res = self._request(
             method="GET",
-            url=self._url(bucket=bucket, schema=schema, table=table, command="column", url_params=url_params),
+            url=self._url(bucket=bucket, schema=schema, table=table, command=command, url_params=url_params),
             headers=headers)
 
         res_headers = res.headers
@@ -1457,6 +1458,20 @@ class VastdbApi:
         columns = [] if count_only else pa.ipc.open_stream(res.content).schema
 
         return columns, next_key, is_truncated, count
+
+    def list_columns(self, bucket, schema, table, *, txid=0, client_tags=None, max_keys=None, next_key=0,
+                     count_only=False, name_prefix="", exact_match=False,
+                     expected_retvals=None, bc_list_internals=False, list_imports_table=False):
+        return self._list_columns_internal('column', bucket, schema, table, txid, client_tags, max_keys, next_key,
+                                           count_only, name_prefix, exact_match, expected_retvals, bc_list_internals,
+                                           list_imports_table)
+
+    def list_sorted_columns(self, bucket, schema, table, *, txid=0, client_tags=None, max_keys=None, next_key=0,
+                            count_only=False, name_prefix="", exact_match=False,
+                            expected_retvals=None, bc_list_internals=False, list_imports_table=False):
+        return self._list_columns_internal('sorted-columns', bucket, schema, table, txid, client_tags, max_keys, next_key,
+                                           count_only, name_prefix, exact_match, expected_retvals, bc_list_internals,
+                                           list_imports_table)
 
     def head_bucket(self, bucket_name):
         """

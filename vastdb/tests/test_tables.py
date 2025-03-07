@@ -13,6 +13,8 @@ import pyarrow.parquet as pq
 import pytest
 from requests.exceptions import HTTPError
 
+from vastdb.errors import BadRequest
+
 from .. import errors
 from ..table import INTERNAL_ROW_ID, QueryConfig
 from .util import prepare_data
@@ -990,3 +992,100 @@ def test_multiple_contains_clauses(session, clean_bucket_name):
         for pred in failed_preds:
             with pytest.raises(NotImplementedError):
                 t.select(predicate=pred(t)).read_all()
+
+
+def test_tables_elysium(session, clean_bucket_name):
+    columns = pa.schema([
+        ('a', pa.int8()),
+        ('b', pa.int32()),
+        ('c', pa.int16()),
+    ])
+    expected = pa.table(schema=columns, data=[
+        [1, 2, 3],
+        [111111, 222222, 333333],
+        [111, 222, 333],
+    ])
+    sorting = [2, 1]
+    with prepare_data(session, clean_bucket_name, 's', 't', expected, sorting_key=sorting) as t:
+        sorted_columns = t.sorted_columns()
+        assert sorted_columns[0].name == 'c'
+        assert sorted_columns[1].name == 'b'
+
+
+# Fails because of a known issue: ORION-240102
+# def test_enable_elysium(session, clean_bucket_name):
+#     columns = pa.schema([
+#         ('a', pa.int8()),
+#         ('b', pa.int32()),
+#         ('c', pa.int16()),
+#     ])
+#     expected = pa.table(schema=columns, data=[
+#         [1,2,3],
+#         [111111,222222,333333],
+#         [111, 222, 333],
+#     ])
+#     sorting = [2, 1]
+#     with prepare_data(session, clean_bucket_name, 's', 't', expected) as t:
+#         sorted_columns = t.sorted_columns()
+#         assert len(sorted_columns) == 0
+#         t.add_sorting_key(sorting)
+#         time.sleep(10)
+#         sorted_columns = t.sorted_columns()
+#         assert len(sorted_columns) == 2
+#         assert sorted_columns[0].name == 'c'
+#         assert sorted_columns[1].name == 'b'
+
+
+def test_elysium_tx(session, clean_bucket_name):
+    columns = pa.schema([
+        ('a', pa.int8()),
+        ('b', pa.int32()),
+        ('c', pa.int16()),
+    ])
+    arrow_table = pa.table(schema=columns, data=[
+        [1, 2, 3],
+        [111111, 222222, 333333],
+        [111, 222, 333],
+    ])
+    sorting = [2, 1]
+    schema_name = 's'
+    table_name = 't'
+    with session.transaction() as tx:
+        s = tx.bucket(clean_bucket_name).create_schema(schema_name)
+        t = s.create_table(table_name, arrow_table.schema)
+        row_ids_array = t.insert(arrow_table)
+        row_ids = row_ids_array.to_pylist()
+        assert row_ids == list(range(arrow_table.num_rows))
+        sorted_columns = t.sorted_columns()
+        assert len(sorted_columns) == 0
+        t.add_sorting_key(sorting)
+
+    with session.transaction() as tx:
+        s = tx.bucket(clean_bucket_name).schema(schema_name)
+        t = s.table(table_name)
+        sorted_columns = t.sorted_columns()
+        assert len(sorted_columns) == 2
+        assert sorted_columns[0].name == 'c'
+        assert sorted_columns[1].name == 'b'
+        t.drop()
+        s.drop()
+
+
+def test_elysium_double_enable(session, clean_bucket_name):
+    columns = pa.schema([
+        ('a', pa.int8()),
+        ('b', pa.int32()),
+        ('c', pa.int16()),
+    ])
+    expected = pa.table(schema=columns, data=[
+        [1, 2, 3],
+        [111111, 222222, 333333],
+        [111, 222, 333],
+    ])
+    sorting = [2, 1]
+    with pytest.raises(BadRequest):
+        with prepare_data(session, clean_bucket_name, 's', 't', expected, sorting_key=sorting) as t:
+            sorted_columns = t.sorted_columns()
+            assert sorted_columns[0].name == 'c'
+            assert sorted_columns[1].name == 'b'
+            t.add_sorting_key(sorting)

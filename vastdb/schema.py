@@ -76,7 +76,8 @@ class Schema:
                 break
         return result
 
-    def create_table(self, table_name: str, columns: pa.Schema, fail_if_exists=True, use_external_row_ids_allocation=False) -> "Table":
+    def create_table(self, table_name: str, columns: pa.Schema, fail_if_exists=True,
+                     use_external_row_ids_allocation=False, sorting_key=[]) -> "Table":
         """Create a new table under this schema.
 
         A virtual `vastdb_rowid` column (of `int64` type) can be created to access and filter by internal VAST row IDs.
@@ -91,7 +92,8 @@ class Schema:
             self.tx._rpc.features.check_external_row_ids_allocation()
 
         self.tx._rpc.api.create_table(self.bucket.name, self.name, table_name, columns, txid=self.tx.txid,
-                                      use_external_row_ids_allocation=use_external_row_ids_allocation)
+                                      use_external_row_ids_allocation=use_external_row_ids_allocation,
+                                      sorting_key=sorting_key)
         log.info("Created table: %s", table_name)
         return self.table(table_name)  # type: ignore[return-value]
 

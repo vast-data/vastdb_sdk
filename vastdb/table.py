@@ -157,6 +157,25 @@ class Table:
         self.arrow_schema = pa.schema(fields)
         return self.arrow_schema
 
+    def sorted_columns(self) -> list:
+        """Return sorted columns' metadata."""
+        fields = []
+        try:
+            next_key = 0
+            while True:
+                cur_columns, next_key, is_truncated, _count = self.tx._rpc.api.list_sorted_columns(
+                    bucket=self.bucket.name, schema=self.schema.name, table=self.name, next_key=next_key, txid=self.tx.txid, list_imports_table=self._imports_table)
+                fields.extend(cur_columns)
+                if not is_truncated:
+                    break
+        except errors.BadRequest:
+            pass
+        except errors.InternalServerError as ise:
+            log.warning("Failed to get the sorted columns Elysium might not be supported: %s", ise)
+            pass
+
+        return fields
+
     def projection(self, name: str) -> "Projection":
         """Get a specific semi-sorted projection of this table."""
         if self._imports_table:
@@ -534,6 +553,12 @@ class Table:
             self.bucket.name, self.schema.name, self.name, txid=self.tx.txid, new_name=new_name)
         log.info("Renamed table from %s to %s ", self.name, new_name)
         self.name = new_name
+
+    def add_sorting_key(self, sorting_key: list) -> None:
+        """Ads a sorting key to a table that doesn't have any."""
+        self.tx._rpc.api.alter_table(
+            self.bucket.name, self.schema.name, self.name, txid=self.tx.txid, sorting_key=sorting_key)
+        log.info("Enabled Elysium for table %s with sorting key %s ", self.name, str(sorting_key))
 
     def add_column(self, new_column: pa.Schema) -> None:
         """Add a new column."""
