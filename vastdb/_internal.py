@@ -787,7 +787,7 @@ def _decode_table_props(s):
     return {y: _prop_coding[x][1](z) for x, y, z in triplets if z != ''}
 
 
-TableInfo = namedtuple('TableInfo', 'name properties handle num_rows size_in_bytes num_partitions')
+TableInfo = namedtuple('TableInfo', 'name properties handle num_rows size_in_bytes num_partitions sorting_key_enabled')
 
 
 def _parse_table_info(obj, parse_properties):
@@ -798,7 +798,8 @@ def _parse_table_info(obj, parse_properties):
     used_bytes = obj.SizeInBytes()
     num_partitions = obj.NumPartitions()
     properties = parse_properties(properties)
-    return TableInfo(name, properties, handle, num_rows, used_bytes, num_partitions)
+    sorting_key_enabled = obj.SortingKeyEnabled()
+    return TableInfo(name, properties, handle, num_rows, used_bytes, num_partitions, sorting_key_enabled)
 
 
 # Results that returns from tablestats

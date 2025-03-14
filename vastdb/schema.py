@@ -151,4 +151,4 @@ class Schema:
 
 
 def _parse_table_info(table_info, schema: "schema.Schema"):
-    return table.Table(name=table_info.name, schema=schema, handle=int(table_info.handle), _imports_table=False)
+    return table.Table(name=table_info.name, schema=schema, handle=int(table_info.handle), _imports_table=False, sorted_table=table_info.sorting_key_enabled)

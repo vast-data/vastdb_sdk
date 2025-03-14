@@ -21,6 +21,7 @@ log = logging.getLogger(__name__)
 
 INTERNAL_ROW_ID = "$row_id"
 INTERNAL_ROW_ID_FIELD = pa.field(INTERNAL_ROW_ID, pa.uint64())
+INTERNAL_ROW_ID_SORTED_FIELD = pa.field(INTERNAL_ROW_ID, pa.decimal128(38, 0))  # Sorted tables have longer row ids
 
 MAX_ROWS_PER_BATCH = 512 * 1024
 # for insert we need a smaller limit due to response amplification
@@ -115,6 +116,7 @@ class Table:
     arrow_schema: pa.Schema = field(init=False, compare=False, repr=False)
     _ibis_table: ibis.Schema = field(init=False, compare=False, repr=False)
     _imports_table: bool
+    sorted_table: bool
 
     def __post_init__(self):
         """Also, load columns' metadata."""
@@ -335,7 +337,7 @@ class Table:
 
         query_schema = self.arrow_schema
         if internal_row_id:
-            queried_fields = [INTERNAL_ROW_ID_FIELD]
+            queried_fields = [INTERNAL_ROW_ID_SORTED_FIELD if self.sorted_table else INTERNAL_ROW_ID_FIELD]
             queried_fields.extend(column for column in self.arrow_schema)
             query_schema = pa.schema(queried_fields)
             columns.append(INTERNAL_ROW_ID)
@@ -504,7 +506,7 @@ class Table:
         if columns is None:
             columns = [name for name in rows.schema.names if name != INTERNAL_ROW_ID]
 
-        update_fields = [(INTERNAL_ROW_ID, pa.uint64())]
+        update_fields = [INTERNAL_ROW_ID_SORTED_FIELD if self.sorted_table else INTERNAL_ROW_ID_FIELD]
         update_values = [_combine_chunks(rows_chunk)]
         for col in columns:
             update_fields.append(rows.field(col))
@@ -530,7 +532,7 @@ class Table:
             rows_chunk = rows[INTERNAL_ROW_ID]
         except KeyError:
             raise errors.MissingRowIdColumn
-        delete_rows_rb = pa.record_batch(schema=pa.schema([(INTERNAL_ROW_ID, pa.uint64())]),
+        delete_rows_rb = pa.record_batch(schema=pa.schema([INTERNAL_ROW_ID_SORTED_FIELD if self.sorted_table else INTERNAL_ROW_ID_FIELD]),
                                          data=[_combine_chunks(rows_chunk)])
 
         delete_rows_rb = util.sort_record_batch_if_needed(delete_rows_rb, INTERNAL_ROW_ID)
@@ -608,7 +610,7 @@ class Table:
     def imports_table(self) -> Optional["Table"]:
         """Get the imports table of this table."""
         self.tx._rpc.features.check_imports_table()
-        return Table(name=self.name, schema=self.schema, handle=int(self.handle), _imports_table=True)
+        return Table(name=self.name, schema=self.schema, handle=int(self.handle), _imports_table=True, sorted_table=self.sorted_table)
 
     def __getitem__(self, col_name: str):
         """Allow constructing ibis-like column expressions from this table.

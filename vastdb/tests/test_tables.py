@@ -1089,3 +1089,74 @@ def test_elysium_double_enable(session, clean_bucket_name):
             assert sorted_columns[0].name == 'c'
             assert sorted_columns[1].name == 'b'
             t.add_sorting_key(sorting)
+
+
+def test_elysium_update_table_tx(session, clean_bucket_name):
+    columns = pa.schema([
+        ('a', pa.int64()),
+        ('b', pa.float32()),
+        ('s', pa.utf8()),
+    ])
+    arrow_table = pa.table(schema=columns, data=[
+        [111, 222, 333],
+        [0.5, 1.5, 2.5],
+        ['a', 'bb', 'ccc'],
+    ])
+    sorting = [2, 1]
+    schema_name = 's'
+    table_name = 't'
+    with session.transaction() as tx:
+        s = tx.bucket(clean_bucket_name).create_schema(schema_name)
+        t = s.create_table(table_name, arrow_table.schema, sorting_key=sorting)
+        row_ids_array = t.insert(arrow_table)
+        row_ids = row_ids_array.to_pylist()
+        assert row_ids == list(range(arrow_table.num_rows))
+        sorted_columns = t.sorted_columns()
+        assert sorted_columns[0].name == 's'
+        assert sorted_columns[1].name == 'b'
+
+    with session.transaction() as tx:
+        s = tx.bucket(clean_bucket_name).schema(schema_name)
+        t = s.table(table_name)
+        sorted_columns = t.sorted_columns()
+        assert sorted_columns[0].name == 's'
+        assert sorted_columns[1].name == 'b'
+
+        actual = t.select(columns=['a', 'b'], predicate=(t['a'] == 222), internal_row_id=True).read_all()
+        column_index = actual.column_names.index('a')
+        column_field = actual.field(column_index)
+        new_data = pc.add(actual.column('a'), 2000)
+        update_table = actual.set_column(column_index, column_field, new_data)
+
+        t.update(update_table, columns=['a'])
+        actual = t.select(columns=['a', 'b']).read_all()
+        assert actual.to_pydict() == {
+            'a': [111, 2222, 333],
+            'b': [0.5, 1.5, 2.5]
+        }
+
+        actual = t.select(columns=['a', 'b'], predicate=(t['a'] != 2222), internal_row_id=True).read_all()
+        column_index = actual.column_names.index('a')
+        column_field = actual.field(column_index)
+        new_data = pc.divide(actual.column('a'), 10)
+        update_table = actual.set_column(column_index, column_field, new_data)
+
+        t.update(update_table.to_batches()[0], columns=['a'])
+        actual = t.select(columns=['a', 'b']).read_all()
+        assert actual.to_pydict() == {
+            'a': [11, 2222, 33],
+            'b': [0.5, 1.5, 2.5]
+        }
+
+        actual = t.select(columns=['a', 'b'], predicate=(t['a'] < 222), internal_row_id=True).read_all()
+        column_index = actual.column_names.index('a')
+        column_field = actual.field(column_index)
+        new_data = pc.divide(actual.column('a'), 10)
+        delete_rows = actual.set_column(column_index, column_field, new_data)
+
+        t.delete(delete_rows)
+        actual = t.select(columns=['a', 'b']).read_all()
+        assert actual.to_pydict() == {
+            'a': [2222],
+            'b': [1.5]
+        }
