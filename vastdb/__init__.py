@@ -13,5 +13,5 @@ def connect(*args, **kwargs):  # noqa: D103
 
 def version():
     """Return VAST DB SDK version."""
-    import importlib
+    import importlib.metadata
     return importlib.metadata.distribution(__package__).version
