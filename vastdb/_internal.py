@@ -1975,6 +1975,49 @@ class QueryDataInternalError(Exception):
     pass
 
 
+def read_first_batch(fileobj):
+    readers = {}  # {stream_id: pa.ipc.RecordBatchStreamReader}
+    while True:
+        stream_id_bytes = fileobj.read(4)
+        if not stream_id_bytes:
+            if readers:
+                raise EOFError(f'no readers ({readers}) should be open at EOF')
+            break
+
+        stream_id, = struct.unpack('<L', stream_id_bytes)
+        if stream_id == TABULAR_KEEP_ALIVE_STREAM_ID:
+            continue
+
+        if stream_id == TABULAR_QUERY_DATA_COMPLETED_STREAM_ID:
+            # read the terminating end chunk from socket
+            res = fileobj.read()
+            _logger.debug("stream_id=%d res=%s (finish)", stream_id, res)
+            return None
+
+        if stream_id == TABULAR_QUERY_DATA_FAILED_STREAM_ID:
+            # read the terminating end chunk from socket
+            res = fileobj.read()
+            _logger.debug("stream_id=%d res=%s (failed)", stream_id, res)
+            raise QueryDataInternalError()  # connection closed by server due to an internal error
+
+        next_row_id_bytes = fileobj.read(8)
+        next_row_id, = struct.unpack('<Q', next_row_id_bytes)
+        _logger.debug("stream_id=%d next_row_id=%d", stream_id, next_row_id)
+
+        if stream_id not in readers:
+            # we implicitly read 1st message (Arrow schema) when constructing RecordBatchStreamReader
+            reader = pa.ipc.RecordBatchStreamReader(fileobj)
+            _logger.debug("stream_id=%d schema=%s", stream_id, reader.schema)
+            readers[stream_id] = reader
+            continue
+
+        reader = readers[stream_id]
+        try:
+            return reader.read_next_batch()  # read single-column chunk data
+        except StopIteration:  # we got an end-of-stream IPC message for a given stream ID
+            return None
+
+
 def _iter_query_data_response_columns(fileobj, stream_ids=None):
     readers = {}  # {stream_id: pa.ipc.RecordBatchStreamReader}
     while True:

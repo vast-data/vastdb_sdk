@@ -3,6 +3,7 @@ import decimal
 import logging
 import random
 import threading
+import time
 from contextlib import closing
 from tempfile import NamedTemporaryFile
 
@@ -1160,3 +1161,39 @@ def test_elysium_update_table_tx(session, clean_bucket_name):
             'a': [2222],
             'b': [1.5]
         }
+
+
+def test_elysium_splits(session, clean_bucket_name):
+    columns = pa.schema([
+        ('a', pa.int32())
+    ])
+
+    data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    data = data * 10000
+    arrow_table = pa.table(schema=columns, data=[data])
+
+    config = QueryConfig()
+    config.rows_per_split = 1000
+
+    sorting = [0]
+    schema_name = 's'
+    table_name = 't'
+
+    with session.transaction() as tx:
+        s = tx.bucket(clean_bucket_name).create_schema(schema_name)
+        t = s.create_table(table_name, arrow_table.schema, sorting_key=sorting)
+        row_ids_array = t.insert(arrow_table)
+        row_ids = row_ids_array.to_pylist()
+        assert row_ids == list(range(arrow_table.num_rows))
+        sorted_columns = t.sorted_columns()
+        assert sorted_columns[0].name == 'a'
+
+    time.sleep(300)
+    with session.transaction() as tx:
+        s = tx.bucket(clean_bucket_name).schema(schema_name)
+        t = s.table(table_name)
+        sorted_columns = t.sorted_columns()
+        assert sorted_columns[0].name == 'a'
+
+        actual = t.select(columns=['a'], predicate=(t['a'] == 1), config=config).read_all()
+        assert len(actual) == 10000

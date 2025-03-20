@@ -298,6 +298,21 @@ class Table:
             imports_table_stats=self._imports_table)
         return TableStats(**stats_tuple._asdict())
 
+    def _get_row_estimate(self, columns: List[str], predicate: ibis.expr.types.BooleanColumn, arrow_schema: pa.Schema):
+        query_data_request = _internal.build_query_data_request(
+            schema=arrow_schema,
+            predicate=predicate,
+            field_names=columns)
+        response = self.tx._rpc.api.query_data(
+            bucket=self.bucket.name,
+            schema=self.schema.name,
+            table=self.name,
+            params=query_data_request.serialized,
+            split=(0xffffffff - 3, 1, 1),
+            txid=self.tx.txid)
+        batch = _internal.read_first_batch(response.raw)
+        return batch.num_rows * 2**16 if batch is not None else 0
+
     def select(self, columns: Optional[List[str]] = None,
                predicate: Union[ibis.expr.types.BooleanColumn, ibis.common.deferred.Deferred] = None,
                config: Optional[QueryConfig] = None,
@@ -314,23 +329,15 @@ class Table:
         if config is None:
             config = QueryConfig()
 
+        stats = None
         # Retrieve snapshots only if needed
-        if config.data_endpoints is None or config.num_splits is None:
+        if config.data_endpoints is None:
             stats = self.get_stats()
             log.debug("stats: %s", stats)
-
-        if config.data_endpoints is None:
             endpoints = stats.endpoints
         else:
             endpoints = tuple(config.data_endpoints)
         log.debug("endpoints: %s", endpoints)
-
-        if config.num_splits is None:
-            config.num_splits = max(1, stats.num_rows // config.rows_per_split)
-        log.debug("config: %s", config)
-
-        if config.semi_sorted_projection_name:
-            self.tx._rpc.features.check_enforce_semisorted_projection()
 
         if columns is None:
             columns = [f.name for f in self.arrow_schema]
@@ -350,6 +357,22 @@ class Table:
 
         if isinstance(predicate, ibis.common.deferred.Deferred):
             predicate = predicate.resolve(self._ibis_table)  # may raise if the predicate is invalid (e.g. wrong types / missing column)
+
+        if config.num_splits is None:
+            num_rows = 0
+            if self.sorted_table:
+                num_rows = self._get_row_estimate(columns, predicate, query_schema)
+                log.info(f'sorted estimate: {num_rows}')
+            if num_rows == 0:
+                if stats is None:
+                    stats = self.get_stats()
+                num_rows = stats.num_rows
+
+            config.num_splits = max(1, num_rows // config.rows_per_split)
+        log.debug("config: %s", config)
+
+        if config.semi_sorted_projection_name:
+            self.tx._rpc.features.check_enforce_semisorted_projection()
 
         query_data_request = _internal.build_query_data_request(
             schema=query_schema,
