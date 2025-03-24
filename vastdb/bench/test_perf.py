@@ -10,11 +10,11 @@ log = logging.getLogger(__name__)
 
 
 @pytest.mark.benchmark
-def test_bench(session, bucket_name, parquets_path, crater_path):
+def test_bench(session, test_bucket_name, parquets_path, crater_path):
     files = [str(parquets_path / f) for f in (parquets_path.glob('**/*.pq'))]
 
     with session.transaction() as tx:
-        b = tx.bucket(bucket_name)
+        b = tx.bucket(test_bucket_name)
         s = b.create_schema('s1')
         t = util.create_table_from_files(s, 't1', files, config=ImportConfig(import_concurrency=8))
         config = QueryConfig(num_splits=8, num_sub_splits=4)
