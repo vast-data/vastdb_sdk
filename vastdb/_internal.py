@@ -87,6 +87,7 @@ import vastdb.vast_flatbuf.tabular.ColumnType as tabular_proj_column_type
 import vastdb.vast_flatbuf.tabular.CreateProjectionRequest as tabular_create_projection
 import vastdb.vast_flatbuf.tabular.CreateSchemaRequest as tabular_create_schema
 import vastdb.vast_flatbuf.tabular.ImportDataRequest as tabular_import_data
+import vastdb.vast_flatbuf.tabular.KeyName as import_key_name
 import vastdb.vast_flatbuf.tabular.S3File as tabular_s3_file
 from vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.Deref import Deref
 from vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.ExpressionImpl import (
@@ -1618,7 +1619,7 @@ class VastdbApi:
     source_files: list of (bucket_name, file_name)
     """
     def import_data(self, bucket, schema, table, source_files, txid=0, client_tags=[], expected_retvals=[], case_sensitive=True,
-                    schedule_id=None, retry_count=0, blocking=True):
+                    schedule_id=None, retry_count=0, blocking=True, key_names=[]):
         """
         POST /mybucket/myschema/mytable?data HTTP/1.1
         Content-Length: ContentLength
@@ -1660,8 +1661,23 @@ class VastdbApi:
             builder.PrependUOffsetTRelative(f)
 
         files = builder.EndVector()
+
+        key_names_arr = []
+        for key in key_names:
+            kname = builder.CreateString(key)
+            import_key_name.Start(builder)
+            import_key_name.AddName(builder, kname)
+            key_names_arr.append(import_key_name.End(builder))
+
+        tabular_import_data.StartKeyNamesVector(builder, len(key_names_arr))
+        for key in reversed(key_names_arr):
+            builder.PrependUOffsetTRelative(key)
+
+        key_names_vec = builder.EndVector()
+
         tabular_import_data.Start(builder)
         tabular_import_data.AddS3Files(builder, files)
+        tabular_import_data.AddKeyNames(builder, key_names_vec)
         params = tabular_import_data.End(builder)
         builder.Finish(params)
         import_req = builder.Output()

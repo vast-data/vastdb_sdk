@@ -63,3 +63,6 @@ class ImportConfig:
     """Import execution configiration."""
 
     import_concurrency: int = 2
+
+    # import key column names
+    key_names: Optional[List[str]] = None

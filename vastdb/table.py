@@ -249,6 +249,8 @@ class Table:
         endpoints = [self.tx._rpc.api.url for _ in range(config.import_concurrency)]  # TODO: use valid endpoints...
         files_queue = queue.Queue()
 
+        key_names = config.key_names or []
+
         for source_file in source_files.items():
             files_queue.put(source_file)
 
@@ -270,8 +272,10 @@ class Table:
                             pass
                         if files_batch:
                             log.debug("Starting import batch of %s files", len(files_batch))
+                            log.info(f"starting import of {files_batch}")
                             session.import_data(
-                                self.bucket.name, self.schema.name, self.name, files_batch, txid=self.tx.txid)
+                                self.bucket.name, self.schema.name, self.name, files_batch, txid=self.tx.txid,
+                                key_names=key_names)
             except (Exception, KeyboardInterrupt) as e:
                 stop_event.set()
                 log.error("Got exception inside import_worker. exception: %s", e)

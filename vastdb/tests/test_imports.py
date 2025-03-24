@@ -6,6 +6,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from vastdb import util
+from vastdb.config import ImportConfig
 from vastdb.errors import ImportFilesError, InternalServerError, InvalidArgument
 
 log = logging.getLogger(__name__)
@@ -52,6 +53,61 @@ def test_parallel_imports(session, clean_bucket_name, s3):
         assert all(name.startswith(prefix) for name in object_names)
         numbers.issubset(int(name.replace(prefix, '')) for name in object_names)
         assert len(object_names) == len(objects_name['ObjectName'])
+
+
+def test_zip_imports(session, clean_bucket_name, s3):
+    num_rows = 10
+    num_files = 5
+    files = []
+    ids = [i for i in range(num_rows)]
+    symbols = [chr(c) for c in range(ord('a'), ord('a') + num_rows)]
+    for i in range(num_files):
+        ds = {'id': ids,
+              'symbol': symbols,
+              f'feature{i}': [i * 10 + k for k in range(num_rows)]}
+        table = pa.Table.from_pydict(ds)
+        with NamedTemporaryFile() as f:
+            pq.write_table(table, f.name)
+            pname = f'prq{i}'
+            s3.put_object(Bucket=clean_bucket_name, Key=pname, Body=f)
+            files.append(f'/{clean_bucket_name}/{pname}')
+
+    with session.transaction() as tx:
+        b = tx.bucket(clean_bucket_name)
+        s = b.create_schema('s1')
+        t = s.create_table('t1', pa.schema([('vastdb_rowid', pa.int64()), ('id', pa.int64()), ('symbol', pa.string())]))
+        columns = pa.schema([
+            ('vastdb_rowid', pa.int64()),
+            ('id', pa.int64()),
+            ('symbol', pa.string()),
+        ])
+        ext_row_ids = [10 + i for i in range(num_rows)]
+        arrow_table = pa.table(schema=columns, data=[
+            ext_row_ids,
+            ids,
+            symbols,
+        ])
+        row_ids_array = t.insert(arrow_table)
+        row_ids = row_ids_array.to_pylist()
+        assert row_ids == ext_row_ids
+
+    with session.transaction() as tx:
+        s = tx.bucket(clean_bucket_name).schema('s1')
+        t = s.table('t1')
+        # with pytest.raises(InternalServerError):
+        #     t.create_imports_table()
+        log.info("Starting import of %d files", num_files)
+        config = ImportConfig()
+        config.key_names = ['id', 'symbol']
+        t.import_files(files, config=config)
+
+    with session.transaction() as tx:
+        s = tx.bucket(clean_bucket_name).schema('s1')
+        t = s.table('t1')
+        arrow_table = t.select(columns=['feature0']).read_all()
+        assert arrow_table.num_rows == num_rows
+        log.debug(f"table schema={t.arrow_schema}")
+        assert len(t.arrow_schema) == 8
 
 
 def test_create_table_from_files(session, clean_bucket_name, s3):

@@ -31,7 +31,7 @@ class ImportDataRequest(object):
             x = self._tab.Vector(o)
             x += flatbuffers.number_types.UOffsetTFlags.py_type(j) * 4
             x = self._tab.Indirect(x)
-            from vastdb.vast_flatbuf.tabular.S3File import S3File
+            from vast_flatbuf.tabular.S3File import S3File
             obj = S3File()
             obj.Init(self._tab.Bytes, x)
             return obj
@@ -49,7 +49,32 @@ class ImportDataRequest(object):
         o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(4))
         return o == 0
 
-def Start(builder): builder.StartObject(1)
+    # ImportDataRequest
+    def KeyNames(self, j):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(6))
+        if o != 0:
+            x = self._tab.Vector(o)
+            x += flatbuffers.number_types.UOffsetTFlags.py_type(j) * 4
+            x = self._tab.Indirect(x)
+            from vast_flatbuf.tabular.KeyName import KeyName
+            obj = KeyName()
+            obj.Init(self._tab.Bytes, x)
+            return obj
+        return None
+
+    # ImportDataRequest
+    def KeyNamesLength(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(6))
+        if o != 0:
+            return self._tab.VectorLen(o)
+        return 0
+
+    # ImportDataRequest
+    def KeyNamesIsNone(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(6))
+        return o == 0
+
+def Start(builder): builder.StartObject(2)
 def ImportDataRequestStart(builder):
     """This method is deprecated. Please switch to Start."""
     return Start(builder)
@@ -61,6 +86,14 @@ def StartS3FilesVector(builder, numElems): return builder.StartVector(4, numElem
 def ImportDataRequestStartS3FilesVector(builder, numElems):
     """This method is deprecated. Please switch to Start."""
     return StartS3FilesVector(builder, numElems)
+def AddKeyNames(builder, keyNames): builder.PrependUOffsetTRelativeSlot(1, flatbuffers.number_types.UOffsetTFlags.py_type(keyNames), 0)
+def ImportDataRequestAddKeyNames(builder, keyNames):
+    """This method is deprecated. Please switch to AddKeyNames."""
+    return AddKeyNames(builder, keyNames)
+def StartKeyNamesVector(builder, numElems): return builder.StartVector(4, numElems, 4)
+def ImportDataRequestStartKeyNamesVector(builder, numElems):
+    """This method is deprecated. Please switch to Start."""
+    return StartKeyNamesVector(builder, numElems)
 def End(builder): return builder.EndObject()
 def ImportDataRequestEnd(builder):
     """This method is deprecated. Please switch to End."""
