@@ -596,7 +596,7 @@ class Table:
         self.name = new_name
 
     def add_sorting_key(self, sorting_key: list) -> None:
-        """Ads a sorting key to a table that doesn't have any."""
+        """Add a sorting key to a table that doesn't have any."""
         self.tx._rpc.features.check_elysium()
         self.tx._rpc.api.alter_table(
             self.bucket.name, self.schema.name, self.name, txid=self.tx.txid, sorting_key=sorting_key)
