@@ -38,7 +38,12 @@ class TableStats:
 
     num_rows: int
     size_in_bytes: int
+    sorting_score: int
+    write_amplification: int
+    acummulative_row_inserition_count: int
     is_external_rowid_alloc: bool = False
+    sorting_key_enabled: bool = False
+    sorting_done: bool = False
     endpoints: Tuple[str, ...] = ()
 
 
@@ -725,7 +730,8 @@ class Projection:
 
 def _parse_projection_info(projection_info, table: "Table"):
     log.info("Projection info %s", str(projection_info))
-    stats = TableStats(num_rows=projection_info.num_rows, size_in_bytes=projection_info.size_in_bytes)
+    stats = TableStats(num_rows=projection_info.num_rows, size_in_bytes=projection_info.size_in_bytes,
+                       sorting_score=0, write_amplification=0, acummulative_row_inserition_count=0)
     return Projection(name=projection_info.name, table=table, stats=stats, handle=int(projection_info.handle))
 
 

@@ -794,7 +794,7 @@ def _decode_table_props(s):
     return {y: _prop_coding[x][1](z) for x, y, z in triplets if z != ''}
 
 
-TableInfo = namedtuple('TableInfo', 'name properties handle num_rows size_in_bytes num_partitions sorting_key_enabled')
+TableInfo = namedtuple('TableInfo', 'name properties handle num_rows size_in_bytes num_partitions sorting_key_enabled sorting_score write_amplification acummulative_row_insertion_count sorting_done')
 
 
 def _parse_table_info(obj, parse_properties):
@@ -806,13 +806,20 @@ def _parse_table_info(obj, parse_properties):
     num_partitions = obj.NumPartitions()
     properties = parse_properties(properties)
     sorting_key_enabled = obj.SortingKeyEnabled()
-    return TableInfo(name, properties, handle, num_rows, used_bytes, num_partitions, sorting_key_enabled)
+    sorting_score_raw = obj.SortingScore()
+    write_amplification = obj.WriteAmplification()
+    acummulative_row_insertion_count = obj.AcummulativeRowInseritionCount()
+
+    sorting_score = sorting_score_raw & ((1 << 63) - 1)
+    sorting_done = bool(sorting_score_raw >> 63)
+    return TableInfo(name, properties, handle, num_rows, used_bytes, num_partitions, sorting_key_enabled,
+                     sorting_score, write_amplification, acummulative_row_insertion_count, sorting_done)
 
 
 # Results that returns from tablestats
 
 
-TableStatsResult = namedtuple("TableStatsResult", ["num_rows", "size_in_bytes", "is_external_rowid_alloc", "endpoints"])
+TableStatsResult = namedtuple("TableStatsResult", 'num_rows size_in_bytes is_external_rowid_alloc sorting_key_enabled sorting_score write_amplification acummulative_row_inserition_count sorting_done endpoints')
 
 
 _RETRIABLE_EXCEPTIONS = (
@@ -1213,8 +1220,16 @@ class VastdbApi:
         num_rows = stats.NumRows()
         size_in_bytes = stats.SizeInBytes()
         is_external_rowid_alloc = stats.IsExternalRowidAlloc()
+        sorting_key_enabled = stats.SortingKeyEnabled()
+        sorting_score_raw = stats.SortingScore()
+        write_amplification = stats.WriteAmplification()
+        acummulative_row_inserition_count = stats.AcummulativeRowInseritionCount()
+
+        sorting_score = sorting_score_raw & ((1 << 63) - 1)
+        sorting_done = bool(sorting_score_raw >> 63)
+
         endpoints = [self.url]  # we cannot replace the host by a VIP address in HTTPS-based URLs
-        return TableStatsResult(num_rows, size_in_bytes, is_external_rowid_alloc, tuple(endpoints))
+        return TableStatsResult(num_rows, size_in_bytes, is_external_rowid_alloc, sorting_key_enabled, sorting_score, write_amplification, acummulative_row_inserition_count, sorting_done, tuple(endpoints))
 
     def alter_topic(self, bucket, name,
                     new_name="", expected_retvals=[],
