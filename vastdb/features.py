@@ -13,6 +13,7 @@ class Features:
     def __init__(self, vast_version):
         """Save the server version."""
         self.vast_version = vast_version
+        log.info("VAST version: %s", self.vast_version)
 
         self.check_imports_table = self._check(
             "Imported objects' table feature requires 5.2+ VAST release",
@@ -29,6 +30,14 @@ class Features:
         self.check_external_row_ids_allocation = self._check(
             "External row IDs allocation requires 5.1+ VAST release",
             vast_version >= (5, 1))
+
+        self.check_elysium = self._check(
+            "Elysium requires 5.3.5+ VAST release",
+            vast_version >= (5, 3, 5))
+
+        self.check_zip_import = self._check(
+            "Zip import requires 5.3.1+ VAST release",
+            vast_version >= (5, 3, 1))
 
     def _check(self, msg, supported):
         log.debug("%s (current version is %s): supported=%s", msg, self.vast_version, supported)

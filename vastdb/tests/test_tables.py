@@ -23,6 +23,16 @@ from .util import prepare_data
 log = logging.getLogger(__name__)
 
 
+@pytest.fixture
+def elysium_session(session):
+    with session.transaction() as tx:
+        try:
+            tx._rpc.features.check_elysium()
+            return session
+        except errors.NotSupportedVersion:
+            pytest.skip("Skipped because this test requires version 5.3.5 with Elysium")
+
+
 def test_tables(session, clean_bucket_name):
     columns = pa.schema([
         ('a', pa.int64()),
@@ -995,7 +1005,7 @@ def test_multiple_contains_clauses(session, clean_bucket_name):
                 t.select(predicate=pred(t)).read_all()
 
 
-def test_tables_elysium(session, clean_bucket_name):
+def test_tables_elysium(elysium_session, clean_bucket_name):
     columns = pa.schema([
         ('a', pa.int8()),
         ('b', pa.int32()),
@@ -1007,7 +1017,7 @@ def test_tables_elysium(session, clean_bucket_name):
         [111, 222, 333],
     ])
     sorting = [2, 1]
-    with prepare_data(session, clean_bucket_name, 's', 't', expected, sorting_key=sorting) as t:
+    with prepare_data(elysium_session, clean_bucket_name, 's', 't', expected, sorting_key=sorting) as t:
         sorted_columns = t.sorted_columns()
         assert sorted_columns[0].name == 'c'
         assert sorted_columns[1].name == 'b'
@@ -1037,7 +1047,7 @@ def test_tables_elysium(session, clean_bucket_name):
 #         assert sorted_columns[1].name == 'b'
 
 
-def test_elysium_tx(session, clean_bucket_name):
+def test_elysium_tx(elysium_session, clean_bucket_name):
     columns = pa.schema([
         ('a', pa.int8()),
         ('b', pa.int32()),
@@ -1051,7 +1061,7 @@ def test_elysium_tx(session, clean_bucket_name):
     sorting = [2, 1]
     schema_name = 's'
     table_name = 't'
-    with session.transaction() as tx:
+    with elysium_session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).create_schema(schema_name)
         t = s.create_table(table_name, arrow_table.schema)
         row_ids_array = t.insert(arrow_table)
@@ -1061,7 +1071,7 @@ def test_elysium_tx(session, clean_bucket_name):
         assert len(sorted_columns) == 0
         t.add_sorting_key(sorting)
 
-    with session.transaction() as tx:
+    with elysium_session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).schema(schema_name)
         t = s.table(table_name)
         sorted_columns = t.sorted_columns()
@@ -1072,7 +1082,7 @@ def test_elysium_tx(session, clean_bucket_name):
         s.drop()
 
 
-def test_elysium_double_enable(session, clean_bucket_name):
+def test_elysium_double_enable(elysium_session, clean_bucket_name):
     columns = pa.schema([
         ('a', pa.int8()),
         ('b', pa.int32()),
@@ -1085,14 +1095,14 @@ def test_elysium_double_enable(session, clean_bucket_name):
     ])
     sorting = [2, 1]
     with pytest.raises(BadRequest):
-        with prepare_data(session, clean_bucket_name, 's', 't', expected, sorting_key=sorting) as t:
+        with prepare_data(elysium_session, clean_bucket_name, 's', 't', expected, sorting_key=sorting) as t:
             sorted_columns = t.sorted_columns()
             assert sorted_columns[0].name == 'c'
             assert sorted_columns[1].name == 'b'
             t.add_sorting_key(sorting)
 
 
-def test_elysium_update_table_tx(session, clean_bucket_name):
+def test_elysium_update_table_tx(elysium_session, clean_bucket_name):
     columns = pa.schema([
         ('a', pa.int64()),
         ('b', pa.float32()),
@@ -1106,7 +1116,7 @@ def test_elysium_update_table_tx(session, clean_bucket_name):
     sorting = [2, 1]
     schema_name = 's'
     table_name = 't'
-    with session.transaction() as tx:
+    with elysium_session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).create_schema(schema_name)
         t = s.create_table(table_name, arrow_table.schema, sorting_key=sorting)
         row_ids_array = t.insert(arrow_table)
@@ -1116,7 +1126,7 @@ def test_elysium_update_table_tx(session, clean_bucket_name):
         assert sorted_columns[0].name == 's'
         assert sorted_columns[1].name == 'b'
 
-    with session.transaction() as tx:
+    with elysium_session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).schema(schema_name)
         t = s.table(table_name)
         sorted_columns = t.sorted_columns()
@@ -1163,7 +1173,7 @@ def test_elysium_update_table_tx(session, clean_bucket_name):
         }
 
 
-def test_elysium_splits(session, clean_bucket_name):
+def test_elysium_splits(elysium_session, clean_bucket_name):
     columns = pa.schema([
         ('a', pa.int32())
     ])
@@ -1179,7 +1189,7 @@ def test_elysium_splits(session, clean_bucket_name):
     schema_name = 's'
     table_name = 't'
 
-    with session.transaction() as tx:
+    with elysium_session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).create_schema(schema_name)
         t = s.create_table(table_name, arrow_table.schema, sorting_key=sorting)
         row_ids_array = t.insert(arrow_table)
@@ -1189,7 +1199,7 @@ def test_elysium_splits(session, clean_bucket_name):
         assert sorted_columns[0].name == 'a'
 
     time.sleep(300)
-    with session.transaction() as tx:
+    with elysium_session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).schema(schema_name)
         t = s.table(table_name)
         sorted_columns = t.sorted_columns()

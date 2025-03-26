@@ -7,9 +7,24 @@ import pytest
 
 from vastdb import util
 from vastdb.config import ImportConfig
-from vastdb.errors import ImportFilesError, InternalServerError, InvalidArgument
+from vastdb.errors import (
+    ImportFilesError,
+    InternalServerError,
+    InvalidArgument,
+    NotSupportedVersion,
+)
 
 log = logging.getLogger(__name__)
+
+
+@pytest.fixture
+def zip_import_session(session):
+    with session.transaction() as tx:
+        try:
+            tx._rpc.features.check_zip_import()
+            return session
+        except NotSupportedVersion:
+            pytest.skip("Skipped because this test requires version 5.3.1")
 
 
 def test_parallel_imports(session, clean_bucket_name, s3):
@@ -55,7 +70,7 @@ def test_parallel_imports(session, clean_bucket_name, s3):
         assert len(object_names) == len(objects_name['ObjectName'])
 
 
-def test_zip_imports(session, clean_bucket_name, s3):
+def test_zip_imports(zip_import_session, clean_bucket_name, s3):
     num_rows = 10
     num_files = 5
     files = []
@@ -72,7 +87,7 @@ def test_zip_imports(session, clean_bucket_name, s3):
             s3.put_object(Bucket=clean_bucket_name, Key=pname, Body=f)
             files.append(f'/{clean_bucket_name}/{pname}')
 
-    with session.transaction() as tx:
+    with zip_import_session.transaction() as tx:
         b = tx.bucket(clean_bucket_name)
         s = b.create_schema('s1')
         t = s.create_table('t1', pa.schema([('vastdb_rowid', pa.int64()), ('id', pa.int64()), ('symbol', pa.string())]))
@@ -91,17 +106,15 @@ def test_zip_imports(session, clean_bucket_name, s3):
         row_ids = row_ids_array.to_pylist()
         assert row_ids == ext_row_ids
 
-    with session.transaction() as tx:
+    with zip_import_session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).schema('s1')
         t = s.table('t1')
-        # with pytest.raises(InternalServerError):
-        #     t.create_imports_table()
         log.info("Starting import of %d files", num_files)
         config = ImportConfig()
         config.key_names = ['id', 'symbol']
         t.import_files(files, config=config)
 
-    with session.transaction() as tx:
+    with zip_import_session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).schema('s1')
         t = s.table('t1')
         arrow_table = t.select(columns=['feature0']).read_all()
