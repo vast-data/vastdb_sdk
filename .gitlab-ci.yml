@@ -4,7 +4,7 @@ variables:
   ORION_PREFIX: $DOCKER_REGISTRY/dev/orion
   PYSDK_IMAGE_PREFIX: $ORION_PREFIX:vastdb-python-sdk-pipe-$CI_PIPELINE_ID
   VASTDB_PYTHON_SDK_REPO: $DOCKER_REGISTRY/dev/vastdb-python-sdk
-  ORION_BRANCH: BUILD/eli/ORION-237693-integ-5.3.1 # based on 5.3.1
+  ORION_BRANCH: BUILD/gilad.woloch/2025-03-31-pysdk-ci  # based on release/5.3.0
   BUILDER_DOCKER_BASE_IMAGE: $VASTDB_PYTHON_SDK_REPO:alonid-rockylinux-rpm-builder-8.6.20227707
 
 

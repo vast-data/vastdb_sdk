@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.3.8] (2025-03-31)
+[1.3.8]: https://github.com/vast-data/vastdb_sdk/compare/v1.3.7...v1.3.8
+
+### Fixed
+  - Support InsufficientCapacity (fixes internal issue)
+
+### Added
+  - Add server feature supported checks
+  - Support zip import
+  - Add split estimation for sorted tables
+  - Support Update & Delete for Sorted Tables
+  - Support Elysium DDL for the pysdk
+
+### Changed
+  - Move vast_flatbuf under vastdb
+
 ## [1.3.7] (2024-12-23)
 [1.3.7]: https://github.com/vast-data/vastdb_sdk/compare/v1.3.6...v1.3.7
 
