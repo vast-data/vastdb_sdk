@@ -1302,8 +1302,8 @@ class VastdbApi:
                                           expected_retvals=expected_retvals,
                                           include_list_stats=include_list_stats, count_only=count_only)
 
-    def _list_tables_internal(self, bucket, schema, parse_properties, txid=0, client_tags=[], max_keys=1000, next_key=0, name_prefix="",
-                              exact_match=False, expected_retvals=[], include_list_stats=False, count_only=False):
+    def _list_tables_raw(self, bucket, schema, txid=0, client_tags=[], max_keys=1000, next_key=0, name_prefix="",
+                         exact_match=False, expected_retvals=[], include_list_stats=False, count_only=False):
         """
         GET /mybucket/schema_path?table HTTP/1.1
         tabular-txid: TransactionId
@@ -1323,7 +1323,6 @@ class VastdbApi:
         headers['tabular-list-count-only'] = str(count_only)
         headers['tabular-include-list-stats'] = str(include_list_stats)
 
-        tables = []
         res = self._request(
             method="GET",
             url=self._url(bucket=bucket, schema=schema, command="table"),
@@ -1333,16 +1332,35 @@ class VastdbApi:
         next_key = int(res_headers['tabular-next-key'])
         is_truncated = res_headers['tabular-is-truncated'] == 'true'
         lists = list_tables.GetRootAs(res.content)
+        tables_length = lists.TablesLength()
+        count = int(res_headers['tabular-list-count']) if 'tabular-list-count' in res_headers else tables_length
+        return lists, is_truncated, count
+
+    def _list_tables_internal(self, bucket, schema, parse_properties, txid=0, client_tags=[], max_keys=1000, next_key=0, name_prefix="",
+                              exact_match=False, expected_retvals=[], include_list_stats=False, count_only=False):
+        tables = []
+        lists, is_truncated, count = self._list_tables_raw(bucket, schema, txid=txid, client_tags=client_tags, max_keys=max_keys,
+                                 next_key=next_key, name_prefix=name_prefix, exact_match=exact_match, expected_retvals=expected_retvals,
+                                 include_list_stats=include_list_stats, count_only=count_only)
         bucket_name = lists.BucketName().decode()
         schema_name = lists.SchemaName().decode()
         if not bucket.startswith(bucket_name):  # ignore snapshot name
             raise ValueError(f'bucket: {bucket} did not start from {bucket_name}')
         tables_length = lists.TablesLength()
-        count = int(res_headers['tabular-list-count']) if 'tabular-list-count' in res_headers else tables_length
         for i in range(tables_length):
             tables.append(_parse_table_info(lists.Tables(i), parse_properties))
 
         return bucket_name, schema_name, tables, next_key, is_truncated, count
+
+    def raw_sorting_score(self, bucket, schema, txid, name):
+        lists, _, _ = self._list_tables_raw(bucket, schema, txid=txid, exact_match=True, name_prefix=name, include_list_stats=True)
+        bucket_name = lists.BucketName().decode()
+        if not bucket.startswith(bucket_name):  # ignore snapshot name
+            raise ValueError(f'bucket: {bucket} did not start from {bucket_name}')
+        tables_length = lists.TablesLength()
+        if tables_length != 1:
+            raise ValueError(f'table: {name} received {tables_length} response')
+        return lists.Tables(0).SortingScore()
 
     def add_columns(self, bucket, schema, name, arrow_schema, txid=0, client_tags=[], expected_retvals=[]):
         """

@@ -29,6 +29,7 @@ MAX_ROWS_PER_BATCH = 512 * 1024
 MAX_INSERT_ROWS_PER_PATCH = 512 * 1024
 # in case insert has TooWideRow - need to insert in smaller batches - each cell could contain up to 128K, and our wire is limited to 5MB
 MAX_COLUMN_IN_BATCH = int(5 * 1024 / 128)
+SORTING_SCORE_BITS = 63
 
 
 @dataclass
@@ -652,6 +653,20 @@ class Table:
         It is useful for constructing expressions for predicate pushdown in `Table.select()` method.
         """
         return self._ibis_table[col_name]
+
+    def sorting_done(self) -> int:
+        """Sorting done indicator for the table.  Always False for unsorted tables."""
+        if not self.sorted_table:
+            return False
+        raw_sorting_score = self.tx._rpc.api.raw_sorting_score(self.schema.bucket.name, self.schema.name, self.schema.tx.txid, self.name)
+        return bool(raw_sorting_score >> SORTING_SCORE_BITS)
+
+    def sorting_score(self) -> int:
+        """Sorting score for the table.  Always 0 for unsorted tables."""
+        if not self.sorted_table:
+            return 0
+        raw_sorting_score = self.tx._rpc.api.raw_sorting_score(self.schema.bucket.name, self.schema.name, self.schema.tx.txid, self.name)
+        return raw_sorting_score & ((1 << SORTING_SCORE_BITS) - 1)
 
 
 @dataclass
