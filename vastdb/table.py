@@ -283,8 +283,8 @@ class Table:
                         except queue.Empty:
                             pass
                         if files_batch:
-                            log.debug("Starting import batch of %s files", len(files_batch))
-                            log.info(f"starting import of {files_batch}")
+                            log.info("Starting import batch of %s files", len(files_batch))
+                            log.debug(f"starting import of {files_batch}")
                             session.import_data(
                                 self.bucket.name, self.schema.name, self.name, files_batch, txid=self.tx.txid,
                                 key_names=key_names)
@@ -378,7 +378,7 @@ class Table:
             num_rows = 0
             if self.sorted_table:
                 num_rows = self._get_row_estimate(columns, predicate, query_schema)
-                log.info(f'sorted estimate: {num_rows}')
+                log.debug(f'sorted estimate: {num_rows}')
             if num_rows == 0:
                 if stats is None:
                     stats = self.get_stats()
