@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.3.9] (2025-04-22)
+[1.3.9]: https://github.com/vast-data/vastdb_sdk/compare/v1.3.8...v1.3.9
+
+### Fixed
+  - Elysium-check validation
+  - Fix logging level
+
+### Added
+  - Support elysium new stats
+  - Exposing `sorting_done` flag for Elysium tables (for other tables, `sorting_done()` will always return false)
+
+
 ## [1.3.8] (2025-03-31)
 [1.3.8]: https://github.com/vast-data/vastdb_sdk/compare/v1.3.7...v1.3.8
 
