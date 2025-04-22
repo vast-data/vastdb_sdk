@@ -4,7 +4,7 @@ import logging
 
 from .errors import NotSupportedVersion
 
-log = logging.getLogger()
+log = logging.getLogger(__name__)
 
 
 class Features:
