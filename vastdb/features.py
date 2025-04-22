@@ -33,7 +33,7 @@ class Features:
 
         self.check_elysium = self._check(
             "Elysium requires 5.3.5+ VAST release",
-            vast_version >= (5, 3, 5))
+            vast_version >= (5, 3))  # TODO: make this validation stricter for v5.4 (beta/poc version is 5.3.0.x)
 
         self.check_zip_import = self._check(
             "Zip import requires 5.3.1+ VAST release",
