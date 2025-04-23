@@ -2,13 +2,17 @@
 
 # VAST DB Python SDK
 
-## Introduction
+A Python SDK for seamless interaction with [VAST Database](https://vastdata.com/database) and [VAST Catalog](https://vastdata.com/blog/vast-catalog-treat-your-file-system-like-a-database). Enables powerful data operations including:
 
-`vastdb` is a Python-based SDK designed for interacting with a [VAST Database](https://vastdata.com/database) and the [VAST Catalog](https://vastdata.com/blog/vast-catalog-treat-your-file-system-like-a-database), enabling schema and table management, efficient ingest, query, and modification of columnar data. 
-
-For more details about the VAST Database, see [this whitepaper](https://vastdata.com/whitepaper/#TheVASTDataBase).
+- Schema and table management
+- Efficient data ingest and querying
+- Advanced filtering with predicate pushdown
+- Direct integration with PyArrow and DuckDB
+- File system querying through VAST Catalog
 
 [![vastdb](docs/vastdb.png)](https://vastdata.com/database)
+
+For technical details about VAST Database architecture, see the [whitepaper](https://vastdata.com/whitepaper/#TheVASTDataBase).
 
 ## Getting Started
 
@@ -217,4 +221,4 @@ See these blog posts for more examples:
 - https://vastdata.com/blog/the-vast-catalog-in-action-part-1
 - https://vastdata.com/blog/the-vast-catalog-in-action-part-2
 
-See also the [full Vast DB Python SDK documentation](https://vastdb-sdk.readthedocs.io/en/v1.1.0/)
+See also the [full Vast DB Python SDK documentation](https://vastdb-sdk.readthedocs.io/en/latest/)
