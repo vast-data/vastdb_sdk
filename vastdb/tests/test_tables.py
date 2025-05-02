@@ -313,8 +313,13 @@ def test_timezones(session, clean_bucket_name):
 
     inserted = pa.table(schema=columns_with_tz, data=data)
     with prepare_data(session, clean_bucket_name, 's', 't', inserted) as table:
-        assert table.arrow_schema == columns_without_tz
-        assert table.select().read_all() == pa.table(schema=columns_without_tz, data=data)
+        try:
+            table.tx._rpc.features.check_timezone()
+            assert table.arrow_schema == columns_with_tz
+            assert table.select().read_all() == pa.table(schema=columns_with_tz, data=data)
+        except errors.NotSupportedVersion:
+            assert table.arrow_schema == columns_without_tz
+            assert table.select().read_all() == pa.table(schema=columns_without_tz, data=data)
 
 
 def test_types(session, clean_bucket_name):

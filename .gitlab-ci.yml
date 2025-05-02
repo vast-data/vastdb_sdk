@@ -4,7 +4,7 @@ variables:
   ORION_PREFIX: $DOCKER_REGISTRY/dev/orion
   PYSDK_IMAGE_PREFIX: $ORION_PREFIX:vastdb-python-sdk-pipe-$CI_PIPELINE_ID
   VASTDB_PYTHON_SDK_REPO: $DOCKER_REGISTRY/dev/vastdb-python-sdk
-  ORION_BRANCH: BUILD/roy/2025-04-22-pysdk-ci # based on release/5.4.0
+  ORION_BRANCH: TEAM/tabular-5.4
   BUILDER_DOCKER_BASE_IMAGE: $VASTDB_PYTHON_SDK_REPO:alonid-rockylinux-rpm-builder-8.6.20227707
 
 

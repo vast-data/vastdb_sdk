@@ -39,6 +39,10 @@ class Features:
             "Zip import requires 5.3.1+ VAST release",
             vast_version >= (5, 3, 1))
 
+        self.check_timezone = self._check(
+            "Timezone support requires 5.4+ Vast release",
+            vast_version >= (5, 4))
+
     def _check(self, msg, supported):
         log.debug("%s (current version is %s): supported=%s", msg, self.vast_version, supported)
         if not supported:
