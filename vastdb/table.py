@@ -1,6 +1,7 @@
 """VAST Database table."""
 
 import concurrent.futures
+import copy
 import logging
 import os
 import queue
@@ -342,8 +343,7 @@ class Table:
 
         Query-execution configuration options can be specified via the optional `config` argument.
         """
-        if config is None:
-            config = QueryConfig()
+        config = copy.deepcopy(config) if config else QueryConfig()
 
         stats = None
         # Retrieve snapshots only if needed
