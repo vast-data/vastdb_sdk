@@ -5,6 +5,7 @@ import copy
 import logging
 import os
 import queue
+import sys
 from dataclasses import dataclass, field
 from math import ceil
 from threading import Event
@@ -334,7 +335,8 @@ class Table:
                predicate: Union[ibis.expr.types.BooleanColumn, ibis.common.deferred.Deferred] = None,
                config: Optional[QueryConfig] = None,
                *,
-               internal_row_id: bool = False) -> pa.RecordBatchReader:
+               internal_row_id: bool = False,
+               limit_rows: Optional[int] = None) -> pa.RecordBatchReader:
         """Execute a query over this table.
 
         To read a subset of the columns, specify their names via `columns` argument. Otherwise, all columns will be read.
@@ -344,6 +346,9 @@ class Table:
         Query-execution configuration options can be specified via the optional `config` argument.
         """
         config = copy.deepcopy(config) if config else QueryConfig()
+
+        if limit_rows:
+            config.limit_rows_per_sub_split = limit_rows
 
         stats = None
         # Retrieve snapshots only if needed
@@ -402,7 +407,7 @@ class Table:
         for split in range(config.num_splits):
             splits_queue.put(split)
 
-        # this queue shouldn't be large it is marely a pipe through which the results
+        # this queue shouldn't be large it is merely a pipe through which the results
         # are sent to the main thread. Most of the pages actually held in the
         # threads that fetch the pages.
         record_batches_queue: queue.Queue[pa.RecordBatch] = queue.Queue(maxsize=2)
@@ -458,6 +463,7 @@ class Table:
             if config.query_id:
                 threads_prefix = threads_prefix + "-" + config.query_id
 
+            total_num_rows = limit_rows if limit_rows else sys.maxsize
             with concurrent.futures.ThreadPoolExecutor(max_workers=len(endpoints), thread_name_prefix=threads_prefix) as tp:  # TODO: concurrency == enpoints is just a heuristic
                 futures = [tp.submit(single_endpoint_worker, endpoint) for endpoint in endpoints]
                 tasks_running = len(futures)
@@ -467,7 +473,14 @@ class Table:
 
                         batch = record_batches_queue.get()
                         if batch is not None:
-                            yield batch
+                            if batch.num_rows < total_num_rows:
+                                yield batch
+                                total_num_rows -= batch.num_rows
+                            else:
+                                yield batch.slice(length=total_num_rows)
+                                log.info("reached limit rows per query: %d - stop query", limit_rows)
+                                stop_event.set()
+                                break
                         else:
                             tasks_running -= 1
                             log.debug("one worker thread finished, remaining: %d", tasks_running)

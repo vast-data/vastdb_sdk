@@ -269,6 +269,24 @@ def test_select_with_multisplits(session, clean_bucket_name):
         assert actual == expected
 
 
+def test_select_with_limit(session, clean_bucket_name):
+    columns = pa.schema([
+        ('a', pa.int32())
+    ])
+
+    data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    data = data * 1000
+    expected = pa.table(schema=columns, data=[data])
+    limit_rows = 10
+
+    with prepare_data(session, clean_bucket_name, 's', 't', expected) as t:
+        start = time.time()
+        actual = t.select(predicate=(t['a'] < 3), limit_rows=limit_rows).read_all()
+        end = time.time()
+        log.info(f"actual: {actual} elapsed time: {end - start}")
+        assert len(actual) == limit_rows
+
+
 def test_select_with_priority(session, clean_bucket_name):
     columns = pa.schema([
         ('a', pa.int32())
