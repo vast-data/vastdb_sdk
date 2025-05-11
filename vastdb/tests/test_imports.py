@@ -222,6 +222,45 @@ def test_zip_imports(zip_import_session, clean_bucket_name, s3):
     # Step 3: Import files into the table
     attempt_import(zip_import_session, clean_bucket_name, 's1', 't1', files, key_names=['id', 'symbol'])
 
+    # Step 4: Construct expected rows
+    expected_rows = []
+    for i in range(num_rows):
+        row = {
+            'vastdb_rowid': 10 + i,  # Initial vastdb_rowid values (10-19)
+            'id': i,  # ID values (0-9)
+            'symbol': chr(ord('a') + i),  # Symbol values ('a' to 'j')
+            'feature0': 0 * 10 + i,  # Values from file 1 (0-9)
+            'feature1': 1 * 10 + i,  # Values from file 2 (10-19)
+            'feature2': 2 * 10 + i,  # Values from file 3 (20-29)
+            'feature3': 3 * 10 + i,  # Values from file 4 (30-39)
+            'feature4': 4 * 10 + i,  # Values from file 5 (40-49)
+        }
+        expected_rows.append(row)
+
+    # Step 5: Query the actual data from the table
+    with zip_import_session.transaction() as tx:
+        t = tx.bucket(clean_bucket_name).schema('s1').table('t1')
+        arrow_table = t.select().read_all()
+        actual_data = arrow_table.to_pydict()
+
+    # Step 6: Compare expected and actual data
+    num_actual_rows = len(next(iter(actual_data.values()), []))
+    assert num_actual_rows == len(expected_rows), f"Expected {len(expected_rows)} rows but got {num_actual_rows}"
+
+    # Convert expected_rows to a comparable format (pydict format)
+    expected_data = {k: [] for k in expected_rows[0].keys()}
+    for row in expected_rows:
+        for k, v in row.items():
+            expected_data[k].append(v)
+
+    # Check that all expected columns exist in actual data
+    for col in expected_data:
+        assert col in actual_data, f"Expected column {col} not found in actual data"
+
+    # Compare column values
+    for col in expected_data:
+        assert actual_data[col] == expected_data[col], f"Values in column {col} don't match expected values"
+
 
 def test_zip_imports_scale(zip_import_session, clean_bucket_name, s3):
     """Verify that many key names, and large amounts of data of different kind work as expected."""
