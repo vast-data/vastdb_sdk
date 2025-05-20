@@ -853,10 +853,11 @@ class VastdbApi:
     VAST_VERSION_REGEX = re.compile(r'^vast (\d+\.\d+\.\d+\.\d+)$')
 
     def __init__(self, endpoint, access_key, secret_key,
-            *,
-            ssl_verify=True,
-            timeout=None,
-            backoff_config: Optional[BackoffConfig] = None):
+                 *,
+                 ssl_verify=True,
+                 timeout=None,
+                 backoff_config: Optional[BackoffConfig] = None,
+                 version_check=True):
 
         from . import version  # import lazily here (to avoid circular dependencies)
         self.client_sdk_version = f"VAST Database Python SDK {version()} - 2024 (c)"
@@ -896,29 +897,30 @@ class VastdbApi:
                                             aws_region='',
                                             aws_service='s3')
 
-        # probe the cluster for its version
-        res = self._request(method="GET", url=self._url(command="transaction"), skip_status_check=True)  # used only for the response headers
-        _logger.debug("headers=%s code=%s content=%s", res.headers, res.status_code, res.content)
-        server_header = res.headers.get("Server")
-        if server_header is None:
-            _logger.error("Response doesn't contain 'Server' header")
-        else:
-            if not server_header.startswith(self.VAST_SERVER_PREFIX):
-                raise UnsupportedServer(f'{self.url} is not a VAST DB server endpoint ("{server_header}")')
-
-            if m := self.VAST_VERSION_REGEX.match(server_header):
-                self.vast_version: Tuple[int, ...] = tuple(int(v) for v in m.group(1).split("."))
-                return
+        if version_check:
+            # probe the cluster for its version
+            res = self._request(method="GET", url=self._url(command="transaction"), skip_status_check=True)  # used only for the response headers
+            _logger.debug("headers=%s code=%s content=%s", res.headers, res.status_code, res.content)
+            server_header = res.headers.get("Server")
+            if server_header is None:
+                _logger.error("Response doesn't contain 'Server' header")
             else:
-                _logger.error("'Server' header '%s' doesn't match the expected pattern", server_header)
+                if not server_header.startswith(self.VAST_SERVER_PREFIX):
+                    raise UnsupportedServer(f'{self.url} is not a VAST DB server endpoint ("{server_header}")')
 
-        msg = (
-            f'Please use `vastdb` <= 0.0.5.x with current VAST cluster version ("{server_header or "N/A"}"). '
-            'To use the latest SDK, please upgrade your cluster to the latest service pack. '
-            'Please contact customer.support@vastdata.com for more details.'
-        )
-        _logger.critical(msg)
-        raise NotImplementedError(msg)
+                if m := self.VAST_VERSION_REGEX.match(server_header):
+                    self.vast_version: Tuple[int, ...] = tuple(int(v) for v in m.group(1).split("."))
+                    return
+                else:
+                    _logger.error("'Server' header '%s' doesn't match the expected pattern", server_header)
+
+            msg = (
+                f'Please use `vastdb` <= 0.0.5.x with current VAST cluster version ("{server_header or "N/A"}"). '
+                'To use the latest SDK, please upgrade your cluster to the latest service pack. '
+                'Please contact customer.support@vastdata.com for more details.'
+            )
+            _logger.critical(msg)
+            raise NotImplementedError(msg)
 
     def __enter__(self):
         """Allow using this session as a context manager."""
@@ -935,7 +937,8 @@ class VastdbApi:
             secret_key=self.secret_key,
             ssl_verify=self._session.verify,
             timeout=self.timeout,
-            backoff_config=self.backoff_config)
+            backoff_config=self.backoff_config,
+            version_check=False)
 
     def _single_request(self, *, method, url, skip_status_check=False, **kwargs):
         _logger.debug("Sending request: %s %s %s timeout=%s", method, url, kwargs, self.timeout)
