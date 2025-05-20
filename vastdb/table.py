@@ -465,7 +465,7 @@ class Table:
 
             total_num_rows = limit_rows if limit_rows else sys.maxsize
             with concurrent.futures.ThreadPoolExecutor(max_workers=len(endpoints), thread_name_prefix=threads_prefix) as tp:  # TODO: concurrency == enpoints is just a heuristic
-                futures = [tp.submit(single_endpoint_worker, endpoint) for endpoint in endpoints]
+                futures = [tp.submit(single_endpoint_worker, endpoint) for endpoint in endpoints[:config.num_splits]]
                 tasks_running = len(futures)
                 try:
                     while tasks_running > 0:
