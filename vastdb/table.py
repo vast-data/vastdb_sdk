@@ -350,12 +350,8 @@ class Table:
         if limit_rows:
             config.limit_rows_per_sub_split = limit_rows
 
-        stats = None
-        # Retrieve snapshots only if needed
         if config.data_endpoints is None:
-            stats = self.get_stats()
-            log.debug("stats: %s", stats)
-            endpoints = stats.endpoints
+            endpoints = tuple([self.tx._rpc.api.url])
         else:
             endpoints = tuple(config.data_endpoints)
         log.debug("endpoints: %s", endpoints)
@@ -385,8 +381,7 @@ class Table:
                 num_rows = self._get_row_estimate(columns, predicate, query_schema)
                 log.debug(f'sorted estimate: {num_rows}')
             if num_rows == 0:
-                if stats is None:
-                    stats = self.get_stats()
+                stats = self.get_stats()
                 num_rows = stats.num_rows
 
             config.num_splits = max(1, num_rows // config.rows_per_split)
