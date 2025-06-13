@@ -497,7 +497,13 @@ class Predicate:
             fb_bool.Start(self.builder)
             field_type = fb_bool.End(self.builder)
 
-            value = True if value == 'true' else False  # not cover all cases
+            # Handle both boolean values and string representations
+            if isinstance(value, bool):
+                value = value
+            elif isinstance(value, str):
+                value = value.lower() == 'true'
+            else:
+                value = bool(value)
         elif isinstance(field.type, pa.Decimal128Type):
             literal_type = fb_decimal_lit
             literal_impl = LiteralImpl.DecimalLiteral

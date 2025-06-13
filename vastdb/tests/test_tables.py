@@ -391,6 +391,7 @@ def test_types(session, clean_bucket_name):
         assert select(None) == expected
         for t in [table, ibis._]:
             assert select(t['tb'] == False) == expected.filter(pc.field('tb') == False)  # noqa: E712
+            assert select(t['tb'] == True) == expected.filter(pc.field('tb') == True)  # noqa: E712
             assert select(t['a1'] == 2) == expected.filter(pc.field('a1') == 2)
             assert select(t['a2'] == 2000) == expected.filter(pc.field('a2') == 2000)
             assert select(t['a4'] == 222111122) == expected.filter(pc.field('a4') == 222111122)
