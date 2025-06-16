@@ -112,12 +112,17 @@ def test_insert_empty(session, clean_bucket_name):
     data = [[None] * 5, [None] * 5]
     all_nulls = pa.table(schema=columns, data=data)
     no_columns = all_nulls.select([])
+    no_rows = pa.table(schema=columns, data=[[] for _ in columns])
 
     with session.transaction() as tx:
         t = tx.bucket(clean_bucket_name).create_schema('s').create_table('t', columns)
         t.insert(all_nulls)
+
         with pytest.raises(errors.NotImplemented):
             t.insert(no_columns)
+
+        row_ids = t.insert(no_rows).to_pylist()
+        assert row_ids == []
 
 
 def test_exists(session, clean_bucket_name):

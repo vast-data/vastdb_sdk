@@ -542,6 +542,9 @@ class Table:
         """Insert a RecordBatch into this table."""
         if self._imports_table:
             raise errors.NotSupportedCommand(self.bucket.name, self.schema.name, self.name)
+        if 0 == rows.num_rows:
+            log.debug("Ignoring empty insert into %s", self.name)
+            return pa.chunked_array([], type=INTERNAL_ROW_ID_FIELD.type)
         try:
             row_ids = []
             serialized_slices = util.iter_serialized_slices(rows, MAX_INSERT_ROWS_PER_PATCH)
@@ -554,7 +557,7 @@ class Table:
                 self.tx._rpc.features.check_return_row_ids()
             except errors.NotSupportedVersion:
                 return  # type: ignore
-            return pa.chunked_array(row_ids)
+            return pa.chunked_array(row_ids, type=INTERNAL_ROW_ID_FIELD.type)
         except errors.TooWideRow:
             self.tx._rpc.features.check_return_row_ids()
             return self.insert_in_column_batches(rows)
