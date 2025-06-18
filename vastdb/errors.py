@@ -2,6 +2,9 @@ import logging
 import xml.etree.ElementTree
 from dataclasses import dataclass
 from enum import Enum
+from typing import Optional
+
+import pyarrow as pa
 
 import requests
 
@@ -178,6 +181,16 @@ class NotSupportedCommand(NotSupported):
 class NotSupportedVersion(NotSupported):
     err_msg: str
     version: str
+
+@dataclass
+class NotSupportedSchema(NotSupported):
+    message: str
+    schema: pa.Schema
+    cause: Optional[Exception] = None
+
+    def __post_init__(self):
+        self.args = [vars(self)]
+
 
 
 @dataclass

@@ -91,6 +91,7 @@ class Schema:
         if use_external_row_ids_allocation:
             self.tx._rpc.features.check_external_row_ids_allocation()
 
+        table.Table.validate_ibis_support_schema(columns)
         self.tx._rpc.api.create_table(self.bucket.name, self.name, table_name, columns, txid=self.tx.txid,
                                       use_external_row_ids_allocation=use_external_row_ids_allocation,
                                       sorting_key=sorting_key)

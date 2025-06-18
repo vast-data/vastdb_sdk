@@ -424,6 +424,58 @@ def test_types(session, clean_bucket_name):
             assert select(t['ts9'] == ts_literal) == expected.filter(pc.field('ts9') == ts_literal)
 
 
+@pytest.mark.parametrize("arrow_type,internal_support", [
+    # Types not supported by Vast.
+    (pa.null(), False),
+    (pa.dictionary(pa.int64(), pa.int64()), False),
+    (pa.dense_union([pa.field('1', pa.int32()), pa.field('2', pa.int64())]), False),
+    # Arrow.FixedSizeBinaryType is not supported by Ibis, but Vast supports it internally.
+    (pa.binary(1), True)
+])
+def test_unsupported_types(session, clean_bucket_name, arrow_type, internal_support):
+    """ Test that unsupported types cannot be used in table creation or modification."""
+    unsupported_field = pa.field('u', arrow_type)
+    schema_name = 's'
+    table_name = 't'
+
+    # Create the schema
+    with session.transaction() as tx:
+        tx.bucket(clean_bucket_name).create_schema(schema_name)
+
+    # Creation of a table with unsupported types should fail
+    with session.transaction() as tx:
+        s = tx.bucket(clean_bucket_name).schema(schema_name)
+        with pytest.raises((errors.NotSupportedSchema, errors.BadRequest)):
+            s.create_table(table_name, pa.schema([unsupported_field]))
+
+    with session.transaction() as tx:
+        tx.bucket(clean_bucket_name).schema(schema_name).create_table(table_name,
+                                                                      pa.schema([pa.field('a', pa.int32())]))
+
+    # Adding unsupported types to an existing table should fail
+    with session.transaction() as tx:
+        t = tx.bucket(clean_bucket_name).schema(schema_name).table(table_name)
+        with pytest.raises((errors.NotSupportedSchema, errors.BadRequest)):
+            t.add_column(pa.schema([unsupported_field]))
+
+    if internal_support:
+        # Using internal API to add unsupported types
+        with session.transaction() as tx:
+            tx._rpc.api.add_columns(clean_bucket_name, schema_name, table_name, pa.schema([unsupported_field]),
+                                    txid=tx.txid)
+
+        # Attempt to open a table with unsupported types should fail
+        with session.transaction() as tx:
+            s = tx.bucket(clean_bucket_name).schema(schema_name)
+            with pytest.raises(errors.NotSupportedSchema):
+                s.table(table_name)
+
+        # Even though the table is with unsupported types, it should still be listed
+        with session.transaction() as tx:
+            s = tx.bucket(clean_bucket_name).schema(schema_name)
+            assert [table_name] == s.tablenames()
+
+
 def test_unsigned_filters(session, clean_bucket_name):
     columns = pa.schema([
         ('a', pa.uint8()),

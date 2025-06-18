@@ -6,6 +6,7 @@ import boto3
 import pytest
 
 import vastdb
+import vastdb.errors
 
 
 def pytest_addoption(parser):
@@ -65,8 +66,14 @@ def clean_bucket_name(request, test_bucket_name, session):
         b = tx.bucket(test_bucket_name)
         for top_schema in b.schemas():
             for s in iter_schemas(top_schema):
-                for t in s.tables():
-                    t.drop()
+                for t_name in s.tablenames():
+                    try:
+                        t = s.table(t_name)
+                        t.drop()
+                    except vastdb.errors.NotSupportedSchema:
+                        # Use internal API to drop the table in case unsupported schema prevents creating a table
+                        # object.
+                        tx._rpc.api.drop_table(b.name, s.name, t_name, txid=tx.txid)
                 s.drop()
     return test_bucket_name
 
