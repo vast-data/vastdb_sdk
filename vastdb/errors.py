@@ -5,7 +5,6 @@ from enum import Enum
 from typing import Optional
 
 import pyarrow as pa
-
 import requests
 
 
@@ -92,6 +91,9 @@ class ImportFilesError(Exception):
     message: str
     error_dict: dict
 
+    def __post_init__(self):
+        self.args = [vars(self)]
+
 
 class InvalidArgument(Exception):
     pass
@@ -125,17 +127,26 @@ class NotSupported(Exception):
 class MissingBucket(Missing):
     bucket: str
 
+    def __post_init__(self):
+        self.args = [vars(self)]
+
 
 @dataclass
 class MissingSnapshot(Missing):
     bucket: str
     snapshot: str
 
+    def __post_init__(self):
+        self.args = [vars(self)]
+
 
 @dataclass
 class MissingSchema(Missing):
     bucket: str
     schema: str
+
+    def __post_init__(self):
+        self.args = [vars(self)]
 
 
 @dataclass
@@ -144,6 +155,9 @@ class MissingTable(Missing):
     schema: str
     table: str
 
+    def __post_init__(self):
+        self.args = [vars(self)]
+
 
 @dataclass
 class MissingProjection(Missing):
@@ -151,6 +165,9 @@ class MissingProjection(Missing):
     schema: str
     table: str
     projection: str
+
+    def __post_init__(self):
+        self.args = [vars(self)]
 
 
 class Exists(Exception):
@@ -162,12 +179,18 @@ class SchemaExists(Exists):
     bucket: str
     schema: str
 
+    def __post_init__(self):
+        self.args = [vars(self)]
+
 
 @dataclass
 class TableExists(Exists):
     bucket: str
     schema: str
     table: str
+
+    def __post_init__(self):
+        self.args = [vars(self)]
 
 
 @dataclass
@@ -176,11 +199,18 @@ class NotSupportedCommand(NotSupported):
     schema: str
     table: str
 
+    def __post_init__(self):
+        self.args = [vars(self)]
+
 
 @dataclass
 class NotSupportedVersion(NotSupported):
     err_msg: str
     version: str
+
+    def __post_init__(self):
+        self.args = [vars(self)]
+
 
 @dataclass
 class NotSupportedSchema(NotSupported):
@@ -192,11 +222,13 @@ class NotSupportedSchema(NotSupported):
         self.args = [vars(self)]
 
 
-
 @dataclass
 class ConnectionError(Exception):
     cause: Exception
     may_retry: bool
+
+    def __post_init__(self):
+        self.args = [vars(self)]
 
 
 def handle_unavailable(**kwargs):
