@@ -445,7 +445,7 @@ def test_unsupported_types(session, clean_bucket_name, arrow_type, internal_supp
     # Creation of a table with unsupported types should fail
     with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).schema(schema_name)
-        with pytest.raises((errors.NotSupportedSchema, errors.BadRequest)):
+        with pytest.raises(errors.NotSupportedSchema):
             s.create_table(table_name, pa.schema([unsupported_field]))
 
     with session.transaction() as tx:
@@ -455,7 +455,7 @@ def test_unsupported_types(session, clean_bucket_name, arrow_type, internal_supp
     # Adding unsupported types to an existing table should fail
     with session.transaction() as tx:
         t = tx.bucket(clean_bucket_name).schema(schema_name).table(table_name)
-        with pytest.raises((errors.NotSupportedSchema, errors.BadRequest)):
+        with pytest.raises(errors.NotSupportedSchema):
             t.add_column(pa.schema([unsupported_field]))
 
     if internal_support:

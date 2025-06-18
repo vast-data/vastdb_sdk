@@ -214,8 +214,8 @@ class NotSupportedVersion(NotSupported):
 
 @dataclass
 class NotSupportedSchema(NotSupported):
-    message: str
-    schema: pa.Schema
+    message: Optional[str] = None
+    schema: Optional[pa.Schema] = None
     cause: Optional[Exception] = None
 
     def __post_init__(self):
@@ -237,7 +237,7 @@ def handle_unavailable(**kwargs):
     raise ServiceUnavailable(**kwargs)
 
 
-ERROR_TYPES_MAP = {
+HTTP_ERROR_TYPES_MAP = {
     HttpStatus.BAD_REQUEST: BadRequest,
     HttpStatus.FOBIDDEN: Forbidden,
     HttpStatus.NOT_FOUND: NotFound,
@@ -248,6 +248,10 @@ ERROR_TYPES_MAP = {
     HttpStatus.NOT_IMPLEMENTED: NotImplemented,
     HttpStatus.SERVICE_UNAVAILABLE: handle_unavailable,
     HttpStatus.INSUFFICIENT_CAPACITY: InsufficientCapacity,
+}
+
+SPECIFIC_ERROR_TYPES_MAP = {
+    'TabularUnsupportedColumnType': NotSupportedSchema,
 }
 
 
@@ -279,5 +283,10 @@ def from_response(res: requests.Response):
     )
     log.warning("RPC failed: %s", kwargs)
     status = HttpStatus(res.status_code)
-    error_type = ERROR_TYPES_MAP.get(status, UnexpectedError)
-    return error_type(**kwargs)  # type: ignore
+    http_error_type = HTTP_ERROR_TYPES_MAP.get(status, UnexpectedError)
+    http_error = http_error_type(**kwargs)  # type: ignore
+    # Wrap specific error types if applicable
+    if code_str in SPECIFIC_ERROR_TYPES_MAP:
+        error_type = SPECIFIC_ERROR_TYPES_MAP[code_str]
+        return error_type(message=message_str, cause=http_error)
+    return http_error
