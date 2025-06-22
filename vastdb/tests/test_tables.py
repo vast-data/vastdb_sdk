@@ -140,7 +140,8 @@ def test_exists(session, clean_bucket_name):
         assert s.tables() == [t]
 
 
-def test_list_tables(session, clean_bucket_name):
+@pytest.mark.parametrize("num_tables,page_size", [(10, 3)])
+def test_list_tables(session, clean_bucket_name, num_tables, page_size):
     with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).create_schema('s1')
         assert s.tables() == []
@@ -148,11 +149,13 @@ def test_list_tables(session, clean_bucket_name):
 
         tables = [
             s.create_table(f't{i}', pa.schema([(f'x{i}', pa.int64())]))
-            for i in range(10)
+            for i in range(num_tables)
         ]
         assert tables == s.tables()
         tablenames = [t.name for t in tables]
         assert s.tablenames() == tablenames
+
+        assert s.tablenames(page_size=page_size) == tablenames
 
 
 def test_update_table(session, clean_bucket_name):

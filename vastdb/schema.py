@@ -110,14 +110,14 @@ class Schema:
         log.debug("Found table: %s", t[0])
         return t[0]
 
-    def _iter_tables(self, table_name=None):
+    def _iter_tables(self, table_name=None, page_size=1000):
         next_key = 0
         name_prefix = table_name if table_name else ""
         exact_match = bool(table_name)
         while True:
             _bucket_name, _schema_name, curr_tables, next_key, is_truncated, _ = \
                 self.tx._rpc.api.list_tables(
-                    bucket=self.bucket.name, schema=self.name, next_key=next_key, txid=self.tx.txid,
+                    bucket=self.bucket.name, schema=self.name, next_key=next_key, max_keys=page_size, txid=self.tx.txid,
                     exact_match=exact_match, name_prefix=name_prefix, include_list_stats=exact_match)
             if not curr_tables:
                 break
@@ -125,19 +125,19 @@ class Schema:
             if not is_truncated:
                 break
 
-    def tables(self, table_name: str = "") -> List["Table"]:
+    def tables(self, table_name: str = "", page_size=1000) -> List["Table"]:
         """List all tables under this schema if `table_name` is empty.
 
         Otherwise, list only the specific table (if exists).
         """
         return [
             _parse_table_info(table_info, self)
-            for table_info in self._iter_tables(table_name=table_name)
+            for table_info in self._iter_tables(table_name=table_name, page_size=page_size)
         ]
 
-    def tablenames(self) -> List[str]:
+    def tablenames(self, page_size=1000) -> List[str]:
         """List all table names under this schema."""
-        return [table_info.name for table_info in self._iter_tables()]
+        return [table_info.name for table_info in self._iter_tables(page_size=page_size)]
 
     def drop(self) -> None:
         """Delete this schema."""

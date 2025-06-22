@@ -1352,12 +1352,12 @@ class VastdbApi:
         lists = list_tables.GetRootAs(res.content)
         tables_length = lists.TablesLength()
         count = int(res_headers['tabular-list-count']) if 'tabular-list-count' in res_headers else tables_length
-        return lists, is_truncated, count
+        return lists, next_key, is_truncated, count
 
     def _list_tables_internal(self, bucket, schema, parse_properties, txid=0, client_tags=[], max_keys=1000, next_key=0, name_prefix="",
                               exact_match=False, expected_retvals=[], include_list_stats=False, count_only=False):
         tables = []
-        lists, is_truncated, count = self._list_tables_raw(bucket, schema, txid=txid, client_tags=client_tags, max_keys=max_keys,
+        lists, next_key, is_truncated, count = self._list_tables_raw(bucket, schema, txid=txid, client_tags=client_tags, max_keys=max_keys,
                                  next_key=next_key, name_prefix=name_prefix, exact_match=exact_match, expected_retvals=expected_retvals,
                                  include_list_stats=include_list_stats, count_only=count_only)
         bucket_name = lists.BucketName().decode()
@@ -1371,7 +1371,7 @@ class VastdbApi:
         return bucket_name, schema_name, tables, next_key, is_truncated, count
 
     def raw_sorting_score(self, bucket, schema, txid, name):
-        lists, _, _ = self._list_tables_raw(bucket, schema, txid=txid, exact_match=True, name_prefix=name, include_list_stats=True)
+        lists, _, _, _ = self._list_tables_raw(bucket, schema, txid=txid, exact_match=True, name_prefix=name, include_list_stats=True)
         bucket_name = lists.BucketName().decode()
         if not bucket.startswith(bucket_name):  # ignore snapshot name
             raise ValueError(f'bucket: {bucket} did not start from {bucket_name}')
