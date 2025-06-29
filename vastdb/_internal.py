@@ -269,13 +269,13 @@ class Predicate:
                     for literal in literals:
                         args_offsets = [column_offset]
                         if literal is not None:
-                            args_offsets.append(self.build_literal(field=node.field, value=literal.value))
+                            args_offsets.append(self.build_literal_expression(field=node.field, value=literal.value))
                         if builder_func == self.build_between:
-                            args_offsets.append(self.build_literal(field=node.field, value=lower.value))
-                            args_offsets.append(self.build_literal(field=node.field, value=upper.value))
+                            args_offsets.append(self.build_literal_expression(field=node.field, value=lower.value))
+                            args_offsets.append(self.build_literal_expression(field=node.field, value=upper.value))
                         if builder_func == self.build_starts_with:
-                            args_offsets.append(self.build_literal(field=node.field, value=lower_bytes))
-                            args_offsets.append(self.build_literal(field=node.field, value=upper_bytes))
+                            args_offsets.append(self.build_literal_expression(field=node.field, value=lower_bytes))
+                            args_offsets.append(self.build_literal_expression(field=node.field, value=upper_bytes))
 
                         inner_offsets.append(builder_func(*args_offsets))
 
@@ -326,14 +326,14 @@ class Predicate:
         if isinstance(filter_by_name, tuple) and len(filter_by_name) == 1:
             op, value = self.rule_to_operator(filter_by_name[0])
             if value:
-                literal = self.build_literal(field=field, value=value)
+                literal = self.build_literal_expression(field=field, value=value)
                 return op(column, literal)
             return op(column)  # is_null or is_not_null operation
 
         rules = []
         for rule in filter_by_name:
             op, value = self.rule_to_operator(rule)
-            literal = self.build_literal(field=field, value=value)
+            literal = self.build_literal_expression(field=field, value=value)
             rules.append(op(column, literal))
 
         return self.build_and(rules)
@@ -359,145 +359,93 @@ class Predicate:
     # see https://github.com/apache/arrow/blob/main/format/Schema.fbs
     # https://github.com/apache/arrow/blob/apache-arrow-7.0.0/experimental/computeir/Expression.fbs
     # https://github.com/apache/arrow/blob/apache-arrow-7.0.0/experimental/computeir/Literal.fbs
-    def build_literal(self, field: pa.Field, value):
-        literal_type: Any
-
-        if field.type.equals(pa.int64()) or field.type.equals(pa.uint64()):
-            is_signed = field.type.equals(pa.int64())
-            literal_type = fb_int64_lit if is_signed else fb_uint64_lit
-            literal_impl = LiteralImpl.Int64Literal if is_signed else LiteralImpl.UInt64Literal
-
-            field_type_type = Type.Int
-            fb_int.Start(self.builder)
-            fb_int.AddBitWidth(self.builder, field.type.bit_width)
-            fb_int.AddIsSigned(self.builder, is_signed)
-            field_type = fb_int.End(self.builder)
-
+    def build_literal_impl(self, pa_type: pa.DataType, value) -> Tuple[int, int]:
+        '''
+        Builds a LiteralImpl for the given Arrow type and value.
+        :param pa_type: Literal type as defined in Arrow.
+        :param value: Value to be used in the LiteralImpl.
+        :return: Tuple[LiteralImpl, buffer_value]
+        '''
+        if pa.types.is_integer(pa_type):
+            impl_type, impl_class = None, None
             value = int(value)
-        elif field.type.equals(pa.int32()) or field.type.equals(pa.uint32()):
-            is_signed = field.type.equals(pa.int32())
-            literal_type = fb_int32_lit if is_signed else fb_uint32_lit
-            literal_impl = LiteralImpl.Int32Literal if is_signed else LiteralImpl.UInt32Literal
 
-            field_type_type = Type.Int
-            fb_int.Start(self.builder)
-            fb_int.AddBitWidth(self.builder, field.type.bit_width)
-            fb_int.AddIsSigned(self.builder, is_signed)
-            field_type = fb_int.End(self.builder)
+            if pa.types.is_int8(pa_type):
+                impl_type, impl_class = LiteralImpl.Int8Literal, fb_int8_lit
+            elif pa.types.is_uint8(pa_type):
+                impl_type, impl_class = LiteralImpl.UInt8Literal, fb_uint8_lit
+            elif pa.types.is_int16(pa_type):
+                impl_type, impl_class = LiteralImpl.Int16Literal, fb_int16_lit
+            elif pa.types.is_uint16(pa_type):
+                impl_type, impl_class = LiteralImpl.UInt16Literal, fb_uint16_lit
+            elif pa.types.is_int32(pa_type):
+                impl_type, impl_class = LiteralImpl.Int32Literal, fb_int32_lit
+            elif pa.types.is_uint32(pa_type):
+                impl_type, impl_class = LiteralImpl.UInt32Literal, fb_uint32_lit
+            elif pa.types.is_int64(pa_type):
+                impl_type, impl_class = LiteralImpl.Int64Literal, fb_int64_lit
+            elif pa.types.is_uint64(pa_type):
+                impl_type, impl_class = LiteralImpl.UInt64Literal, fb_uint64_lit
+            else:
+                raise ValueError(f'unsupported integer predicate type: {pa_type}, value={value}')
 
-            value = int(value)
-        elif field.type.equals(pa.int16()) or field.type.equals(pa.uint16()):
-            is_signed = field.type.equals(pa.int16())
-            literal_type = fb_int16_lit if is_signed else fb_uint16_lit
-            literal_impl = LiteralImpl.Int16Literal if is_signed else LiteralImpl.UInt16Literal
+            impl_class.Start(self.builder)
+            impl_class.AddValue(self.builder, value)
+            buffer_value = impl_class.End(self.builder)
+            return impl_type, buffer_value
 
-            field_type_type = Type.Int
-            fb_int.Start(self.builder)
-            fb_int.AddBitWidth(self.builder, field.type.bit_width)
-            fb_int.AddIsSigned(self.builder, is_signed)
-            field_type = fb_int.End(self.builder)
-
-            value = int(value)
-        elif field.type.equals(pa.int8()) or field.type.equals(pa.uint8()):
-            is_signed = field.type.equals(pa.int8())
-            literal_type = fb_int8_lit if is_signed else fb_uint8_lit
-            literal_impl = LiteralImpl.Int8Literal if is_signed else LiteralImpl.UInt8Literal
-
-            field_type_type = Type.Int
-            fb_int.Start(self.builder)
-            fb_int.AddBitWidth(self.builder, field.type.bit_width)
-            fb_int.AddIsSigned(self.builder, is_signed)
-            field_type = fb_int.End(self.builder)
-
-            value = int(value)
-        elif field.type.equals(pa.float32()):
-            literal_type = fb_float32_lit
-            literal_impl = LiteralImpl.Float32Literal
-
-            field_type_type = Type.FloatingPoint
-            fb_floating_point.Start(self.builder)
-            fb_floating_point.AddPrecision(self.builder, 1)  # single
-            field_type = fb_floating_point.End(self.builder)
-
+        if pa.types.is_floating(pa_type):
+            impl_type, impl_class = None, None
             value = float(value)
-        elif field.type.equals(pa.float64()):
-            literal_type = fb_float64_lit
-            literal_impl = LiteralImpl.Float64Literal
 
-            field_type_type = Type.FloatingPoint
-            fb_floating_point.Start(self.builder)
-            fb_floating_point.AddPrecision(self.builder, 2)  # double
-            field_type = fb_floating_point.End(self.builder)
+            if pa.types.is_float32(pa_type):
+                impl_type, impl_class = LiteralImpl.Float32Literal,  fb_float32_lit
+            elif pa.types.is_float64(pa_type):
+                impl_type, impl_class = LiteralImpl.Float64Literal, fb_float64_lit
+            else:
+                # Float16 is not supported by Vast.
+                raise ValueError(f'unsupported floating point predicate type: {pa_type}, value={value}')
 
-            value = float(value)
-        elif field.type.equals(pa.string()):
-            literal_type = fb_string_lit
-            literal_impl = LiteralImpl.StringLiteral
+            impl_class.Start(self.builder)
+            impl_class.AddValue(self.builder, value)
+            buffer_value = impl_class.End(self.builder)
+            return impl_type, buffer_value
 
-            field_type_type = Type.Utf8
-            fb_utf8.Start(self.builder)
-            field_type = fb_utf8.End(self.builder)
-
+        if pa_type.equals(pa.string()):
             value = self.builder.CreateString(value)
-        elif field.type.equals(pa.date32()):  # pa.date64() is not supported
-            literal_type = fb_date32_lit
-            literal_impl = LiteralImpl.DateLiteral
 
-            field_type_type = Type.Date
-            fb_date.Start(self.builder)
-            fb_date.AddUnit(self.builder, DateUnit.DAY)
-            field_type = fb_date.End(self.builder)
-            value, = pa.array([value], field.type).cast(pa.int32()).to_pylist()
-        elif isinstance(field.type, pa.TimestampType):
-            literal_type = fb_timestamp_lit
-            literal_impl = LiteralImpl.TimestampLiteral
+            fb_string_lit.Start(self.builder)
+            fb_string_lit.AddValue(self.builder, value)
+            buffer_value = fb_string_lit.End(self.builder)
+            return LiteralImpl.StringLiteral, buffer_value
 
-            if field.type.equals(pa.timestamp('s')):
-                unit = TimeUnit.SECOND
-            if field.type.equals(pa.timestamp('ms')):
-                unit = TimeUnit.MILLISECOND
-            if field.type.equals(pa.timestamp('us')):
-                unit = TimeUnit.MICROSECOND
-            if field.type.equals(pa.timestamp('ns')):
-                unit = TimeUnit.NANOSECOND
+        if pa_type.equals(pa.date32()):  # pa.date64() is not supported
+            # Assuming units are in Days. Look at get_field_type for more details.
+            value, = pa.array([value], pa_type).cast(pa.int32()).to_pylist()
 
-            field_type_type = Type.Timestamp
-            fb_timestamp.Start(self.builder)
-            fb_timestamp.AddUnit(self.builder, unit)
-            field_type = fb_timestamp.End(self.builder)
-            value, = pa.array([value], field.type).cast(pa.int64()).to_pylist()
-        elif isinstance(field.type, (pa.Time32Type, pa.Time64Type)):
-            literal_type = fb_time_lit
-            literal_impl = LiteralImpl.TimeLiteral
+            fb_date32_lit.Start(self.builder)
+            fb_date32_lit.AddValue(self.builder, value)
+            buffer_value = fb_date32_lit.End(self.builder)
+            return LiteralImpl.DateLiteral, buffer_value
 
-            if field.type.equals(pa.time32('s')):
-                target_type = pa.int32()
-                unit = TimeUnit.SECOND
-            if field.type.equals(pa.time32('ms')):
-                target_type = pa.int32()
-                unit = TimeUnit.MILLISECOND
-            if field.type.equals(pa.time64('us')):
-                target_type = pa.int64()
-                unit = TimeUnit.MICROSECOND
-            if field.type.equals(pa.time64('ns')):
-                target_type = pa.int64()
-                unit = TimeUnit.NANOSECOND
+        if pa.types.is_timestamp(pa_type):
+            value, = pa.array([value], pa_type).cast(pa.int64()).to_pylist()
 
-            field_type_type = Type.Time
-            fb_time.Start(self.builder)
-            fb_time.AddBitWidth(self.builder, field.type.bit_width)
-            fb_time.AddUnit(self.builder, unit)
-            field_type = fb_time.End(self.builder)
+            fb_timestamp_lit.Start(self.builder)
+            fb_timestamp_lit.AddValue(self.builder, value)
+            buffer_value = fb_timestamp_lit.End(self.builder)
+            return LiteralImpl.TimestampLiteral, buffer_value
 
-            value, = pa.array([value], field.type).cast(target_type).to_pylist()
-        elif field.type.equals(pa.bool_()):
-            literal_type = fb_bool_lit
-            literal_impl = LiteralImpl.BooleanLiteral
+        if pa.types.is_time(pa_type):
+            target_type = pa.int32() if pa.types.is_time32(pa_type) else pa.int64()
+            value, = pa.array([value], pa_type).cast(target_type).to_pylist()
 
-            field_type_type = Type.Bool
-            fb_bool.Start(self.builder)
-            field_type = fb_bool.End(self.builder)
+            fb_time_lit.Start(self.builder)
+            fb_time_lit.AddValue(self.builder, value)
+            buffer_value = fb_time_lit.End(self.builder)
+            return LiteralImpl.TimeLiteral, buffer_value
 
+        if pa_type.equals(pa.bool_()):
             # Handle both boolean values and string representations
             if isinstance(value, bool):
                 value = value
@@ -505,46 +453,48 @@ class Predicate:
                 value = value.lower() == 'true'
             else:
                 value = bool(value)
-        elif isinstance(field.type, pa.Decimal128Type):
-            literal_type = fb_decimal_lit
-            literal_impl = LiteralImpl.DecimalLiteral
 
-            field_type_type = Type.Decimal
-            fb_decimal.Start(self.builder)
-            fb_decimal.AddPrecision(self.builder, field.type.precision)
-            fb_decimal.AddScale(self.builder, field.type.scale)
-            field_type = fb_decimal.End(self.builder)
-            int_value = int(float(value) * 10 ** field.type.scale)
+            fb_bool_lit.Start(self.builder)
+            fb_bool_lit.AddValue(self.builder, value)
+            buffer_value = fb_bool_lit.End(self.builder)
+            return LiteralImpl.BooleanLiteral, buffer_value
+
+        if pa.types.is_decimal128(pa_type):
+            int_value = int(float(value) * 10 ** pa_type.scale)
             binary_value = int_value.to_bytes(16, 'little')
-
             value = self.builder.CreateByteVector(binary_value)
-        elif field.type.equals(pa.binary()):
-            literal_type = fb_binary_lit
-            literal_impl = LiteralImpl.BinaryLiteral
 
-            field_type_type = Type.Binary
-            fb_binary.Start(self.builder)
-            field_type = fb_binary.End(self.builder)
+            fb_decimal_lit.Start(self.builder)
+            fb_decimal_lit.AddValue(self.builder, value)
+            buffer_value = fb_decimal_lit.End(self.builder)
+            return LiteralImpl.DecimalLiteral, buffer_value
 
+        if pa_type.equals(pa.binary()):
             value = self.builder.CreateByteVector(value)
-        else:
-            raise ValueError(f'unsupported predicate for type={field.type}, value={value}')
 
-        literal_type.Start(self.builder)
-        literal_type.AddValue(self.builder, value)
-        buffer_value = literal_type.End(self.builder)
+            fb_binary_lit.Start(self.builder)
+            fb_binary_lit.AddValue(self.builder, value)
+            buffer_value = fb_binary_lit.End(self.builder)
+            return LiteralImpl.BinaryLiteral, buffer_value
 
-        fb_field.Start(self.builder)
-        fb_field.AddTypeType(self.builder, field_type_type)
-        fb_field.AddType(self.builder, field_type)
-        buffer_field = fb_field.End(self.builder)
+        raise ValueError(f'unsupported predicate for type={pa_type}, value={value}')
+
+
+    def build_literal(self, field: pa.Field, value) -> int:
+        literal_impl_type, literal_impl_buffer = self.build_literal_impl(field.type, value)
+
+        # Literal type should not contain name for more information
+        # https://github.com/apache/arrow/blob/apache-arrow-7.0.0/cpp/src/arrow/compute/exec/ir_consumer.cc#L326
+        field_buffer = build_field(self.builder, field, include_name=False)
 
         fb_literal.Start(self.builder)
-        fb_literal.AddImplType(self.builder, literal_impl)
-        fb_literal.AddImpl(self.builder, buffer_value)
-        fb_literal.AddType(self.builder, buffer_field)
-        buffer_literal = fb_literal.End(self.builder)
+        fb_literal.AddImplType(self.builder, literal_impl_type)
+        fb_literal.AddImpl(self.builder, literal_impl_buffer)
+        fb_literal.AddType(self.builder, field_buffer)
+        return fb_literal.End(self.builder)
 
+    def build_literal_expression(self, field: pa.Field, value) -> int:
+        buffer_literal = self.build_literal(field, value)
         fb_expression.Start(self.builder)
         fb_expression.AddImplType(self.builder, ExpressionImpl.Literal)
         fb_expression.AddImpl(self.builder, buffer_literal)
@@ -2305,16 +2255,16 @@ def get_field_type(builder: flatbuffers.Builder, field: pa.Field):
     return field_type, field_type_type
 
 
-def build_field(builder: flatbuffers.Builder, f: pa.Field, name: str):
+def build_field(builder: flatbuffers.Builder, f: pa.Field, include_name=True):
     children = None
     if isinstance(f.type, pa.StructType):
-        children = [build_field(builder, child, child.name) for child in list(f.type)]
+        children = [build_field(builder, child, include_name) for child in list(f.type)]
     if pa.types.is_list(f.type) or pa.types.is_fixed_size_list(f.type):
-        children = [build_field(builder, f.type.value_field, "item")]
+        children = [build_field(builder, f.type.value_field.with_name("item"), include_name)]
     if isinstance(f.type, pa.MapType):
         children = [
-            build_field(builder, f.type.key_field, "key"),
-            build_field(builder, f.type.item_field, "value"),
+            build_field(builder, f.type.key_field.with_name("key"), include_name),
+            build_field(builder, f.type.item_field.with_name("value"), include_name),
         ]
 
         # adding "entries" column:
@@ -2340,10 +2290,15 @@ def build_field(builder: flatbuffers.Builder, f: pa.Field, name: str):
             builder.PrependUOffsetTRelative(offset)
         children = builder.EndVector()
 
-    col_name = builder.CreateString(name)
+    col_name = None
+    if include_name:
+        col_name = builder.CreateString(f.name)
+
     field_type, field_type_type = get_field_type(builder, f)
     fb_field.Start(builder)
-    fb_field.AddName(builder, col_name)
+    if col_name is not None:
+        fb_field.AddName(builder, col_name)
+    fb_field.AddNullable(builder, f.nullable)
     fb_field.AddTypeType(builder, field_type_type)
     fb_field.AddType(builder, field_type)
     if children is not None:
@@ -2370,7 +2325,7 @@ def build_query_data_request(schema: 'pa.Schema' = pa.schema([]), predicate: ibi
 
     source_name = builder.CreateString('')  # required
 
-    fields = [build_field(builder, f, f.name) for f in schema]
+    fields = [build_field(builder, f) for f in schema]
 
     fb_schema.StartFieldsVector(builder, len(fields))
     for offset in reversed(fields):
