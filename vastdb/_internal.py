@@ -69,6 +69,7 @@ import vastdb.vast_flatbuf.org.apache.arrow.flatbuf.Date as fb_date
 import vastdb.vast_flatbuf.org.apache.arrow.flatbuf.Decimal as fb_decimal
 import vastdb.vast_flatbuf.org.apache.arrow.flatbuf.Field as fb_field
 import vastdb.vast_flatbuf.org.apache.arrow.flatbuf.FixedSizeBinary as fb_fixed_size_binary
+import vastdb.vast_flatbuf.org.apache.arrow.flatbuf.FixedSizeList as fb_fixed_size_list
 import vastdb.vast_flatbuf.org.apache.arrow.flatbuf.FloatingPoint as fb_floating_point
 import vastdb.vast_flatbuf.org.apache.arrow.flatbuf.Int as fb_int
 import vastdb.vast_flatbuf.org.apache.arrow.flatbuf.List as fb_list
@@ -614,7 +615,7 @@ class FieldNode:
         self.debug = debug
         if isinstance(self.type, pa.StructType):
             self.children = [FieldNode(field, index_iter, parent=self) for field in self.type]
-        elif isinstance(self.type, pa.ListType):
+        elif pa.types.is_list(self.type) or pa.types.is_fixed_size_list(self.type):
             self.children = [FieldNode(self.type.value_field, index_iter, parent=self)]
         elif isinstance(self.type, pa.MapType):
             # Map is represented as List<Struct<K, V>> in Arrow
@@ -758,7 +759,7 @@ def _iter_nested_arrays(column: pa.Array) -> Iterator[pa.Array]:
         if not column.type.num_fields == 1:  # Note: VAST serializes only a single struct field at a time
             raise ValueError(f'column.type.num_fields: {column.type.num_fields} not eq to 1')
         yield from _iter_nested_arrays(column.field(0))
-    elif isinstance(column.type, pa.ListType):
+    elif pa.types.is_list(column.type) or pa.types.is_fixed_size_list(column.type):
         yield from _iter_nested_arrays(column.values)  # Note: Map is serialized in VAST as a List<Struct<K, V>>
 
 
@@ -2276,10 +2277,16 @@ def get_field_type(builder: flatbuffers.Builder, field: pa.Field):
         fb_struct.Start(builder)
         field_type = fb_struct.End(builder)
 
-    elif isinstance(field.type, pa.ListType):
+    elif pa.types.is_list(field.type):
         field_type_type = Type.List
         fb_list.Start(builder)
         field_type = fb_list.End(builder)
+
+    elif pa.types.is_fixed_size_list(field.type):
+        field_type_type = Type.FixedSizeList
+        fb_fixed_size_list.Start(builder)
+        fb_fixed_size_list.AddListSize(builder, field.type.list_size)
+        field_type = fb_fixed_size_list.End(builder)
 
     elif isinstance(field.type, pa.MapType):
         field_type_type = Type.Map
@@ -2302,7 +2309,7 @@ def build_field(builder: flatbuffers.Builder, f: pa.Field, name: str):
     children = None
     if isinstance(f.type, pa.StructType):
         children = [build_field(builder, child, child.name) for child in list(f.type)]
-    if isinstance(f.type, pa.ListType):
+    if pa.types.is_list(f.type) or pa.types.is_fixed_size_list(f.type):
         children = [build_field(builder, f.type.value_field, "item")]
     if isinstance(f.type, pa.MapType):
         children = [
