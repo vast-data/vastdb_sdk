@@ -10,6 +10,8 @@ For more details see:
 import os
 from typing import TYPE_CHECKING, Optional
 
+from vastdb.transaction import Transaction
+
 if TYPE_CHECKING:
     from .config import BackoffConfig
 
@@ -45,7 +47,7 @@ class Session:
         """Don't show the secret key."""
         return f'{self.__class__.__name__}(endpoint={self.api.url}, access={self.api.access_key})'
 
-    def transaction(self):
+    def transaction(self) -> Transaction:
         """Create a non-initialized transaction object.
 
         It should be used as a context manager:

@@ -518,7 +518,7 @@ class Table:
 
         return pa.RecordBatchReader.from_batches(query_data_request.response_schema, batches_iterator())
 
-    def insert_in_column_batches(self, rows: pa.RecordBatch):
+    def insert_in_column_batches(self, rows: pa.RecordBatch) -> pa.ChunkedArray:
         """Split the RecordBatch into max_columns that can be inserted in single RPC.
 
         Insert first MAX_COLUMN_IN_BATCH columns and get the row_ids. Then loop on the rest of the columns and
@@ -542,7 +542,7 @@ class Table:
             self.update(rows=column_record_batch, columns=columns_name_chunk)
         return row_ids
 
-    def insert(self, rows: Union[pa.RecordBatch, pa.Table], by_columns: bool = False):
+    def insert(self, rows: Union[pa.RecordBatch, pa.Table], by_columns: bool = False) -> pa.ChunkedArray:
         """Insert a RecordBatch into this table."""
         if self._imports_table:
             raise errors.NotSupportedCommand(self.bucket.name, self.schema.name, self.name)

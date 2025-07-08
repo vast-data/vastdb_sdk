@@ -917,7 +917,7 @@ class VastdbApi:
         """Make sure that the connections closed."""
         self._session.close()
 
-    def with_endpoint(self, endpoint):
+    def with_endpoint(self, endpoint) -> 'VastdbApi':
         """Open a new session for targeting a specific endpoint."""
         return VastdbApi(endpoint=endpoint,
             access_key=self.access_key,
@@ -1592,7 +1592,7 @@ class VastdbApi:
 
         return headers
 
-    def _build_query_data_url_params(self, projection, query_imports_table):
+    def _build_query_data_url_params(self, projection: Optional[str], query_imports_table):
         if query_imports_table and projection:
             raise ValueError("Can't query both imports and projection table")
 
@@ -1604,8 +1604,8 @@ class VastdbApi:
         return url_params
 
     def query_data(self, bucket, schema, table, params, split=(0, 1, 8), num_sub_splits=1, response_row_id=False,
-                   txid=0, client_tags=[], expected_retvals=[], limit_rows=0, schedule_id=None, retry_count=0,
-                   search_path=None, sub_split_start_row_ids=[], tenant_guid=None, projection='', enable_sorted_projections=True,
+                   txid: Optional[int] = 0, client_tags=[], expected_retvals=[], limit_rows=0, schedule_id=None, retry_count=0,
+                   search_path=None, sub_split_start_row_ids=[], tenant_guid=None, projection: Optional[str] = '', enable_sorted_projections=True,
                    request_format='string', response_format='string', query_imports_table=False):
         """
         GET /mybucket/myschema/mytable?data HTTP/1.1
@@ -2343,14 +2343,16 @@ class QueryDataRequest:
         self.response_parser = response_parser
 
 
-def get_response_schema(schema: 'pa.Schema' = pa.schema([]), field_names: Optional[List[str]] = None):
+def get_response_schema(schema: 'pa.Schema' = pa.schema([]), field_names: Optional[List[str]] = None) -> pa.Schema:
     if field_names is None:
         field_names = [field.name for field in schema]
 
     return pa.schema([schema.field(name) for name in field_names])
 
 
-def build_query_data_request(schema: 'pa.Schema' = pa.schema([]), predicate: ibis.expr.types.BooleanColumn = None, field_names: Optional[List[str]] = None):
+def build_query_data_request(schema: 'pa.Schema' = pa.schema([]),
+                             predicate: ibis.expr.types.BooleanColumn = None,
+                             field_names: Optional[List[str]] = None) -> QueryDataRequest:
     builder = flatbuffers.Builder(1024)
 
     source_name = builder.CreateString('')  # required

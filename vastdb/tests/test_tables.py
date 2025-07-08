@@ -17,6 +17,7 @@ from requests.exceptions import HTTPError
 from vastdb.errors import BadRequest
 from vastdb.session import Session
 
+from session import Session
 from .. import errors
 from ..table import INTERNAL_ROW_ID, QueryConfig
 from .util import assert_row_ids_ascending_on_first_insertion_to_table, prepare_data
@@ -25,7 +26,7 @@ log = logging.getLogger(__name__)
 
 
 @pytest.fixture
-def elysium_session(session):
+def elysium_session(session: Session):
     with session.transaction() as tx:
         try:
             tx._rpc.features.check_elysium()
