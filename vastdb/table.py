@@ -9,7 +9,7 @@ import sys
 from dataclasses import dataclass, field
 from math import ceil
 from threading import Event
-from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union, Set
 
 import ibis
 import pyarrow as pa
@@ -473,7 +473,7 @@ class Table:
                 record_batches_queue.put(None)
 
         def batches_iterator():
-            def propagate_first_exception(futures: List[concurrent.futures.Future], block=False):
+            def propagate_first_exception(futures: Set[concurrent.futures.Future], block=False) -> Set[concurrent.futures.Future]:
                 done, not_done = concurrent.futures.wait(futures, None if block else 0, concurrent.futures.FIRST_EXCEPTION)
                 if self.tx.txid is None:
                     raise errors.MissingTransaction()
@@ -488,7 +488,8 @@ class Table:
 
             total_num_rows = limit_rows if limit_rows else sys.maxsize
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix=threads_prefix) as tp:
-                futures = [tp.submit(single_endpoint_worker, endpoint) for endpoint in endpoints[:config.num_splits]]
+                futures: Set[concurrent.futures.Future] = {tp.submit(single_endpoint_worker, endpoint)
+                                                           for endpoint in endpoints[:config.num_splits]}
                 tasks_running = len(futures)
                 try:
                     while tasks_running > 0:
