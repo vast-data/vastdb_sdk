@@ -49,11 +49,13 @@ class TableStats:
     endpoints: Tuple[str, ...] = ()
 
 
-class SelectSplitState:
+
+class SplitWorker:
     """State of a specific query split execution."""
 
     def __init__(self,
-                 query_data_request,
+                 api: _internal.VastdbApi,
+                 query_data_request: _internal.QueryDataRequest,
                  bucket_name: str,
                  schema_name: str,
                  table_name: str,
@@ -62,6 +64,7 @@ class SelectSplitState:
                  split_id: int,
                  config: QueryConfig) -> None:
         """Initialize query split state."""
+        self.api = api
         self.split_id = split_id
         self.subsplits_state = {i: 0 for i in range(config.num_sub_splits)}
         self.config = config
@@ -73,8 +76,7 @@ class SelectSplitState:
         self.query_imports_table = query_imports_table
         
 
-
-    def process_split(self, api: _internal.VastdbApi, record_batches_queue: queue.Queue[pa.RecordBatch], check_stop: Callable):
+    def __iter__(self):
         """Execute a sequence of QueryData requests, and queue the parsed RecordBatch objects.
 
         Can be called repeatedly, to support resuming the query after a disconnection / retriable error.
@@ -83,7 +85,7 @@ class SelectSplitState:
             # contains RecordBatch parts received from the server, must be re-created in case of a retry
             while not self.done:
                 # raises if request parsing fails or throttled due to server load, and will be externally retried
-                response = api.query_data(
+                response = self.api.query_data(
                                 bucket=self.bucket_name,
                                 schema=self.schema_name,
                                 table=self.table_name,
@@ -113,9 +115,7 @@ class SelectSplitState:
                     # we have parsed a pyarrow.Table successfully, self.subsplits_state is now correctly updated
                     # if the below loop fails, the query is not retried
                     for batch in table_chunk.to_batches():
-                        check_stop()  # may raise StoppedException to early-exit the query (without retries)
-                        if batch:
-                            record_batches_queue.put(batch)
+                        yield batch
         except urllib3.exceptions.ProtocolError as err:
             fully_qualified_table_name = f"\"{self.bucket_name}/{self.schema_name}\".{self.table_name}"
             log.warning("Failed parsing QueryData response table=%s txid=%s split=%s/%s offsets=%s cause=%s",
@@ -123,6 +123,19 @@ class SelectSplitState:
                         self.split_id, self.config.num_splits, self.subsplits_state, err)
             # since this is a read-only idempotent operation, it is safe to retry
             raise errors.ConnectionError(cause=err, may_retry=True)
+
+    def split_record_batch_reader(self) -> pa.RecordBatchReader:
+        """Return pa.RecordBatchReader for split."""
+        return pa.RecordBatchReader.from_batches(self.query_data_request.response_schema,
+                                                 self)
+
+    def _process_split(self, record_batches_queue: queue.Queue[pa.RecordBatch], check_stop: Callable):
+        """Process split and enqueues batches into the queue."""
+        for batch in self:
+            check_stop()  # may raise StoppedException to early-exit the query (without retries)
+            if batch:
+                record_batches_queue.put(batch)
+
 
     @property
     def done(self):
@@ -472,17 +485,19 @@ class Table:
                             log.debug("splits queue is empty")
                             break
 
-                        split_state = SelectSplitState(query_data_request=query_data_request,
-                                                       bucket_name=self.schema.bucket.name,
-                                                       schema_name=self.schema.name,
-                                                       table_name=self.name,
-                                                       txid=self.tx.txid,
-                                                       query_imports_table=self._imports_table,
-                                                       split_id=split,
-                                                       config=config)
+                        split_state = SplitWorker(
+                            api=host_api,
+                            query_data_request=query_data_request,
+                            bucket_name=self.schema.bucket.name,
+                            schema_name=self.schema.name,
+                            table_name=self.name,
+                            txid=self.tx.txid,
+                            query_imports_table=self._imports_table,
+                            split_id=split,
+                            config=config)
 
-                        process_with_retries = backoff_decorator(split_state.process_split)
-                        process_with_retries(host_api, record_batches_queue, check_stop)
+                        process_with_retries = backoff_decorator(split_state._process_split)
+                        process_with_retries(record_batches_queue, check_stop)
 
             except StoppedException:
                 log.debug("stop signal.", exc_info=True)
