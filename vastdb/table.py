@@ -1,6 +1,7 @@
 """VAST Database table."""
 
 import concurrent.futures
+import itertools
 import copy
 import logging
 import os
@@ -34,6 +35,13 @@ MAX_COLUMN_IN_BATCH = int(5 * 1024 / 128)
 SORTING_SCORE_BITS = 63
 
 
+class _EmptyResultException(Exception):
+    response_schema: pa.Schema
+
+    def __init__(self, response_schema: pa.Schema):
+        self.response_schema = response_schema
+
+
 @dataclass
 class TableStats:
     """Table-related information."""
@@ -49,6 +57,18 @@ class TableStats:
     endpoints: Tuple[str, ...] = ()
 
 
+@dataclass
+class SplitWorkerConfig:
+    """Split worker configuration."""
+
+    num_splits: int
+    num_sub_splits: int
+    num_row_groups_per_sub_split: int
+    limit_rows_per_sub_split: int
+    use_semi_sorted_projections: bool
+    queue_priority: Optional[int]
+    semi_sorted_projection_name: Optional[str]
+
 
 class SplitWorker:
     """State of a specific query split execution."""
@@ -62,19 +82,18 @@ class SplitWorker:
                  txid: Optional[int],
                  query_imports_table: bool,
                  split_id: int,
-                 config: QueryConfig) -> None:
+                 config: SplitWorkerConfig) -> None:
         """Initialize query split state."""
         self.api = api
         self.split_id = split_id
         self.subsplits_state = {i: 0 for i in range(config.num_sub_splits)}
-        self.config = config
         self.query_data_request = query_data_request
         self.bucket_name = bucket_name
         self.schema_name = schema_name
         self.table_name = table_name
         self.txid = txid
         self.query_imports_table = query_imports_table
-        
+        self.config = config
 
     def __iter__(self):
         """Execute a sequence of QueryData requests, and queue the parsed RecordBatch objects.
@@ -86,20 +105,21 @@ class SplitWorker:
             while not self.done:
                 # raises if request parsing fails or throttled due to server load, and will be externally retried
                 response = self.api.query_data(
-                                bucket=self.bucket_name,
-                                schema=self.schema_name,
-                                table=self.table_name,
-                                params=self.query_data_request.serialized,
-                                split=(self.split_id, self.config.num_splits, self.config.num_row_groups_per_sub_split),
-                                num_sub_splits=self.config.num_sub_splits,
-                                response_row_id=False,
-                                txid=self.txid,
-                                limit_rows=self.config.limit_rows_per_sub_split,
-                                sub_split_start_row_ids=self.subsplits_state.items(),
-                                schedule_id=self.config.queue_priority,
-                                enable_sorted_projections=self.config.use_semi_sorted_projections,
-                                query_imports_table=self.query_imports_table,
-                                projection=self.config.semi_sorted_projection_name)
+                    bucket=self.bucket_name,
+                    schema=self.schema_name,
+                    table=self.table_name,
+                    params=self.query_data_request.serialized,
+                    split=(self.split_id, self.config.num_splits,
+                           self.config.num_row_groups_per_sub_split),
+                    num_sub_splits=self.config.num_sub_splits,
+                    response_row_id=False,
+                    txid=self.txid,
+                    limit_rows=self.config.limit_rows_per_sub_split,
+                    sub_split_start_row_ids=self.subsplits_state.items(),
+                    schedule_id=self.config.queue_priority,
+                    enable_sorted_projections=self.config.use_semi_sorted_projections,
+                    query_imports_table=self.query_imports_table,
+                    projection=self.config.semi_sorted_projection_name)
 
                 # can raise during response parsing (e.g. due to disconnections), and will be externally retried
                 # the pagination state is stored in `self.subsplits_state` and must be correct in case of a reconnection
@@ -135,7 +155,6 @@ class SplitWorker:
             check_stop()  # may raise StoppedException to early-exit the query (without retries)
             if batch:
                 record_batches_queue.put(batch)
-
 
     @property
     def done(self):
@@ -384,6 +403,114 @@ class Table:
         batch = _internal.read_first_batch(response.raw)
         return batch.num_rows * 2**16 if batch is not None else 0
 
+    def _select_prepare(self,
+                        config: QueryConfig,
+                        columns: Optional[List[str]] = None,
+                        predicate: Union[ibis.expr.types.BooleanColumn,
+                                         ibis.common.deferred.Deferred] = None,
+                        *,
+                        internal_row_id: bool = False,
+                        limit_rows: Optional[int] = None) -> Tuple[SplitWorkerConfig, _internal.QueryDataRequest, Tuple[str]]:
+        if config.data_endpoints is None:
+            endpoints = tuple([self.tx._rpc.api.url])
+        else:
+            endpoints = tuple(config.data_endpoints)
+        log.debug("endpoints: %s", endpoints)
+
+        if columns is None:
+            columns = [f.name for f in self.arrow_schema]
+
+        query_schema = self.arrow_schema
+        if internal_row_id:
+            queried_fields = [
+                INTERNAL_ROW_ID_SORTED_FIELD if self.sorted_table else INTERNAL_ROW_ID_FIELD]
+            queried_fields.extend(column for column in self.arrow_schema)
+            query_schema = pa.schema(queried_fields)
+            columns.append(INTERNAL_ROW_ID)
+
+        if predicate is True:
+            predicate = None
+        if predicate is False:
+            raise _EmptyResultException(
+                response_schema=_internal.get_response_schema(schema=query_schema, field_names=columns))
+
+        if isinstance(predicate, ibis.common.deferred.Deferred):
+            # may raise if the predicate is invalid (e.g. wrong types / missing column)
+            predicate = predicate.resolve(self._ibis_table)
+
+        if config.num_splits:
+            num_splits = config.num_splits
+        else:
+            num_rows = 0
+            if self.sorted_table:
+                num_rows = self._get_row_estimate(
+                    columns, predicate, query_schema)
+                log.debug(f'sorted estimate: {num_rows}')
+            if num_rows == 0:
+                stats = self.get_stats()
+                num_rows = stats.num_rows
+
+            num_splits = max(1, num_rows // config.rows_per_split)
+
+        log.debug("config: %s", config)
+
+        if config.semi_sorted_projection_name:
+            self.tx._rpc.features.check_enforce_semisorted_projection()
+
+        query_data_request = _internal.build_query_data_request(
+            schema=query_schema,
+            predicate=predicate,
+            field_names=columns)
+        if len(query_data_request.serialized) > util.MAX_QUERY_DATA_REQUEST_SIZE:
+            raise errors.TooLargeRequest(
+                f"{len(query_data_request.serialized)} bytes")
+
+        split_config = SplitWorkerConfig(
+            num_splits=num_splits,
+            num_sub_splits=config.num_sub_splits,
+            num_row_groups_per_sub_split=config.num_row_groups_per_sub_split,
+            limit_rows_per_sub_split=limit_rows or config.limit_rows_per_sub_split,
+            use_semi_sorted_projections=config.use_semi_sorted_projections,
+            queue_priority=config.queue_priority,
+            semi_sorted_projection_name=config.semi_sorted_projection_name)
+
+        return split_config, query_data_request, endpoints
+
+    def select_splits(self, columns: Optional[List[str]] = None,
+                      predicate: Union[ibis.expr.types.BooleanColumn,
+                                       ibis.common.deferred.Deferred] = None,
+                      config: Optional[QueryConfig] = None,
+                      *,
+                      internal_row_id: bool = False,
+                      limit_rows: Optional[int] = None) -> List[pa.RecordBatchReader]:
+        """Return pa.RecordBatchReader for each split."""
+        config = config or QueryConfig()
+
+        try:
+            split_config, query_data_request, endpoints = self._select_prepare(
+                config, columns, predicate, internal_row_id=internal_row_id, limit_rows=limit_rows)
+        except _EmptyResultException:
+            return []
+
+        endpoint_api = itertools.cycle([
+            self.tx._rpc.api.with_endpoint(endpoint)
+            for endpoint in endpoints])
+
+        return [
+            SplitWorker(
+                api=next(endpoint_api),
+                query_data_request=query_data_request,
+                bucket_name=self.schema.bucket.name,
+                schema_name=self.schema.name,
+                table_name=self.name,
+                txid=self.tx.txid,
+                query_imports_table=self._imports_table,
+                split_id=split,
+                config=split_config
+            ).split_record_batch_reader()
+            for split in range(split_config.num_splits)
+        ]
+
     def select(self, columns: Optional[List[str]] = None,
                predicate: Union[ibis.expr.types.BooleanColumn, ibis.common.deferred.Deferred] = None,
                config: Optional[QueryConfig] = None,
@@ -398,61 +525,20 @@ class Table:
 
         Query-execution configuration options can be specified via the optional `config` argument.
         """
-        config = copy.deepcopy(config) if config else QueryConfig()
+        config = config or QueryConfig()
 
-        if limit_rows:
-            config.limit_rows_per_sub_split = limit_rows
-
-        if config.data_endpoints is None:
-            endpoints = tuple([self.tx._rpc.api.url])
-        else:
-            endpoints = tuple(config.data_endpoints)
-        log.debug("endpoints: %s", endpoints)
-
-        if columns is None:
-            columns = [f.name for f in self.arrow_schema]
-
-        query_schema = self.arrow_schema
-        if internal_row_id:
-            queried_fields = [INTERNAL_ROW_ID_SORTED_FIELD if self.sorted_table else INTERNAL_ROW_ID_FIELD]
-            queried_fields.extend(column for column in self.arrow_schema)
-            query_schema = pa.schema(queried_fields)
-            columns.append(INTERNAL_ROW_ID)
-
-        if predicate is True:
-            predicate = None
-        if predicate is False:
-            response_schema = _internal.get_response_schema(schema=query_schema, field_names=columns)
-            return pa.RecordBatchReader.from_batches(response_schema, [])
-
-        if isinstance(predicate, ibis.common.deferred.Deferred):
-            predicate = predicate.resolve(self._ibis_table)  # may raise if the predicate is invalid (e.g. wrong types / missing column)
-
-        if config.num_splits is None:
-            num_rows = 0
-            if self.sorted_table:
-                num_rows = self._get_row_estimate(columns, predicate, query_schema)
-                log.debug(f'sorted estimate: {num_rows}')
-            if num_rows == 0:
-                stats = self.get_stats()
-                num_rows = stats.num_rows
-
-            config.num_splits = max(1, num_rows // config.rows_per_split)
-        log.debug("config: %s", config)
-
-        if config.semi_sorted_projection_name:
-            self.tx._rpc.features.check_enforce_semisorted_projection()
-
-        query_data_request = _internal.build_query_data_request(
-            schema=query_schema,
-            predicate=predicate,
-            field_names=columns)
-        if len(query_data_request.serialized) > util.MAX_QUERY_DATA_REQUEST_SIZE:
-            raise errors.TooLargeRequest(f"{len(query_data_request.serialized)} bytes")
+        try:
+            split_config, query_data_request, endpoints = self._select_prepare(config,
+                                                                               columns,
+                                                                               predicate,
+                                                                               internal_row_id=internal_row_id,
+                                                                               limit_rows=limit_rows)
+        except _EmptyResultException as e:
+            return pa.RecordBatchReader.from_batches(e.response_schema, [])
 
         splits_queue: queue.Queue[int] = queue.Queue()
 
-        for split in range(config.num_splits):
+        for split in range(split_config.num_splits):
             splits_queue.put(split)
 
         # this queue shouldn't be large it is merely a pipe through which the results
@@ -494,7 +580,7 @@ class Table:
                             txid=self.tx.txid,
                             query_imports_table=self._imports_table,
                             split_id=split,
-                            config=config)
+                            config=split_config)
 
                         process_with_retries = backoff_decorator(split_state._process_split)
                         process_with_retries(record_batches_queue, check_stop)
