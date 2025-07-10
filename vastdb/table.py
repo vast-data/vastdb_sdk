@@ -52,13 +52,27 @@ class TableStats:
 class SelectSplitState:
     """State of a specific query split execution."""
 
-    def __init__(self, query_data_request, table: "Table", split_id: int, config: QueryConfig) -> None:
+    def __init__(self,
+                 query_data_request,
+                 bucket_name: str,
+                 schema_name: str,
+                 table_name: str,
+                 txid: Optional[int],
+                 query_imports_table: bool,
+                 split_id: int,
+                 config: QueryConfig) -> None:
         """Initialize query split state."""
         self.split_id = split_id
         self.subsplits_state = {i: 0 for i in range(config.num_sub_splits)}
         self.config = config
         self.query_data_request = query_data_request
-        self.table = table
+        self.bucket_name = bucket_name
+        self.schema_name = schema_name
+        self.table_name = table_name
+        self.txid = txid
+        self.query_imports_table = query_imports_table
+        
+
 
     def process_split(self, api: _internal.VastdbApi, record_batches_queue: queue.Queue[pa.RecordBatch], check_stop: Callable):
         """Execute a sequence of QueryData requests, and queue the parsed RecordBatch objects.
@@ -70,19 +84,19 @@ class SelectSplitState:
             while not self.done:
                 # raises if request parsing fails or throttled due to server load, and will be externally retried
                 response = api.query_data(
-                                bucket=self.table.bucket.name,
-                                schema=self.table.schema.name,
-                                table=self.table.name,
+                                bucket=self.bucket_name,
+                                schema=self.schema_name,
+                                table=self.table_name,
                                 params=self.query_data_request.serialized,
                                 split=(self.split_id, self.config.num_splits, self.config.num_row_groups_per_sub_split),
                                 num_sub_splits=self.config.num_sub_splits,
                                 response_row_id=False,
-                                txid=self.table.tx.txid,
+                                txid=self.txid,
                                 limit_rows=self.config.limit_rows_per_sub_split,
                                 sub_split_start_row_ids=self.subsplits_state.items(),
                                 schedule_id=self.config.queue_priority,
                                 enable_sorted_projections=self.config.use_semi_sorted_projections,
-                                query_imports_table=self.table._imports_table,
+                                query_imports_table=self.query_imports_table,
                                 projection=self.config.semi_sorted_projection_name)
 
                 # can raise during response parsing (e.g. due to disconnections), and will be externally retried
@@ -103,8 +117,10 @@ class SelectSplitState:
                         if batch:
                             record_batches_queue.put(batch)
         except urllib3.exceptions.ProtocolError as err:
-            log.warning("Failed parsing QueryData response table=%r split=%s/%s offsets=%s cause=%s",
-                        self.table, self.split_id, self.config.num_splits, self.subsplits_state, err)
+            fully_qualified_table_name = f"\"{self.bucket_name}/{self.schema_name}\".{self.table_name}"
+            log.warning("Failed parsing QueryData response table=%s txid=%s split=%s/%s offsets=%s cause=%s",
+                        fully_qualified_table_name, self.txid,
+                        self.split_id, self.config.num_splits, self.subsplits_state, err)
             # since this is a read-only idempotent operation, it is safe to retry
             raise errors.ConnectionError(cause=err, may_retry=True)
 
@@ -457,7 +473,11 @@ class Table:
                             break
 
                         split_state = SelectSplitState(query_data_request=query_data_request,
-                                                       table=self,
+                                                       bucket_name=self.schema.bucket.name,
+                                                       schema_name=self.schema.name,
+                                                       table_name=self.name,
+                                                       txid=self.tx.txid,
+                                                       query_imports_table=self._imports_table,
                                                        split_id=split,
                                                        config=config)
 
