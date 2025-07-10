@@ -14,6 +14,7 @@ import pyarrow.compute as pc
 import pyarrow.parquet as pq
 import pytest
 from requests.exceptions import HTTPError
+from session import Session
 
 from vastdb import errors
 from vastdb.session import Session
