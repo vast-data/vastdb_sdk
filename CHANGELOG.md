@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.3.11] (2025-007-10)
+[1.3.11]: https://github.com/vast-data/vastdb_sdk/compare/v1.3.10...v1.3.11
+
+### Added
+- Support Tables with FixedSizeListArray of Numerics
+
+## Fixed
+- Table insert with no rows
+- Boolean predicates
+- List tables with pagination
+- Amount of threads used for parallel queries
+
+
 ## [1.3.10] (2025-05-11)
 [1.3.10]: https://github.com/vast-data/vastdb_sdk/compare/v1.3.9...v1.3.10
 
