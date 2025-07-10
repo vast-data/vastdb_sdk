@@ -2,7 +2,6 @@
 
 import concurrent.futures
 import itertools
-import copy
 import logging
 import os
 import queue
@@ -10,7 +9,7 @@ import sys
 from dataclasses import dataclass, field
 from math import ceil
 from threading import Event
-from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union, Set
+from typing import Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
 
 import ibis
 import pyarrow as pa

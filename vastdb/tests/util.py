@@ -1,6 +1,6 @@
 import logging
 from contextlib import contextmanager
-from typing import Any, cast, List
+from typing import Any, List, cast
 
 import numpy as np
 import pandas as pd
@@ -23,7 +23,7 @@ def assert_row_ids_ascending_on_first_insertion_to_table(row_ids, expected_num_r
 @contextmanager
 def prepare_data(session: Session,
                  clean_bucket_name: str, schema_name: str, table_name: str,
-                 arrow_table: pa.Table, sorting_key: List[str]=[]):
+                 arrow_table: pa.Table, sorting_key: List[str] = []):
     with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).create_schema(schema_name)
         t = s.create_table(table_name, arrow_table.schema, sorting_key=sorting_key)
