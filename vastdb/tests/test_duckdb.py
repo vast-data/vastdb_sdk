@@ -32,6 +32,8 @@ def test_duckdb(session, clean_bucket_name):
 
 
 def test_closed_tx(session, clean_bucket_name):
+    assert duckdb.__version__ == "1.0.0", "doesn't reproduce with newer duckdb versions, when updating duckdb in tests/when relevant need to update this test accordingly."
+
     columns = pa.schema([
         ('a', pa.int64()),
     ])

@@ -3,7 +3,7 @@
 black
 boto3
 coverage
-duckdb
+duckdb==1.0.0
 exchange-calendars
 fsspec
 ipython
