@@ -1,5 +1,9 @@
 -r requirements.txt
 
+# for dev requirements it is ok to take from pypi
+--index-url https://pypi.org/simple
+--trusted-host pypi.org
+
 black
 boto3
 coverage
@@ -8,11 +12,13 @@ exchange-calendars
 fsspec
 ipython
 mypy
-pandas-stubs
+pandas-stubs==2.2.2.240807
+pandas==2.2.2
 pytest
 pytest-cov
 pytest-retry
 pytest-xdist
+pytest-check
 ruff
 twine
 typer

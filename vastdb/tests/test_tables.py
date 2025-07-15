@@ -8,17 +8,17 @@ from contextlib import closing
 from tempfile import NamedTemporaryFile
 
 import ibis
+import pandas as pd
 import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 import pytest
 from requests.exceptions import HTTPError
 
-from vastdb.errors import BadRequest
+from vastdb import errors
 from vastdb.session import Session
+from vastdb.table import INTERNAL_ROW_ID, QueryConfig
 
-from .. import errors
-from ..table import INTERNAL_ROW_ID, QueryConfig
 from .util import assert_row_ids_ascending_on_first_insertion_to_table, prepare_data
 
 log = logging.getLogger(__name__)
@@ -1185,7 +1185,7 @@ def test_elysium_double_enable(elysium_session, clean_bucket_name):
         [111, 222, 333],
     ])
     sorting = [2, 1]
-    with pytest.raises(BadRequest):
+    with pytest.raises(errors.BadRequest):
         with prepare_data(elysium_session, clean_bucket_name, 's', 't', expected, sorting_key=sorting) as t:
             sorted_columns = t.sorted_columns()
             assert sorted_columns[0].name == 'c'
@@ -1298,3 +1298,43 @@ def test_elysium_splits(elysium_session, clean_bucket_name):
 
         actual = t.select(columns=['a'], predicate=(t['a'] == 1), config=config).read_all()
         assert len(actual) == 10000
+
+
+def to_df(table: pa.Table) -> pd.DataFrame:
+    return table.to_pandas().sort_values(by='a').reset_index(drop=True)
+
+
+def test_select_splits_sanity(session, clean_bucket_name, check):
+    columns = pa.schema([
+        ('a', pa.int64()),
+        ('b', pa.float32()),
+        ('c', pa.utf8()),
+    ])
+
+    length = 1000000
+
+    expected = pa.table(schema=columns, data=[
+        list(range(length)),
+        [i * 0.001 for i in range(length)],
+        [f'a{i}' for i in range(length)],
+    ])
+
+    query_config = QueryConfig(
+        num_sub_splits=1,
+        num_splits=4,
+        limit_rows_per_sub_split=2500,
+        num_row_groups_per_sub_split=1,
+    )
+
+    with prepare_data(session, clean_bucket_name, 's', 't', expected) as t:
+        splits_readers = t.select_splits(
+            columns=['a', 'b', 'c'], config=query_config)
+        splits_reader_tables = [splits_reader.read_all().combine_chunks()
+                            for splits_reader in splits_readers]
+
+        for splits_reader_table in splits_reader_tables:
+            check.greater(splits_reader_table.num_rows, 0, "if splits readers are empty test is not interesting")
+
+        actual = pa.concat_tables(splits_reader_tables).combine_chunks()
+
+        check.is_true(to_df(actual).equals(to_df(expected)))
