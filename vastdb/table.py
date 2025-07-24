@@ -538,13 +538,18 @@ class Table:
             self.update(rows=column_record_batch, columns=columns_name_chunk)
         return row_ids
 
-    def insert(self, rows: Union[pa.RecordBatch, pa.Table]):
+    def insert(self, rows: Union[pa.RecordBatch, pa.Table], by_columns: bool = False):
         """Insert a RecordBatch into this table."""
         if self._imports_table:
             raise errors.NotSupportedCommand(self.bucket.name, self.schema.name, self.name)
         if 0 == rows.num_rows:
             log.debug("Ignoring empty insert into %s", self.name)
             return pa.chunked_array([], type=INTERNAL_ROW_ID_FIELD.type)
+
+        if by_columns:
+            self.tx._rpc.features.check_return_row_ids()
+            return self.insert_in_column_batches(rows)
+
         try:
             row_ids = []
             serialized_slices = util.iter_serialized_slices(rows, MAX_INSERT_ROWS_PER_PATCH)
