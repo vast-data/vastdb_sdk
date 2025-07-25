@@ -532,7 +532,7 @@ class Table:
             columns_name_chunk = columns_names[start:end]
             columns_chunks = columns[start:end]
             arrays_chunks = arrays[start:end]
-            columns_chunks.append(INTERNAL_ROW_ID_FIELD)
+            columns_chunks.append(INTERNAL_ROW_ID_SORTED_FIELD if self.sorted_table else INTERNAL_ROW_ID_FIELD)
             arrays_chunks.append(row_ids.to_pylist())
             column_record_batch = pa.RecordBatch.from_arrays(arrays_chunks, schema=pa.schema(columns_chunks))
             self.update(rows=column_record_batch, columns=columns_name_chunk)
@@ -544,7 +544,7 @@ class Table:
             raise errors.NotSupportedCommand(self.bucket.name, self.schema.name, self.name)
         if 0 == rows.num_rows:
             log.debug("Ignoring empty insert into %s", self.name)
-            return pa.chunked_array([], type=INTERNAL_ROW_ID_FIELD.type)
+            return pa.chunked_array([], type=(INTERNAL_ROW_ID_SORTED_FIELD if self.sorted_table else INTERNAL_ROW_ID_FIELD).type)
 
         if by_columns:
             self.tx._rpc.features.check_return_row_ids()
