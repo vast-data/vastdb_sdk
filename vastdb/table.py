@@ -429,7 +429,11 @@ class Table:
         # this queue shouldn't be large it is merely a pipe through which the results
         # are sent to the main thread. Most of the pages actually held in the
         # threads that fetch the pages.
-        record_batches_queue: queue.Queue[pa.RecordBatch] = queue.Queue(maxsize=2)
+        # also, this queue should be at least the amount of workers. otherwise a deadlock may arise.
+        # each worker must be able to send the final None message without blocking.
+        log.warn("Using the number of endpoints as a heuristic for concurrency.")
+        max_workers = len(endpoints)
+        record_batches_queue: queue.Queue[pa.RecordBatch] = queue.Queue(maxsize=max_workers)
 
         stop_event = Event()
 
@@ -483,7 +487,7 @@ class Table:
                 threads_prefix = threads_prefix + "-" + config.query_id
 
             total_num_rows = limit_rows if limit_rows else sys.maxsize
-            with concurrent.futures.ThreadPoolExecutor(max_workers=len(endpoints), thread_name_prefix=threads_prefix) as tp:  # TODO: concurrency == enpoints is just a heuristic
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix=threads_prefix) as tp:
                 futures = [tp.submit(single_endpoint_worker, endpoint) for endpoint in endpoints[:config.num_splits]]
                 tasks_running = len(futures)
                 try:
