@@ -2,6 +2,8 @@ aws-requests-auth
 flatbuffers
 ibis-framework==9.0.0
 pyarrow
+pandas
+numpy
 requests
 xmltodict
 backoff==2.2.1

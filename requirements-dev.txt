@@ -16,3 +16,4 @@ pytest-xdist
 ruff
 twine
 typer
+packaging
