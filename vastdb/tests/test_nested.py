@@ -79,13 +79,11 @@ def test_nested_filter(session, clean_bucket_name):
 def test_nested_unsupported_filter(session, clean_bucket_name):
     columns = pa.schema([
         ('l', pa.list_(pa.int8())),
-        ('fl', pa.list_(pa.field(name='item', type=pa.int64(), nullable=False), 2)),
         ('m', pa.map_(pa.utf8(), pa.float64())),
         ('s', pa.struct([('x', pa.int16()), ('y', pa.int32())])),
     ])
     expected = pa.table(schema=columns, data=[
         [[1], [], [2, 3], None],
-        [[1, 2], None, [3, 4], None],
         [None, {'a': 2.5}, {'b': 0.25, 'c': 0.025}, {}],
         [{'x': 1, 'y': None}, None, {'x': 2, 'y': 3}, {'x': None, 'y': 4}],
     ])
@@ -94,9 +92,6 @@ def test_nested_unsupported_filter(session, clean_bucket_name):
 
         with pytest.raises(NotImplementedError):
             list(t.select(predicate=(t['l'].isnull())))
-
-        with pytest.raises(NotImplementedError):
-            list(t.select(predicate=(t['fl'].isnull())))
 
         with pytest.raises(NotImplementedError):
             list(t.select(predicate=(t['m'].isnull())))

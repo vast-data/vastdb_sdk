@@ -11,7 +11,11 @@ import pytest
 
 import vastdb.errors
 
-from .util import prepare_data
+from .util import (
+    assert_pandas_df_equal,
+    convert_pandas_df_to_hashable_values,
+    prepare_data,
+)
 
 supported_fixed_list_element_types = [
     pa.uint8(),
@@ -221,8 +225,8 @@ def generate_random_pyarrow_value(
 
 @pytest.mark.parametrize("element_field", supported_fixed_list_element_fields)
 def test_fixed_list_type_values(session, clean_bucket_name, element_field):
-    list_size = random.randint(1, 1000)
-    num_rows = random.randint(1, 100)
+    list_size = 250
+    num_rows = 100
 
     vec_type = pa.list_(element_field, list_size)
     schema = pa.schema(
@@ -233,11 +237,56 @@ def test_fixed_list_type_values(session, clean_bucket_name, element_field):
                                         for col_name in
                                         schema.names[1:]],
     )
+    # Convert the list to tuple in order to support comparison as a whole.
+    pd_expected = convert_pandas_df_to_hashable_values(expected.to_pandas())
 
     with prepare_data(session, clean_bucket_name, "s", "t", expected) as table:
         assert table.arrow_schema == schema
         actual = table.select().read_all()
         assert actual == expected
+
+        # Select by id.
+        id_to_select = random.randint(0, num_rows - 1)
+        select_by_id = table.select(predicate=(table["id"] == id_to_select)).read_all()
+        assert len(select_by_id) == 1  # ID is unique.
+        assert select_by_id == expected.filter(pc.field("id") == id_to_select)
+
+        # Choose a random vector which is not null. Nulls should not be selected using == , != operators, but by isnull.
+        # In addition, nulls are discarded unless isnull is used (meaning != 1 will return both not nulls and not 1).
+        vector_to_select = random.choice(expected.filter(~pc.field('vec').is_null())['vec'].to_numpy())
+
+        # TODO VSDK-36: Remove this workaround when the issue with negative decimals is predicate is fixed.
+        if pa.types.is_decimal(element_field.type):
+            vector_to_select = abs(vector_to_select)
+
+        # Dtype is not asserted since pandas convert the dtype of integer to float when there are (or could be)
+        # NaN/None values.
+        # Select by vector value.
+        select_by_vector = table.select(predicate=(table["vec"] == vector_to_select)).read_all()
+        assert_pandas_df_equal(select_by_vector.to_pandas(),
+                               pd_expected.loc[pd_expected['vec'] == tuple(vector_to_select)], check_dtype=False)
+
+        # Not equal to vector value.
+        select_by_vector = table.select(predicate=(table["vec"] != vector_to_select)).read_all()
+        assert_pandas_df_equal(select_by_vector.to_pandas(),
+                               pd_expected.loc[(pd_expected['vec'] != tuple(vector_to_select)) &
+                                               pd_expected['vec'].notnull()], check_dtype=False)
+
+        # Not equal to vector value or null.
+        select_by_vector = table.select(
+            predicate=((table["vec"] != vector_to_select) | (table['vec'].isnull()))).read_all()
+        assert_pandas_df_equal(select_by_vector.to_pandas(),
+                               pd_expected.loc[pd_expected['vec'] != tuple(vector_to_select)], check_dtype=False)
+
+        # Lexicographically greater than vector.
+        select_by_vector = table.select(predicate=(table["vec"] > vector_to_select)).read_all()
+        assert_pandas_df_equal(select_by_vector.to_pandas(), pd_expected.loc[
+            pd_expected['vec'].notnull() & (pd_expected['vec'] > tuple(vector_to_select))], check_dtype=False)
+
+        # Lexicographically less than vector.
+        select_by_vector = table.select(predicate=(table["vec"] < vector_to_select)).read_all()
+        assert_pandas_df_equal(select_by_vector.to_pandas(), pd_expected.loc[
+            pd_expected['vec'].notnull() & (pd_expected['vec'] < tuple(vector_to_select))], check_dtype=False)
 
 
 @pytest.mark.parametrize("list_type", unsupported_fixed_list_types)

@@ -7,7 +7,7 @@ import time
 import urllib.parse
 from collections import defaultdict, namedtuple
 from enum import Enum
-from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union, cast
 
 import backoff
 import flatbuffers
@@ -52,6 +52,7 @@ import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.Int8Literal as fb_
 import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.Int16Literal as fb_int16_lit
 import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.Int32Literal as fb_int32_lit
 import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.Int64Literal as fb_int64_lit
+import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.ListLiteral as fb_list_lit
 import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.Literal as fb_literal
 import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.Relation as fb_relation
 import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.RelationImpl as rel_impl
@@ -262,20 +263,32 @@ class Predicate:
                         node = nodes_map[name]
                         nodes_map = node.children_map
 
-                    # TODO: support predicate pushdown for leaf nodes (ORION-160338)
+                    literal_field = node.field
+                    literal_column_index = node.index
                     if node.children:
-                        raise NotImplementedError(node.field)  # no predicate pushdown for nested columns
-                    column_offset = self.build_column(position=node.index)
+                        # Support fixed size list of a single flat child.
+                        if pa.types.is_fixed_size_list(node.type) and len(node.children) == 1 and not node.children[
+                            0].children:
+                            # Similar to projection, the index of the column should be the leaf which is the child's.
+                            literal_column_index = node.children[0].index
+                            # Set the literal type to be a list rather than fixed list since fixed list is not supported.
+                            # https://github.com/apache/arrow/blob/apache-arrow-7.0.0/cpp/src/arrow/compute/exec/ir_consumer.cc#L287
+                            literal_field = node.field.with_type(pa.list_(node.field.type.value_field))
+                        else:
+                            # TODO: support predicate pushdown for leaf nodes (ORION-160338)
+                            raise NotImplementedError(node.field)  # no predicate pushdown for nested columns
+
+                    column_offset = self.build_column(position=literal_column_index)
                     for literal in literals:
                         args_offsets = [column_offset]
                         if literal is not None:
-                            args_offsets.append(self.build_literal_expression(field=node.field, value=literal.value))
+                            args_offsets.append(self.build_literal_expression(field=literal_field, value=literal.value))
                         if builder_func == self.build_between:
-                            args_offsets.append(self.build_literal_expression(field=node.field, value=lower.value))
-                            args_offsets.append(self.build_literal_expression(field=node.field, value=upper.value))
+                            args_offsets.append(self.build_literal_expression(field=literal_field, value=lower.value))
+                            args_offsets.append(self.build_literal_expression(field=literal_field, value=upper.value))
                         if builder_func == self.build_starts_with:
-                            args_offsets.append(self.build_literal_expression(field=node.field, value=lower_bytes))
-                            args_offsets.append(self.build_literal_expression(field=node.field, value=upper_bytes))
+                            args_offsets.append(self.build_literal_expression(field=literal_field, value=lower_bytes))
+                            args_offsets.append(self.build_literal_expression(field=literal_field, value=upper_bytes))
 
                         inner_offsets.append(builder_func(*args_offsets))
 
@@ -399,7 +412,7 @@ class Predicate:
             value = float(value)
 
             if pa.types.is_float32(pa_type):
-                impl_type, impl_class = LiteralImpl.Float32Literal,  fb_float32_lit
+                impl_type, impl_class = LiteralImpl.Float32Literal, fb_float32_lit
             elif pa.types.is_float64(pa_type):
                 impl_type, impl_class = LiteralImpl.Float64Literal, fb_float64_lit
             else:
@@ -477,8 +490,25 @@ class Predicate:
             buffer_value = fb_binary_lit.End(self.builder)
             return LiteralImpl.BinaryLiteral, buffer_value
 
-        raise ValueError(f'unsupported predicate for type={pa_type}, value={value}')
+        # pa.types.is_list is False for FixedSizeList which is important since parsing of FixedSizeList is not supported
+        # https://github.com/apache/arrow/blob/apache-arrow-7.0.0/cpp/src/arrow/compute/exec/ir_consumer.cc#L287
+        if pa.types.is_list(pa_type):
+            pa_type = cast(pa.FixedSizeListType, pa_type)
 
+            buffer_literals = []
+            for element in value:
+                buffer_literals.append(self.build_literal(pa_type.value_field, element))
+            fb_list_lit.StartValuesVector(self.builder, len(buffer_literals))
+            for offset in reversed(buffer_literals):
+                self.builder.PrependUOffsetTRelative(offset)
+            values_buffer = self.builder.EndVector()
+
+            fb_list_lit.Start(self.builder)
+            fb_list_lit.AddValues(self.builder, values_buffer)
+            buffer_value = fb_list_lit.End(self.builder)
+            return LiteralImpl.ListLiteral, buffer_value
+
+        raise ValueError(f'unsupported predicate for type={pa_type}, value={value}')
 
     def build_literal(self, field: pa.Field, value) -> int:
         literal_impl_type, literal_impl_buffer = self.build_literal_impl(field.type, value)
