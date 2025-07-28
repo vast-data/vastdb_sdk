@@ -3,17 +3,27 @@ from contextlib import contextmanager
 
 import pyarrow as pa
 
+from vastdb.session import Session
+
 log = logging.getLogger(__name__)
 
 
+def assert_row_ids_ascending_on_first_insertion_to_table(row_ids, expected_num_rows, sorted_table):
+    adjusted_row_ids = [
+        int(row_id) & 0xFFFFFFFFFFFFFF for row_id in row_ids
+        ] if sorted_table else row_ids
+
+    assert adjusted_row_ids == list(range(expected_num_rows))
+
+
 @contextmanager
-def prepare_data(session, clean_bucket_name, schema_name, table_name, arrow_table, sorting_key=[]):
+def prepare_data(session: Session, clean_bucket_name, schema_name, table_name, arrow_table, sorting_key=[]):
     with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).create_schema(schema_name)
         t = s.create_table(table_name, arrow_table.schema, sorting_key=sorting_key)
         row_ids_array = t.insert(arrow_table)
         row_ids = row_ids_array.to_pylist()
-        assert row_ids == list(range(arrow_table.num_rows))
+        assert_row_ids_ascending_on_first_insertion_to_table(row_ids, arrow_table.num_rows, t.sorted_table)
         yield t
         t.drop()
         s.drop()

@@ -15,10 +15,11 @@ import pytest
 from requests.exceptions import HTTPError
 
 from vastdb.errors import BadRequest
+from vastdb.session import Session
 
 from .. import errors
 from ..table import INTERNAL_ROW_ID, QueryConfig
-from .util import prepare_data
+from .util import assert_row_ids_ascending_on_first_insertion_to_table, prepare_data
 
 log = logging.getLogger(__name__)
 
@@ -1150,7 +1151,7 @@ def test_elysium_tx(elysium_session, clean_bucket_name):
         t = s.create_table(table_name, arrow_table.schema)
         row_ids_array = t.insert(arrow_table)
         row_ids = row_ids_array.to_pylist()
-        assert row_ids == list(range(arrow_table.num_rows))
+        assert_row_ids_ascending_on_first_insertion_to_table(row_ids, arrow_table.num_rows, t.sorted_table)
         sorted_columns = t.sorted_columns()
         assert len(sorted_columns) == 0
         t.add_sorting_key(sorting)
@@ -1186,7 +1187,7 @@ def test_elysium_double_enable(elysium_session, clean_bucket_name):
             t.add_sorting_key(sorting)
 
 
-def test_elysium_update_table_tx(elysium_session, clean_bucket_name):
+def test_elysium_update_table_tx(elysium_session: Session, clean_bucket_name):
     columns = pa.schema([
         ('a', pa.int64()),
         ('b', pa.float32()),
@@ -1205,7 +1206,7 @@ def test_elysium_update_table_tx(elysium_session, clean_bucket_name):
         t = s.create_table(table_name, arrow_table.schema, sorting_key=sorting)
         row_ids_array = t.insert(arrow_table)
         row_ids = row_ids_array.to_pylist()
-        assert row_ids == list(range(arrow_table.num_rows))
+        assert_row_ids_ascending_on_first_insertion_to_table(row_ids, arrow_table.num_rows, t.sorted_table)
         sorted_columns = t.sorted_columns()
         assert sorted_columns[0].name == 's'
         assert sorted_columns[1].name == 'b'
@@ -1278,7 +1279,7 @@ def test_elysium_splits(elysium_session, clean_bucket_name):
         t = s.create_table(table_name, arrow_table.schema, sorting_key=sorting)
         row_ids_array = t.insert(arrow_table)
         row_ids = row_ids_array.to_pylist()
-        assert row_ids == list(range(arrow_table.num_rows))
+        assert_row_ids_ascending_on_first_insertion_to_table(row_ids, arrow_table.num_rows, t.sorted_table)
         sorted_columns = t.sorted_columns()
         assert sorted_columns[0].name == 'a'
 

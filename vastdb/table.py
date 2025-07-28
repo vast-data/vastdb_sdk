@@ -557,7 +557,7 @@ class Table:
                 self.tx._rpc.features.check_return_row_ids()
             except errors.NotSupportedVersion:
                 return  # type: ignore
-            return pa.chunked_array(row_ids, type=INTERNAL_ROW_ID_FIELD.type)
+            return pa.chunked_array(row_ids, type=(INTERNAL_ROW_ID_SORTED_FIELD if self.sorted_table else INTERNAL_ROW_ID_FIELD).type)
         except errors.TooWideRow:
             self.tx._rpc.features.check_return_row_ids()
             return self.insert_in_column_batches(rows)
