@@ -508,7 +508,7 @@ class Predicate:
             buffer_value = fb_list_lit.End(self.builder)
             return LiteralImpl.ListLiteral, buffer_value
 
-        raise ValueError(f'unsupported predicate for type={pa_type}, value={value}')
+        raise ValueError(f'unsupported literal type={pa_type}, value={value}')
 
     def build_literal(self, field: pa.Field, value) -> int:
         literal_impl_type, literal_impl_buffer = self.build_literal_impl(field.type, value)
