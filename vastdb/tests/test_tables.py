@@ -954,12 +954,18 @@ def test_audit_log_select(session, clean_bucket_name):
 def test_catalog_snapshots_select(session, clean_bucket_name):
     with session.transaction() as tx:
         snaps = tx.catalog_snapshots()
-        if not snaps:
+        filtered_snaps = []
+        for snap in snaps:
+            log.info("Snapshot: %s", snap)
+            if snap.name.startswith("vast-big-catalog-bucket/.snapshot/bc_table"):
+                filtered_snaps.append(snap)
+        if not filtered_snaps:
             raise NotReady
-        latest = snaps[-1]
+        latest = filtered_snaps[-1]
+        log.info("Latest snapshot: %s", latest)
         t = tx.catalog(latest)
         assert t.columns()
-        rows = t.select().read_all()
+        rows = t.select(limit_rows=10).read_all()
         if not rows:
             raise NotReady
 
