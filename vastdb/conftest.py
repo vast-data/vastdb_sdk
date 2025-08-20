@@ -8,13 +8,34 @@ import pytest
 import vastdb
 import vastdb.errors
 
+AWS_ACCESS_KEY_ID = "AWS_ACCESS_KEY_ID"
+AWS_SECRET_ACCESS_KEY = "AWS_SECRET_ACCESS_KEY"
+
+
+def get_aws_cred_from_system(cred_name):
+    orion_dir = Path(os.path.expanduser(os.environ.get("ORION_DIR", "~/orion")))
+    orion_file_path = orion_dir / 'data' / cred_name
+
+    env_value = os.environ.get(cred_name)
+
+    if env_value is not None:
+        return env_value
+
+    if not  orion_file_path.exists():
+        return None
+    
+    with open(orion_file_path, "r") as f:
+        return f.read().strip()
+
+
+
 
 def pytest_addoption(parser):
     parser.addoption("--tabular-bucket-name", help="Name of the S3 bucket with Tabular enabled", default="vastdb")
     parser.addoption("--tabular-access-key", help="Access key with Tabular permissions (AWS_ACCESS_KEY_ID)",
-                     default=os.environ.get("AWS_ACCESS_KEY_ID", None))
+                     default=get_aws_cred_from_system(AWS_ACCESS_KEY_ID))
     parser.addoption("--tabular-secret-key", help="Secret key with Tabular permissions (AWS_SECRET_ACCESS_KEY)",
-                     default=os.environ.get("AWS_SECRET_ACCESS_KEY", None))
+                     default=get_aws_cred_from_system(AWS_SECRET_ACCESS_KEY))
     parser.addoption("--tabular-endpoint-url", help="Tabular server endpoint", default=[], action="append")
     parser.addoption("--data-path", help="Data files location", default=None)
     parser.addoption("--crater-path", help="Save benchmark results in a dedicated location", default=None)
