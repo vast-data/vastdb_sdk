@@ -18,7 +18,7 @@ For technical details about VAST Database architecture, see the [whitepaper](htt
 
 ### Requirements
 
-- Linux client with Python 3.9 - 3.12, and network access to the VAST Cluster
+- Linux client with Python 3.10 - 3.13, and network access to the VAST Cluster
 - [Virtual IP pool configured with DNS service](https://support.vastdata.com/s/topic/0TOV40000000FThOAM/configuring-network-access-v50)
 - [S3 access & secret keys on the VAST cluster](https://support.vastdata.com/s/article/UUID-4d2e7e23-b2fb-7900-d98f-96c31a499626)
 - [Tabular identity policy with the proper permissions](https://support.vastdata.com/s/article/UUID-14322b60-d6a2-89ac-3df0-3dfbb6974182)
@@ -156,6 +156,39 @@ snaps = bucket.list_snapshots()
 batches = snaps[0].schema('schema-name').table('table-name').select()
 ```
 
+## Interactive and Non-Interactive Workflows
+
+Interactive `Table` created via the `Schema` object (`tx.bucket('..').schema('..').table('..')`) loads metadata and stats eagrly allowing for interactive development.
+
+For more efficient use-cases where the extra round-trips to the server hurt use the Non-Interactive workflow.
+
+```python
+# load the table schema & stats into an object we can use across transactions
+table_md = TableMetadata(TableRef("bucket-name", "schema-name", "table-name"))
+with session.transaction() as tx:
+    table_md.load(tx)
+
+# you may init the TableMetadata with the schema in advanced (to save that round-trip)
+table_md = TableMetadata(TableRef("bucket-name", "schema-name", "table-name"),
+                         arrow_schema=<some-arrow-schema>)
+
+# now we can reuse without the overhead of reloading the schema and stats,
+# such as for inserts:
+with session.transaction() as tx:
+    table = tx.table_from_metadata(table_md)
+    rows = [{"id": 1, "name": "row1"}]
+    py_records = pa.RecordBatch.from_pylist(rows, schema=table_md.arrow_schema)
+    table.insert(py_records)
+
+# and selects:
+with session.transaction() as tx:
+    table = tx.table_from_metadata(table_md)
+    reader = table.select()
+    results = reader.read_all()
+    print(results)
+```
+
+
 ## Post-processing
 
 ### Export
@@ -214,6 +247,10 @@ with session.transaction() as tx:
     print("Distinct element types on the system:")
     print(distinct_elements)
 ```
+
+
+
+
 ## More Information
 
 See these blog posts for more examples:
@@ -222,3 +259,5 @@ See these blog posts for more examples:
 - https://vastdata.com/blog/the-vast-catalog-in-action-part-2
 
 See also the [full Vast DB Python SDK documentation](https://vastdb-sdk.readthedocs.io/en/latest/)
+
+

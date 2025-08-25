@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2.0.0] (2025-09-17)
+
+### BREAKING CHANGE
+- Removed properties `Table.bucket` and `Table.schema`
+- Removed properties `Projection.bucket` and `Projection.schema`
+- Removed official support for Python 3.9
+- Added hard requirement for pyarrow~=18.0
+
+### Added
+- `ITable` - partial VAST tables interface (no DDL)
+- `TableMetadata` - table metadata allowing for reuse / or refraining from loading bucket/schema/table metadata on every transaction
+- `Transaction.table_from_metadata` allows creating `ITable` from `TableMetadata` inside a transaction
+  - This table is only for DQL and DML (query and manipulation)
+- Official support for Python 3.13
+
 ## [1.4.0] (2025-07-28)
 [1.4.0]: https://github.com/vast-data/vastdb_sdk/compare/v1.3.11...v1.4.0
 
