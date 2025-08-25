@@ -1,6 +1,6 @@
 import logging
 from contextlib import contextmanager
-from typing import Any, cast, List, Iterator
+from typing import Any, Iterator, List, cast
 
 import numpy as np
 import pandas as pd

@@ -1,12 +1,15 @@
 import os
 import sqlite3
 from pathlib import Path
+from typing import Iterable
 
 import boto3
 import pytest
 
 import vastdb
 import vastdb.errors
+from vastdb.schema import Schema
+from vastdb.session import Session
 
 AWS_ACCESS_KEY_ID = "AWS_ACCESS_KEY_ID"
 AWS_SECRET_ACCESS_KEY = "AWS_SECRET_ACCESS_KEY"
@@ -29,7 +32,6 @@ def get_aws_cred_from_system(cred_name):
 
 
 
-
 def pytest_addoption(parser):
     parser.addoption("--tabular-bucket-name", help="Name of the S3 bucket with Tabular enabled", default="vastdb")
     parser.addoption("--tabular-access-key", help="Access key with Tabular permissions (AWS_ACCESS_KEY_ID)",
@@ -45,7 +47,7 @@ def pytest_addoption(parser):
 
 
 @pytest.fixture(scope="session")
-def session_kwargs(request, tabular_endpoint_urls):
+def session_kwargs(request: pytest.FixtureRequest, tabular_endpoint_urls):
     return dict(
         access=request.config.getoption("--tabular-access-key"),
         secret=request.config.getoption("--tabular-secret-key"),
@@ -59,30 +61,30 @@ def session(session_kwargs):
 
 
 @pytest.fixture(scope="session")
-def num_workers(request):
+def num_workers(request: pytest.FixtureRequest):
     return int(request.config.getoption("--num-workers"))
 
 
 @pytest.fixture(scope="session")
-def test_bucket_name(request):
+def test_bucket_name(request: pytest.FixtureRequest):
     return request.config.getoption("--tabular-bucket-name")
 
 
 @pytest.fixture(scope="session")
-def tabular_endpoint_urls(request):
+def tabular_endpoint_urls(request: pytest.FixtureRequest):
     return request.config.getoption("--tabular-endpoint-url") or ["http://localhost:9090"]
 
 
-def iter_schemas(s):
-    """Recusively scan all schemas."""
-    children = s.schemas()
-    for c in children:
-        yield from iter_schemas(c)
-    yield s
+def iter_schemas(schema: Schema) -> Iterable[Schema]:
+    """Recursively scan all schemas."""
+    children = schema.schemas()
+    for child in children:
+        yield from iter_schemas(child)
+    yield schema
 
 
 @pytest.fixture(scope="function")
-def clean_bucket_name(request, test_bucket_name, session):
+def clean_bucket_name(request: pytest.FixtureRequest, test_bucket_name: str, session: Session) -> str:
     with session.transaction() as tx:
         b = tx.bucket(test_bucket_name)
         for top_schema in b.schemas():
@@ -100,7 +102,7 @@ def clean_bucket_name(request, test_bucket_name, session):
 
 
 @pytest.fixture(scope="session")
-def s3(request, tabular_endpoint_urls):
+def s3(request: pytest.FixtureRequest, tabular_endpoint_urls):
     return boto3.client(
         's3',
         aws_access_key_id=request.config.getoption("--tabular-access-key"),
@@ -109,22 +111,22 @@ def s3(request, tabular_endpoint_urls):
 
 
 @pytest.fixture(scope="function")
-def parquets_path(request):
+def parquets_path(request: pytest.FixtureRequest):
     return Path(request.config.getoption("--data-path"))
 
 
 @pytest.fixture(scope="function")
-def crater_path(request):
+def crater_path(request: pytest.FixtureRequest):
     return request.config.getoption("--crater-path")
 
 
 @pytest.fixture(scope="function")
-def schema_name(request):
+def schema_name(request: pytest.FixtureRequest):
     return request.config.getoption("--schema-name")
 
 
 @pytest.fixture(scope="function")
-def table_name(request):
+def table_name(request: pytest.FixtureRequest):
     return request.config.getoption("--table-name")
 
 

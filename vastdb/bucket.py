@@ -36,7 +36,7 @@ class Bucket:
         """Get a specific schema (a container of tables) under this bucket."""
         return self._root_schema.schema(name=name, fail_if_missing=fail_if_missing)
 
-    def schemas(self, batch_size=None):
+    def schemas(self, batch_size: Optional[int] = None) -> Iterable["Schema"]:
         """List bucket's schemas."""
         return self._root_schema.schemas(batch_size=batch_size)
 

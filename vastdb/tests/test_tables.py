@@ -21,7 +21,6 @@ from vastdb.table import INTERNAL_ROW_ID, QueryConfig
 
 from .util import assert_row_ids_ascending_on_first_insertion_to_table, prepare_data
 
-
 log = logging.getLogger(__name__)
 
 
@@ -127,7 +126,7 @@ def test_insert_empty(session, clean_bucket_name):
         assert row_ids == []
 
 
-def test_exists(session, clean_bucket_name):
+def test_exists(session: Session, clean_bucket_name: str):
     with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).create_schema('s1')
         assert s.tables() == []
