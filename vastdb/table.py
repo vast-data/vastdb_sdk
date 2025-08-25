@@ -6,25 +6,39 @@ import logging
 import os
 import queue
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from math import ceil
+from queue import Queue
 from threading import Event
-from typing import Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
+from typing import (
+    TYPE_CHECKING,
+    Callable,
+    Iterable,
+    Optional,
+    Union,
+)
 
 import ibis
 import pyarrow as pa
 import urllib3
 
-from . import _internal, errors, schema, util
+from vastdb._table_interface import ITable
+from vastdb.table_metadata import TableMetadata, TableRef, TableStats, TableType
+
+from . import _internal, errors, util
 from ._ibis_support import validate_ibis_support_schema
 from .config import ImportConfig, QueryConfig
+
+if TYPE_CHECKING:
+    from .transaction import Transaction
 
 log = logging.getLogger(__name__)
 
 
 INTERNAL_ROW_ID = "$row_id"
 INTERNAL_ROW_ID_FIELD = pa.field(INTERNAL_ROW_ID, pa.uint64())
-INTERNAL_ROW_ID_SORTED_FIELD = pa.field(INTERNAL_ROW_ID, pa.decimal128(38, 0))  # Sorted tables have longer row ids
+INTERNAL_ROW_ID_SORTED_FIELD = pa.field(
+    INTERNAL_ROW_ID, pa.decimal128(38, 0))  # Sorted tables have longer row ids
 
 MAX_ROWS_PER_BATCH = 512 * 1024
 # for insert we need a smaller limit due to response amplification
@@ -40,21 +54,6 @@ class _EmptyResultException(Exception):
 
     def __init__(self, response_schema: pa.Schema):
         self.response_schema = response_schema
-
-
-@dataclass
-class TableStats:
-    """Table-related information."""
-
-    num_rows: int
-    size_in_bytes: int
-    sorting_score: int
-    write_amplification: int
-    acummulative_row_inserition_count: int
-    is_external_rowid_alloc: bool = False
-    sorting_key_enabled: bool = False
-    sorting_done: bool = False
-    endpoints: Tuple[str, ...] = ()
 
 
 @dataclass
@@ -149,7 +148,7 @@ class SplitWorker:
         return pa.RecordBatchReader.from_batches(self.query_data_request.response_schema,
                                                  self)
 
-    def _process_split(self, record_batches_queue: queue.Queue[pa.RecordBatch], check_stop: Callable):
+    def _process_split(self, record_batches_queue: Queue[pa.RecordBatch], check_stop: Callable):
         """Process split and enqueues batches into the queue."""
         for batch in self:
             check_stop()  # may raise StoppedException to early-exit the query (without retries)
@@ -162,96 +161,87 @@ class SplitWorker:
         return all(row_id == _internal.TABULAR_INVALID_ROW_ID for row_id in self.subsplits_state.values())
 
 
-@dataclass
-class Table:
+class TableInTransaction(ITable):
     """VAST Table."""
 
-    name: str
-    schema: "schema.Schema"
-    handle: int
-    arrow_schema: pa.Schema = field(init=False, compare=False, repr=False)
-    _ibis_table: ibis.Schema = field(init=False, compare=False, repr=False)
-    _imports_table: bool
-    sorted_table: bool
+    _metadata: TableMetadata
+    _tx: "Transaction"
 
-
-    def __post_init__(self):
-        """Also, load columns' metadata."""
-        self.arrow_schema = self.columns()
-
-        self._table_path = f'{self.schema.bucket.name}/{self.schema.name}/{self.name}'
-        self.validate_ibis_support_schema(self.arrow_schema)
-        self._ibis_table = ibis.table(ibis.Schema.from_pyarrow(self.arrow_schema), self._table_path)
+    def __init__(self,
+                 metadata: TableMetadata,
+                 tx: "Transaction"):
+        """VastDB Table."""
+        self._metadata = metadata
+        self._tx = tx
 
     @property
-    def path(self):
+    def ref(self) -> TableRef:
+        """Table Reference."""
+        return self._metadata.ref
+
+    def __eq__(self, other: object) -> bool:
+        """Table __eq__."""
+        if not isinstance(other, type(self)):
+            return False
+
+        return self.ref == other.ref
+
+    @property
+    def name(self) -> str:
+        """Table name."""
+        return self.ref.table
+
+    @property
+    def arrow_schema(self) -> pa.Schema:
+        """Table arrow schema."""
+        return self._metadata.arrow_schema
+
+    @property
+    def stats(self) -> Optional[TableStats]:
+        """Table's statistics."""
+        return self._metadata.stats
+
+    def reload_schema(self) -> None:
+        """Reload Arrow Schema."""
+        self._metadata.load_schema(self._tx)
+
+    def reload_stats(self) -> None:
+        """Reload Table Stats."""
+        self._metadata.load_stats(self._tx)
+
+    def reload_sorted_columns(self) -> None:
+        """Reload Sorted Columns."""
+        self._metadata.load_sorted_columns(self._tx)
+
+    @property
+    def path(self) -> str:
         """Return table's path."""
-        return self._table_path
+        return self.ref.full_path
 
     @property
-    def tx(self):
-        """Return transaction."""
-        return self.schema.tx
-
-    @property
-    def bucket(self):
-        """Return bucket."""
-        return self.schema.bucket
     def _internal_rowid_field(self) -> pa.Field:
-        if self.sorted_table:
-            return INTERNAL_ROW_ID_SORTED_FIELD
-        return INTERNAL_ROW_ID_FIELD
+        return INTERNAL_ROW_ID_SORTED_FIELD if self._is_sorted_table else INTERNAL_ROW_ID_FIELD
 
-    @property
-    def stats(self):
-        """Fetch table's statistics from server."""
-        return self.get_stats()
-
-    def columns(self) -> pa.Schema:
-        """Return columns' metadata."""
-        fields = []
-        next_key = 0
-        while True:
-            cur_columns, next_key, is_truncated, _count = self.tx._rpc.api.list_columns(
-                bucket=self.bucket.name, schema=self.schema.name, table=self.name, next_key=next_key, txid=self.tx.active_txid, list_imports_table=self._imports_table)
-            fields.extend(cur_columns)
-            if not is_truncated:
-                break
-
-        self.arrow_schema = pa.schema(fields)
-        return self.arrow_schema
-
-    def sorted_columns(self) -> list:
+    def sorted_columns(self) -> list[str]:
         """Return sorted columns' metadata."""
-        fields = []
-        try:
-            self.tx._rpc.features.check_elysium()
-            next_key = 0
-            while True:
-                cur_columns, next_key, is_truncated, _count = self.tx._rpc.api.list_sorted_columns(
-                    bucket=self.bucket.name, schema=self.schema.name, table=self.name, next_key=next_key, txid=self.tx.active_txid, list_imports_table=self._imports_table)
-                fields.extend(cur_columns)
-                if not is_truncated:
-                    break
-        except errors.BadRequest:
-            pass
-        except errors.InternalServerError as ise:
-            log.warning("Failed to get the sorted columns Elysium might not be supported: %s", ise)
-            pass
-        except errors.NotSupportedVersion:
-            log.warning("Failed to get the sorted columns, Elysium not supported")
-            pass
+        return self._metadata.sorted_columns
 
-        return fields
+    def _assert_not_imports_table(self):
+        if self._metadata.is_imports_table:
+            raise errors.NotSupportedCommand(
+                self.ref.bucket, self.ref.schema, self.ref.table)
 
     def projection(self, name: str) -> "Projection":
         """Get a specific semi-sorted projection of this table."""
-        if self._imports_table:
-            raise errors.NotSupportedCommand(self.bucket.name, self.schema.name, self.name)
+        self._assert_not_imports_table()
+
         projs = tuple(self.projections(projection_name=name))
         if not projs:
-            raise errors.MissingProjection(self.bucket.name, self.schema.name, self.name, name)
-        assert len(projs) == 1, f"Expected to receive only a single projection, but got: {len(projs)}. projections: {projs}"
+            raise errors.MissingProjection(
+                self.ref.bucket, self.ref.schema, self.ref.table, name)
+        if len(projs) != 1:
+            raise AssertionError(
+                f"Expected to receive only a single projection, but got: {len(projs)}. projections: {projs}")
         log.debug("Found projection: %s", projs[0])
         return projs[0]
 
@@ -260,31 +250,33 @@ class Table:
 
         Otherwise, list only the specific projection (if exists).
         """
-        if self._imports_table:
-            raise errors.NotSupportedCommand(self.bucket.name, self.schema.name, self.name)
+        self._assert_not_imports_table()
+
         projections = []
         next_key = 0
         name_prefix = projection_name if projection_name else ""
         exact_match = bool(projection_name)
         while True:
             _bucket_name, _schema_name, _table_name, curr_projections, next_key, is_truncated, _ = \
-                self.tx._rpc.api.list_projections(
-                    bucket=self.bucket.name, schema=self.schema.name, table=self.name, next_key=next_key, txid=self.tx.active_txid,
+                self._tx._rpc.api.list_projections(
+                    bucket=self.ref.bucket, schema=self.ref.schema, table=self.ref.table, next_key=next_key, txid=self._tx.active_txid,
                     exact_match=exact_match, name_prefix=name_prefix)
             if not curr_projections:
                 break
             projections.extend(curr_projections)
             if not is_truncated:
                 break
-        return [_parse_projection_info(projection, self) for projection in projections]
+        return [_parse_projection_info(projection, self._metadata, self._tx) for projection in projections]
 
-    def import_files(self, files_to_import: Iterable[str], config: Optional[ImportConfig] = None) -> None:
+    def import_files(self,
+                     files_to_import: Iterable[str],
+                     config: Optional[ImportConfig] = None) -> None:
         """Import a list of Parquet files into this table.
 
         The files must be on VAST S3 server and be accessible using current credentials.
         """
-        if self._imports_table:
-            raise errors.NotSupportedCommand(self.bucket.name, self.schema.name, self.name)
+        self._assert_not_imports_table()
+
         source_files = {}
         for f in files_to_import:
             bucket_name, object_path = _parse_bucket_and_object_names(f)
@@ -292,42 +284,50 @@ class Table:
 
         self._execute_import(source_files, config=config)
 
-    def import_partitioned_files(self, files_and_partitions: Dict[str, pa.RecordBatch], config: Optional[ImportConfig] = None) -> None:
+    def import_partitioned_files(self,
+                                 files_and_partitions: dict[str, pa.RecordBatch],
+                                 config: Optional[ImportConfig] = None) -> None:
         """Import a list of Parquet files into this table.
 
         The files must be on VAST S3 server and be accessible using current credentials.
         Each file must have its own partition values defined as an Arrow RecordBatch.
         """
-        if self._imports_table:
-            raise errors.NotSupportedCommand(self.bucket.name, self.schema.name, self.name)
+        self._assert_not_imports_table()
+
         source_files = {}
         for f, record_batch in files_and_partitions.items():
             bucket_name, object_path = _parse_bucket_and_object_names(f)
             serialized_batch = _serialize_record_batch(record_batch)
-            source_files = {(bucket_name, object_path): serialized_batch.to_pybytes()}
+            source_files[(bucket_name, object_path)] = serialized_batch.to_pybytes()
 
         self._execute_import(source_files, config=config)
 
-    def _execute_import(self, source_files, config):
+    def _execute_import(self,
+                        source_files: dict[tuple[str, str], bytes],
+                        config: Optional[ImportConfig]):
         config = config or ImportConfig()
-        assert config.import_concurrency > 0  # TODO: Do we want to validate concurrency isn't too high?
+        # TODO: Do we want to validate concurrency isn't too high?
+        assert config.import_concurrency > 0
         max_batch_size = 10  # Enforced in server side.
-        endpoints = [self.tx._rpc.api.url for _ in range(config.import_concurrency)]  # TODO: use valid endpoints...
-        files_queue = queue.Queue()
+        # TODO: use valid endpoints...
+        endpoints = [self._tx._rpc.api.url for _ in range(
+            config.import_concurrency)]
+        files_queue: Queue = Queue()
 
         key_names = config.key_names or []
         if key_names:
-            self.tx._rpc.features.check_zip_import()
+            self._tx._rpc.features.check_zip_import()
 
         for source_file in source_files.items():
             files_queue.put(source_file)
 
         stop_event = Event()
-        num_files_in_batch = min(ceil(len(source_files) / len(endpoints)), max_batch_size)
+        num_files_in_batch = min(
+            ceil(len(source_files) / len(endpoints)), max_batch_size)
 
         def import_worker(q, endpoint):
             try:
-                with self.tx._rpc.api.with_endpoint(endpoint) as session:
+                with self._tx._rpc.api.with_endpoint(endpoint) as session:
                     while not q.empty():
                         if stop_event.is_set():
                             log.debug("stop_event is set, exiting")
@@ -339,10 +339,11 @@ class Table:
                         except queue.Empty:
                             pass
                         if files_batch:
-                            log.info("Starting import batch of %s files", len(files_batch))
+                            log.info(
+                                "Starting import batch of %s files", len(files_batch))
                             log.debug(f"starting import of {files_batch}")
                             session.import_data(
-                                self.bucket.name, self.schema.name, self.name, files_batch, txid=self.tx.active_txid,
+                                self.ref.bucket, self.ref.schema, self.ref.table, files_batch, txid=self._tx.active_txid,
                                 key_names=key_names)
             except (Exception, KeyboardInterrupt) as e:
                 stop_event.set()
@@ -354,7 +355,8 @@ class Table:
                 max_workers=config.import_concurrency, thread_name_prefix='import_thread') as pool:
             try:
                 for endpoint in endpoints:
-                    futures.append(pool.submit(import_worker, files_queue, endpoint))
+                    futures.append(pool.submit(
+                        import_worker, files_queue, endpoint))
 
                 log.debug("Waiting for import workers to finish")
                 for future in concurrent.futures.as_completed(futures):
@@ -363,38 +365,35 @@ class Table:
                 stop_event.set()
                 # ThreadPoolExecutor will be joined at the end of the context
 
-    def get_stats(self) -> TableStats:
-        """Get the statistics of this table."""
-        stats_tuple = self.tx._rpc.api.get_table_stats(
-            bucket=self.bucket.name, schema=self.schema.name, name=self.name, txid=self.tx.active_txid,
-            imports_table_stats=self._imports_table)
-        return TableStats(**stats_tuple._asdict())
-
-    def _get_row_estimate(self, columns: List[str], predicate: ibis.expr.types.BooleanColumn, arrow_schema: pa.Schema):
+    def _get_row_estimate(self,
+                          columns: list[str],
+                          predicate: ibis.expr.types.BooleanColumn,
+                          arrow_schema: pa.Schema):
         query_data_request = _internal.build_query_data_request(
             schema=arrow_schema,
             predicate=predicate,
             field_names=columns)
-        response = self.tx._rpc.api.query_data(
-            bucket=self.bucket.name,
-            schema=self.schema.name,
-            table=self.name,
+        response = self._tx._rpc.api.query_data(
+            bucket=self.ref.bucket,
+            schema=self.ref.schema,
+            table=self.ref.table,
             params=query_data_request.serialized,
             split=(0xffffffff - 3, 1, 1),
-            txid=self.tx.active_txid)
+            txid=self._tx.active_txid)
         batch = _internal.read_first_batch(response.raw)
         return batch.num_rows * 2**16 if batch is not None else 0
 
     def _select_prepare(self,
                         config: QueryConfig,
-                        columns: Optional[List[str]] = None,
+                        columns: Optional[list[str]] = None,
                         predicate: Union[ibis.expr.types.BooleanColumn,
                                          ibis.common.deferred.Deferred] = None,
                         *,
                         internal_row_id: bool = False,
-                        limit_rows: Optional[int] = None) -> Tuple[SplitWorkerConfig, _internal.QueryDataRequest, Tuple[str]]:
+                        limit_rows: Optional[int] = None) -> tuple[SplitWorkerConfig, _internal.QueryDataRequest, tuple[str, ...]]:
+
         if config.data_endpoints is None:
-            endpoints = tuple([self.tx._rpc.api.url])
+            endpoints = tuple([self._tx._rpc.api.url])
         else:
             endpoints = tuple(config.data_endpoints)
         log.debug("endpoints: %s", endpoints)
@@ -417,26 +416,29 @@ class Table:
 
         if isinstance(predicate, ibis.common.deferred.Deferred):
             # may raise if the predicate is invalid (e.g. wrong types / missing column)
-            predicate = predicate.resolve(self._ibis_table)
+            predicate = predicate.resolve(self._metadata.ibis_table)
 
         if config.num_splits:
             num_splits = config.num_splits
         else:
             num_rows = 0
-            if self.sorted_table:
+            if self._is_sorted_table:
                 num_rows = self._get_row_estimate(
                     columns, predicate, query_schema)
                 log.debug(f'sorted estimate: {num_rows}')
+
             if num_rows == 0:
-                stats = self.get_stats()
-                num_rows = stats.num_rows
+                if self.stats is None:
+                    raise AssertionError("Select requires either config.num_splits or loaded stats.")
+
+                num_rows = self.stats.num_rows
 
             num_splits = max(1, num_rows // config.rows_per_split)
 
         log.debug("config: %s", config)
 
         if config.semi_sorted_projection_name:
-            self.tx._rpc.features.check_enforce_semisorted_projection()
+            self._tx._rpc.features.check_enforce_semisorted_projection()
 
         query_data_request = _internal.build_query_data_request(
             schema=query_schema,
@@ -457,13 +459,13 @@ class Table:
 
         return split_config, query_data_request, endpoints
 
-    def select_splits(self, columns: Optional[List[str]] = None,
+    def select_splits(self, columns: Optional[list[str]] = None,
                       predicate: Union[ibis.expr.types.BooleanColumn,
                                        ibis.common.deferred.Deferred] = None,
                       config: Optional[QueryConfig] = None,
                       *,
                       internal_row_id: bool = False,
-                      limit_rows: Optional[int] = None) -> List[pa.RecordBatchReader]:
+                      limit_rows: Optional[int] = None) -> list[pa.RecordBatchReader]:
         """Return pa.RecordBatchReader for each split."""
         config = config or QueryConfig()
 
@@ -474,26 +476,27 @@ class Table:
             return []
 
         endpoint_api = itertools.cycle([
-            self.tx._rpc.api.with_endpoint(endpoint)
+            self._tx._rpc.api.with_endpoint(endpoint)
             for endpoint in endpoints])
 
         return [
             SplitWorker(
                 api=next(endpoint_api),
                 query_data_request=query_data_request,
-                bucket_name=self.schema.bucket.name,
-                schema_name=self.schema.name,
-                table_name=self.name,
-                txid=self.tx.active_txid,
-                query_imports_table=self._imports_table,
+                bucket_name=self.ref.bucket,
+                schema_name=self.ref.schema,
+                table_name=self.ref.table,
+                txid=self._tx.active_txid,
+                query_imports_table=self._metadata.is_imports_table,
                 split_id=split,
                 config=split_config
             ).split_record_batch_reader()
             for split in range(split_config.num_splits)
         ]
 
-    def select(self, columns: Optional[List[str]] = None,
-               predicate: Union[ibis.expr.types.BooleanColumn, ibis.common.deferred.Deferred] = None,
+    def select(self, columns: Optional[list[str]] = None,
+               predicate: Union[ibis.expr.types.BooleanColumn,
+                                ibis.common.deferred.Deferred] = None,
                config: Optional[QueryConfig] = None,
                *,
                internal_row_id: bool = False,
@@ -517,7 +520,7 @@ class Table:
         except _EmptyResultException as e:
             return pa.RecordBatchReader.from_batches(e.response_schema, [])
 
-        splits_queue: queue.Queue[int] = queue.Queue()
+        splits_queue: Queue[int] = Queue()
 
         for split in range(split_config.num_splits):
             splits_queue.put(split)
@@ -529,7 +532,8 @@ class Table:
         # each worker must be able to send the final None message without blocking.
         log.warn("Using the number of endpoints as a heuristic for concurrency.")
         max_workers = len(endpoints)
-        record_batches_queue: queue.Queue[pa.RecordBatch] = queue.Queue(maxsize=max_workers)
+        record_batches_queue: Queue[pa.RecordBatch] = Queue(
+            maxsize=max_workers)
 
         stop_event = Event()
 
@@ -542,8 +546,8 @@ class Table:
 
         def single_endpoint_worker(endpoint: str):
             try:
-                with self.tx._rpc.api.with_endpoint(endpoint) as host_api:
-                    backoff_decorator = self.tx._rpc.api._backoff_decorator
+                with self._tx._rpc.api.with_endpoint(endpoint) as host_api:
+                    backoff_decorator = self._tx._rpc.api._backoff_decorator
                     while True:
                         check_stop()
                         try:
@@ -555,15 +559,16 @@ class Table:
                         split_state = SplitWorker(
                             api=host_api,
                             query_data_request=query_data_request,
-                            bucket_name=self.schema.bucket.name,
-                            schema_name=self.schema.name,
-                            table_name=self.name,
-                            txid=self.tx.active_txid,
-                            query_imports_table=self._imports_table,
+                            bucket_name=self.ref.bucket,
+                            schema_name=self.ref.schema,
+                            table_name=self.ref.table,
+                            txid=self._tx.active_txid,
+                            query_imports_table=self._metadata.is_imports_table,
                             split_id=split,
                             config=split_config)
 
-                        process_with_retries = backoff_decorator(split_state._process_split)
+                        process_with_retries = backoff_decorator(
+                            split_state._process_split)
                         process_with_retries(record_batches_queue, check_stop)
 
             except StoppedException:
@@ -574,10 +579,11 @@ class Table:
                 log.debug("exiting")
                 record_batches_queue.put(None)
 
-        def batches_iterator():
-            def propagate_first_exception(futures: Set[concurrent.futures.Future], block=False) -> Set[concurrent.futures.Future]:
-                done, not_done = concurrent.futures.wait(futures, None if block else 0, concurrent.futures.FIRST_EXCEPTION)
-                if not self.tx.is_active:
+        def batches_iterator() -> Iterable[pa.RecordBatch]:
+            def propagate_first_exception(futures: set[concurrent.futures.Future], block=False) -> set[concurrent.futures.Future]:
+                done, not_done = concurrent.futures.wait(
+                    futures, None if block else 0, concurrent.futures.FIRST_EXCEPTION)
+                if not self._tx.is_active:
                     raise errors.MissingTransaction()
                 for future in done:
                     future.result()
@@ -590,12 +596,13 @@ class Table:
 
             total_num_rows = limit_rows if limit_rows else sys.maxsize
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix=threads_prefix) as tp:
-                futures: Set[concurrent.futures.Future] = {tp.submit(single_endpoint_worker, endpoint)
+                futures: set[concurrent.futures.Future] = {tp.submit(single_endpoint_worker, endpoint)
                                                            for endpoint in endpoints[:config.num_splits]}
                 tasks_running = len(futures)
                 try:
                     while tasks_running > 0:
-                        futures = propagate_first_exception(futures, block=False)
+                        futures = propagate_first_exception(
+                            futures, block=False)
 
                         batch = record_batches_queue.get()
                         if batch is not None:
@@ -604,12 +611,14 @@ class Table:
                                 total_num_rows -= batch.num_rows
                             else:
                                 yield batch.slice(length=total_num_rows)
-                                log.info("reached limit rows per query: %d - stop query", limit_rows)
+                                log.info(
+                                    "reached limit rows per query: %d - stop query", limit_rows)
                                 stop_event.set()
                                 break
                         else:
                             tasks_running -= 1
-                            log.debug("one worker thread finished, remaining: %d", tasks_running)
+                            log.debug(
+                                "one worker thread finished, remaining: %d", tasks_running)
 
                     # all host threads ended - wait for all futures to complete
                     propagate_first_exception(futures, block=True)
@@ -633,48 +642,59 @@ class Table:
 
         columns_names = [field.name for field in rows.schema]
         columns = list(rows.schema)
-        arrays = [_combine_chunks(rows.column(i)) for i in range(len(rows.schema))]
+        arrays = [_combine_chunks(rows.column(i))
+                  for i in range(len(rows.schema))]
         for start in range(MAX_COLUMN_IN_BATCH, len(rows.schema), MAX_COLUMN_IN_BATCH):
-            end = start + MAX_COLUMN_IN_BATCH if start + MAX_COLUMN_IN_BATCH < len(rows.schema) else len(rows.schema)
+            end = start + MAX_COLUMN_IN_BATCH if start + \
+                MAX_COLUMN_IN_BATCH < len(rows.schema) else len(rows.schema)
             columns_name_chunk = columns_names[start:end]
             columns_chunks = columns[start:end]
             arrays_chunks = arrays[start:end]
             columns_chunks.append(self._internal_rowid_field)
             arrays_chunks.append(row_ids.to_pylist())
-            column_record_batch = pa.RecordBatch.from_arrays(arrays_chunks, schema=pa.schema(columns_chunks))
+            column_record_batch = pa.RecordBatch.from_arrays(
+                arrays_chunks, schema=pa.schema(columns_chunks))
             self.update(rows=column_record_batch, columns=columns_name_chunk)
         return row_ids
 
-    def insert(self, rows: Union[pa.RecordBatch, pa.Table], by_columns: bool = False) -> pa.ChunkedArray:
+    def insert(self,
+               rows: Union[pa.RecordBatch, pa.Table],
+               by_columns: bool = False) -> pa.ChunkedArray:
         """Insert a RecordBatch into this table."""
-        if self._imports_table:
-            raise errors.NotSupportedCommand(self.bucket.name, self.schema.name, self.name)
+        self._assert_not_imports_table()
+
         if 0 == rows.num_rows:
-            log.debug("Ignoring empty insert into %s", self.name)
+            log.debug("Ignoring empty insert into %s", self.ref)
             return pa.chunked_array([], type=self._internal_rowid_field.type)
 
         if by_columns:
-            self.tx._rpc.features.check_return_row_ids()
+            self._tx._rpc.features.check_return_row_ids()
             return self.insert_in_column_batches(rows)
 
         try:
             row_ids = []
-            serialized_slices = util.iter_serialized_slices(rows, MAX_INSERT_ROWS_PER_PATCH)
+            serialized_slices = util.iter_serialized_slices(
+                rows, MAX_INSERT_ROWS_PER_PATCH)
             for slice in serialized_slices:
-                res = self.tx._rpc.api.insert_rows(self.bucket.name, self.schema.name, self.name, record_batch=slice,
-                                                   txid=self.tx.active_txid)
+                res = self._tx._rpc.api.insert_rows(self.ref.bucket,
+                                                    self.ref.schema,
+                                                    self.ref.table,
+                                                    record_batch=slice,
+                                                    txid=self._tx.active_txid)
                 (batch,) = pa.RecordBatchStreamReader(res.content)
                 row_ids.append(batch[INTERNAL_ROW_ID])
             try:
-                self.tx._rpc.features.check_return_row_ids()
+                self._tx._rpc.features.check_return_row_ids()
             except errors.NotSupportedVersion:
                 return  # type: ignore
             return pa.chunked_array(row_ids, type=self._internal_rowid_field.type)
         except errors.TooWideRow:
-            self.tx._rpc.features.check_return_row_ids()
+            self._tx._rpc.features.check_return_row_ids()
             return self.insert_in_column_batches(rows)
 
-    def update(self, rows: Union[pa.RecordBatch, pa.Table], columns: Optional[List[str]] = None) -> None:
+    def update(self,
+               rows: Union[pa.RecordBatch, pa.Table],
+               columns: Optional[list[str]] = None) -> None:
         """Update a subset of cells in this table.
 
         Row IDs are specified using a special field (named "$row_id" of uint64 type) - this function assume that this
@@ -682,15 +702,16 @@ class Table:
 
         A subset of columns to be updated can be specified via the `columns` argument.
         """
-        if self._imports_table:
-            raise errors.NotSupportedCommand(self.bucket.name, self.schema.name, self.name)
+        self._assert_not_imports_table()
+
         try:
             rows_chunk = rows[INTERNAL_ROW_ID]
         except KeyError:
             raise errors.MissingRowIdColumn
 
         if columns is None:
-            columns = [name for name in rows.schema.names if name != INTERNAL_ROW_ID]
+            columns = [
+                name for name in rows.schema.names if name != INTERNAL_ROW_ID]
 
         update_fields = [self._internal_rowid_field]
         update_values = [_combine_chunks(rows_chunk)]
@@ -698,22 +719,25 @@ class Table:
             update_fields.append(rows.field(col))
             update_values.append(_combine_chunks(rows[col]))
 
-        update_rows_rb = pa.record_batch(schema=pa.schema(update_fields), data=update_values)
+        update_rows_rb = pa.record_batch(
+            schema=pa.schema(update_fields), data=update_values)
 
-        update_rows_rb = util.sort_record_batch_if_needed(update_rows_rb, INTERNAL_ROW_ID)
+        update_rows_rb = util.sort_record_batch_if_needed(
+            update_rows_rb, INTERNAL_ROW_ID)
 
-        serialized_slices = util.iter_serialized_slices(update_rows_rb, MAX_ROWS_PER_BATCH)
+        serialized_slices = util.iter_serialized_slices(
+            update_rows_rb, MAX_ROWS_PER_BATCH)
         for slice in serialized_slices:
-            self.tx._rpc.api.update_rows(self.bucket.name, self.schema.name, self.name, record_batch=slice,
-                                         txid=self.tx.active_txid)
+            self._tx._rpc.api.update_rows(self.ref.bucket, self.ref.schema, self.ref.table, record_batch=slice,
+                                          txid=self._tx.active_txid)
 
     def delete(self, rows: Union[pa.RecordBatch, pa.Table]) -> None:
         """Delete a subset of rows in this table.
 
         Row IDs are specified using a special field (named "$row_id" of uint64 type).
         """
-        if self._imports_table:
-            raise errors.NotSupportedCommand(self.bucket.name, self.schema.name, self.name)
+        self._assert_not_imports_table()
+
         try:
             rows_chunk = rows[INTERNAL_ROW_ID]
         except KeyError:
@@ -721,105 +745,231 @@ class Table:
         delete_rows_rb = pa.record_batch(schema=pa.schema([self._internal_rowid_field]),
                                          data=[_combine_chunks(rows_chunk)])
 
-        delete_rows_rb = util.sort_record_batch_if_needed(delete_rows_rb, INTERNAL_ROW_ID)
+        delete_rows_rb = util.sort_record_batch_if_needed(
+            delete_rows_rb, INTERNAL_ROW_ID)
 
-        serialized_slices = util.iter_serialized_slices(delete_rows_rb, MAX_ROWS_PER_BATCH)
+        serialized_slices = util.iter_serialized_slices(
+            delete_rows_rb, MAX_ROWS_PER_BATCH)
         for slice in serialized_slices:
-            self.tx._rpc.api.delete_rows(self.bucket.name, self.schema.name, self.name, record_batch=slice,
-                                         txid=self.tx.active_txid, delete_from_imports_table=self._imports_table)
+            self._tx._rpc.api.delete_rows(self.ref.bucket,
+                                          self.ref.schema,
+                                          self.ref.table,
+                                          record_batch=slice,
+                                          txid=self._tx.active_txid,
+                                          delete_from_imports_table=self._metadata.is_imports_table)
 
-    def drop(self) -> None:
-        """Drop this table."""
-        self.tx._rpc.api.drop_table(self.bucket.name, self.schema.name, self.name, txid=self.tx.active_txid, remove_imports_table=self._imports_table)
-        log.info("Dropped table: %s", self.name)
+    def imports_table(self) -> Optional[ITable]:
+        """Get the imports table of this table."""
+        imports_table_metadata = self.imports_table_metadata()
+        return TableInTransaction(metadata=imports_table_metadata,
+                                  tx=self._tx)
 
-    def rename(self, new_name: str) -> None:
-        """Rename this table."""
-        if self._imports_table:
-            raise errors.NotSupportedCommand(self.bucket.name, self.schema.name, self.name)
-        self.tx._rpc.api.alter_table(
-            self.bucket.name, self.schema.name, self.name, txid=self.tx.active_txid, new_name=new_name)
-        log.info("Renamed table from %s to %s ", self.name, new_name)
-        self.name = new_name
+    def imports_table_metadata(self) -> TableMetadata:
+        """Get TableMetadata for import table."""
+        self._tx._rpc.features.check_imports_table()
 
-    def add_sorting_key(self, sorting_key: list) -> None:
-        """Add a sorting key to a table that doesn't have any."""
-        self.tx._rpc.features.check_elysium()
-        self.tx._rpc.api.alter_table(
-            self.bucket.name, self.schema.name, self.name, txid=self.tx.active_txid, sorting_key=sorting_key)
-        log.info("Enabled Elysium for table %s with sorting key %s ", self.name, str(sorting_key))
+        return TableMetadata(ref=self.ref,
+                             table_type=TableType.TableImports)
 
-    def add_column(self, new_column: pa.Schema) -> None:
-        """Add a new column."""
-        if self._imports_table:
-            raise errors.NotSupportedCommand(self.bucket.name, self.schema.name, self.name)
-        validate_ibis_support_schema(new_column)
-        self.tx._rpc.api.add_columns(self.bucket.name, self.schema.name, self.name, new_column, txid=self.tx.active_txid)
-        log.info("Added column(s): %s", new_column)
-        self.arrow_schema = self.columns()
+    def __getitem__(self, col_name: str) -> ibis.Column:
+        """Allow constructing ibis-like column expressions from this table.
 
-    def drop_column(self, column_to_drop: pa.Schema) -> None:
-        """Drop an existing column."""
-        if self._imports_table:
-            raise errors.NotSupported(self.bucket.name, self.schema.name, self.name)
-        if self._imports_table:
-            raise errors.NotSupportedCommand(self.bucket.name, self.schema.name, self.name)
-        self.tx._rpc.api.drop_columns(self.bucket.name, self.schema.name, self.name, column_to_drop, txid=self.tx.active_txid)
-        log.info("Dropped column(s): %s", column_to_drop)
-        self.arrow_schema = self.columns()
+        It is useful for constructing expressions for predicate pushdown in `Table.select()` method.
+        """
+        return self._metadata.ibis_table[col_name]
 
-    def rename_column(self, current_column_name: str, new_column_name: str) -> None:
-        """Rename an existing column."""
-        if self._imports_table:
-            raise errors.NotSupportedCommand(self.bucket.name, self.schema.name, self.name)
-        self.tx._rpc.api.alter_column(self.bucket.name, self.schema.name, self.name, name=current_column_name,
-                                       new_name=new_column_name, txid=self.tx.active_txid)
-        log.info("Renamed column: %s to %s", current_column_name, new_column_name)
-        self.arrow_schema = self.columns()
+    def sorting_done(self) -> bool:
+        """Sorting done indicator for the table.  Always False for unsorted tables."""
+        if not self._is_sorted_table:
+            return False
+        raw_sorting_score = self._tx._rpc.api.raw_sorting_score(self.ref.bucket,
+                                                                self.ref.schema,
+                                                                self._tx.active_txid,
+                                                                self.ref.table)
+        return bool(raw_sorting_score >> SORTING_SCORE_BITS)
 
-    def create_projection(self, projection_name: str, sorted_columns: List[str], unsorted_columns: List[str]) -> "Projection":
-        """Create a new semi-sorted projection."""
-        if self._imports_table:
-            raise errors.NotSupportedCommand(self.bucket.name, self.schema.name, self.name)
-        columns = [(sorted_column, "Sorted") for sorted_column in sorted_columns] + [(unsorted_column, "Unorted") for unsorted_column in unsorted_columns]
-        self.tx._rpc.api.create_projection(self.bucket.name, self.schema.name, self.name, projection_name, columns=columns, txid=self.tx.active_txid)
-        log.info("Created projection: %s", projection_name)
-        return self.projection(projection_name)
+    def sorting_score(self) -> int:
+        """Sorting score for the table.  Always 0 for unsorted tables."""
+        if not self._is_sorted_table:
+            return 0
+        raw_sorting_score = self._tx._rpc.api.raw_sorting_score(self.ref.bucket,
+                                                                self.ref.schema,
+                                                                self._tx.active_txid,
+                                                                self.ref.table)
+        return raw_sorting_score & ((1 << SORTING_SCORE_BITS) - 1)
 
-    def create_imports_table(self, fail_if_exists=True) -> "Table":
-        """Create imports table."""
-        self.tx._rpc.features.check_imports_table()
-        empty_schema = pa.schema([])
-        self.tx._rpc.api.create_table(self.bucket.name, self.schema.name, self.name, empty_schema, txid=self.tx.active_txid,
-                                        create_imports_table=True)
-        log.info("Created imports table for table: %s", self.name)
-        return self.imports_table()  # type: ignore[return-value]
+    @property
+    def _is_sorted_table(self) -> bool:
+        return self._metadata.table_type is TableType.Elysium
+
+
+class Table(TableInTransaction):
+    """Vast Interactive Table."""
+
+    _handle: int
+
+    def __init__(self,
+                 metadata: TableMetadata,
+                 handle: int,
+                 tx: "Transaction"):
+        """Vast Interactive Table."""
+        super().__init__(metadata, tx)
+        self._metadata.load_schema(tx)
+
+        self._handle = handle
+
+    @property
+    def schema(self):
+        """Deprecated property."""
+        return DeprecationWarning("`schema` property is deprecated, to get the schema name use `self.ref.schema`")
+
+    @property
+    def bucket(self):
+        """Deprecated property."""
+        return DeprecationWarning("`bucket` property is deprecated, to get the bucket name use `self.ref.bucket`")
+
+    @property
+    def handle(self) -> int:
+        """Table Handle."""
+        return self._handle
+
+    @property
+    def tx(self):
+        """Return transaction."""
+        return self._tx
+
+    @property
+    def stats(self) -> TableStats:
+        """Fetch table's statistics from server."""
+        self.reload_stats()
+        assert self._metadata.stats is not None
+        return self._metadata.stats
+
+    def columns(self) -> pa.Schema:
+        """Return columns' metadata."""
+        self.reload_schema()
+        return self._metadata.arrow_schema
+
+    def sorted_columns(self) -> list:
+        """Return sorted columns' metadata."""
+        try:
+            self.reload_sorted_columns()
+        except Exception:
+            pass
+
+        return self._metadata.sorted_columns
+
+    def get_stats(self) -> TableStats:
+        """Get the statistics of this table."""
+        return self.stats
 
     def imports_table(self) -> Optional["Table"]:
         """Get the imports table of this table."""
-        self.tx._rpc.features.check_imports_table()
-        return Table(name=self.name, schema=self.schema, handle=int(self.handle), _imports_table=True, sorted_table=self.sorted_table)
+        imports_table_metadata = self.imports_table_metadata()
+        imports_table_metadata.load(self.tx)
+        return Table(handle=self.handle,
+                     metadata=imports_table_metadata,
+                     tx=self.tx)
+
+    @property
+    def sorted_table(self) -> bool:
+        """Is table a sorted table."""
+        return self._is_sorted_table
 
     def __getitem__(self, col_name: str):
         """Allow constructing ibis-like column expressions from this table.
 
         It is useful for constructing expressions for predicate pushdown in `Table.select()` method.
         """
-        return self._ibis_table[col_name]
+        return self._metadata.ibis_table[col_name]
 
-    def sorting_done(self) -> int:
-        """Sorting done indicator for the table.  Always False for unsorted tables."""
-        if not self.sorted_table:
-            return False
-        raw_sorting_score = self.tx._rpc.api.raw_sorting_score(self.schema.bucket.name, self.schema.name, self.schema.tx.txid, self.name)
-        return bool(raw_sorting_score >> SORTING_SCORE_BITS)
+    def drop(self) -> None:
+        """Drop this table."""
+        self._tx._rpc.api.drop_table(self.ref.bucket,
+                                     self.ref.schema,
+                                     self.ref.table,
+                                     txid=self._tx.active_txid,
+                                     remove_imports_table=self._metadata.is_imports_table)
+        log.info("Dropped table: %s", self.ref.table)
 
-    def sorting_score(self) -> int:
-        """Sorting score for the table.  Always 0 for unsorted tables."""
-        if not self.sorted_table:
-            return 0
-        raw_sorting_score = self.tx._rpc.api.raw_sorting_score(self.schema.bucket.name, self.schema.name, self.schema.tx.txid, self.name)
-        return raw_sorting_score & ((1 << SORTING_SCORE_BITS) - 1)
+    def rename(self, new_name: str) -> None:
+        """Rename this table."""
+        self._assert_not_imports_table()
+
+        self._tx._rpc.api.alter_table(self.ref.bucket,
+                                      self.ref.schema,
+                                      self.ref.table,
+                                      txid=self._tx.active_txid,
+                                      new_name=new_name)
+        log.info("Renamed table from %s to %s ", self.ref.table, new_name)
+        self._metadata.rename_table(new_name)
+
+    def add_sorting_key(self, sorting_key: list[int]) -> None:
+        """Add a sorting key to a table that doesn't have any."""
+        self._tx._rpc.features.check_elysium()
+        self._tx._rpc.api.alter_table(self.ref.bucket,
+                                      self.ref.schema,
+                                      self.ref.table,
+                                      txid=self._tx.active_txid,
+                                      sorting_key=sorting_key)
+        log.info("Enabled Elysium for table %s with sorting key %s ",
+                 self.ref.table, str(sorting_key))
+
+    def add_column(self, new_column: pa.Schema) -> None:
+        """Add a new column."""
+        self._assert_not_imports_table()
+
+        validate_ibis_support_schema(new_column)
+        self._tx._rpc.api.add_columns(
+            self.ref.bucket, self.ref.schema, self.ref.table, new_column, txid=self._tx.active_txid)
+        log.info("Added column(s): %s", new_column)
+        self._metadata.load_schema(self._tx)
+
+    def drop_column(self, column_to_drop: pa.Schema) -> None:
+        """Drop an existing column."""
+        self._tx._rpc.api.drop_columns(self.ref.bucket,
+                                       self.ref.schema,
+                                       self.ref.table, column_to_drop, txid=self._tx.active_txid)
+        log.info("Dropped column(s): %s", column_to_drop)
+        self._metadata.load_schema(self._tx)
+
+    def rename_column(self, current_column_name: str, new_column_name: str) -> None:
+        """Rename an existing column."""
+        self._assert_not_imports_table()
+
+        self._tx._rpc.api.alter_column(self.ref.bucket,
+                                       self.ref.schema,
+                                       self.ref.table, name=current_column_name,
+                                       new_name=new_column_name, txid=self._tx.active_txid)
+        log.info("Renamed column: %s to %s",
+                 current_column_name, new_column_name)
+        self._metadata.load_schema(self._tx)
+
+    def create_projection(self, projection_name: str, sorted_columns: list[str], unsorted_columns: list[str]) -> "Projection":
+        """Create a new semi-sorted projection."""
+        self._assert_not_imports_table()
+
+        columns = [(sorted_column, "Sorted") for sorted_column in sorted_columns] + \
+            [(unsorted_column, "Unorted")
+             for unsorted_column in unsorted_columns]
+        self._tx._rpc.api.create_projection(self.ref.bucket,
+                                            self.ref.schema,
+                                            self.ref.table, projection_name, columns=columns, txid=self._tx.active_txid)
+        log.info("Created projection: %s", projection_name)
+        return self.projection(projection_name)
+
+    def create_imports_table(self, fail_if_exists=True) -> ITable:
+        """Create imports table."""
+        self._tx._rpc.features.check_imports_table()
+        empty_schema = pa.schema([])
+        self._tx._rpc.api.create_table(self.ref.bucket,
+                                       self.ref.schema,
+                                       self.ref.table,
+                                       empty_schema,
+                                       txid=self._tx.active_txid,
+                                       create_imports_table=True)
+        log.info("Created imports table for table: %s", self.name)
+        return self.imports_table()  # type: ignore[return-value]
 
 
 @dataclass
@@ -827,24 +977,10 @@ class Projection:
     """VAST semi-sorted projection."""
 
     name: str
-    table: Table
-    handle: int
+    table_metadata: TableMetadata
     stats: TableStats
-
-    @property
-    def bucket(self):
-        """Return bucket."""
-        return self.table.schema.bucket
-
-    @property
-    def schema(self):
-        """Return schema."""
-        return self.table.schema
-
-    @property
-    def tx(self):
-        """Return transaction."""
-        return self.table.schema.tx
+    handle: int
+    tx: "Transaction"
 
     def columns(self) -> pa.Schema:
         """Return this projections' columns as an Arrow schema."""
@@ -853,7 +989,12 @@ class Projection:
         while True:
             curr_columns, next_key, is_truncated, _count, _ = \
                 self.tx._rpc.api.list_projection_columns(
-                    self.bucket.name, self.schema.name, self.table.name, self.name, txid=self.table.tx.txid, next_key=next_key)
+                    self.table_metadata.ref.bucket,
+                    self.table_metadata.ref.schema,
+                    self.table_metadata.ref.table,
+                    self.name,
+                    txid=self.tx.active_txid,
+                    next_key=next_key)
             if not curr_columns:
                 break
             columns.extend(curr_columns)
@@ -864,26 +1005,37 @@ class Projection:
 
     def rename(self, new_name: str) -> None:
         """Rename this projection."""
-        self.tx._rpc.api.alter_projection(self.bucket.name, self.schema.name,
-                                                self.table.name, self.name, txid=self.tx.active_txid, new_name=new_name)
+        self.tx._rpc.api.alter_projection(self.table_metadata.ref.bucket,
+                                          self.table_metadata.ref.schema,
+                                          self.table_metadata.ref.table,
+                                          self.name,
+                                          txid=self.tx.active_txid,
+                                          new_name=new_name)
         log.info("Renamed projection from %s to %s ", self.name, new_name)
         self.name = new_name
 
     def drop(self) -> None:
         """Drop this projection."""
-        self.tx._rpc.api.drop_projection(self.bucket.name, self.schema.name, self.table.name,
-                                         self.name, txid=self.tx.active_txid)
+        self.tx._rpc.api.drop_projection(self.table_metadata.ref.bucket,
+                                         self.table_metadata.ref.schema,
+                                         self.table_metadata.ref.table,
+                                         self.name,
+                                         txid=self.tx.active_txid)
         log.info("Dropped projection: %s", self.name)
 
 
-def _parse_projection_info(projection_info, table: "Table"):
+def _parse_projection_info(projection_info, table_metadata: "TableMetadata", tx: "Transaction"):
     log.info("Projection info %s", str(projection_info))
     stats = TableStats(num_rows=projection_info.num_rows, size_in_bytes=projection_info.size_in_bytes,
                        sorting_score=0, write_amplification=0, acummulative_row_inserition_count=0)
-    return Projection(name=projection_info.name, table=table, stats=stats, handle=int(projection_info.handle))
+    return Projection(name=projection_info.name,
+                      table_metadata=table_metadata,
+                      stats=stats,
+                      handle=int(projection_info.handle),
+                      tx=tx)
 
 
-def _parse_bucket_and_object_names(path: str) -> Tuple[str, str]:
+def _parse_bucket_and_object_names(path: str) -> tuple[str, str]:
     if not path.startswith('/'):
         raise errors.InvalidArgument(f"Path {path} must start with a '/'")
     components = path.split(os.path.sep)
@@ -904,3 +1056,9 @@ def _combine_chunks(col):
         return col.combine_chunks()
     else:
         return col
+
+
+__all__ = ["ITable",
+           "Table",
+           "TableInTransaction",
+           "Projection"]

@@ -24,12 +24,11 @@ def get_aws_cred_from_system(cred_name):
     if env_value is not None:
         return env_value
 
-    if not  orion_file_path.exists():
+    if not orion_file_path.exists():
         return None
-    
+
     with open(orion_file_path, "r") as f:
         return f.read().strip()
-
 
 
 def pytest_addoption(parser):
@@ -92,7 +91,8 @@ def clean_bucket_name(request: pytest.FixtureRequest, test_bucket_name: str, ses
                 for t_name in s.tablenames():
                     try:
                         t = s.table(t_name)
-                        t.drop()
+                        if t is not None:
+                            t.drop()
                     except vastdb.errors.NotSupportedSchema:
                         # Use internal API to drop the table in case unsupported schema prevents creating a table
                         # object.

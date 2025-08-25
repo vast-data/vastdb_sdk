@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Iterable, List, Optional
 
 import pyarrow as pa
 
+from vastdb.table_metadata import TableMetadata, TableRef, TableType
+
 from . import bucket, errors, schema, table
 from ._ibis_support import validate_ibis_support_schema
 
@@ -118,7 +120,7 @@ class Schema:
         while True:
             _bucket_name, _schema_name, curr_tables, next_key, is_truncated, _ = \
                 self.tx._rpc.api.list_tables(
-                    bucket=self.bucket.name, schema=self.name, next_key=next_key, max_keys=page_size, txid=self.tx.txid,
+                    bucket=self.bucket.name, schema=self.name, next_key=next_key, max_keys=page_size, txid=self.tx.active_txid,
                     exact_match=exact_match, name_prefix=name_prefix, include_list_stats=exact_match)
             if not curr_tables:
                 break
@@ -153,4 +155,13 @@ class Schema:
 
 
 def _parse_table_info(table_info, schema: "schema.Schema"):
-    return table.Table(name=table_info.name, schema=schema, handle=int(table_info.handle), _imports_table=False, sorted_table=table_info.sorting_key_enabled)
+    ref = TableRef(bucket=schema.bucket.name,
+                   schema=schema.name,
+                   table=table_info.name)
+
+    table_type = TableType.Elysium if table_info.sorting_key_enabled else TableType.Regular
+    table_metadata = TableMetadata(ref, table_type=table_type)
+
+    return table.Table(handle=int(table_info.handle),
+                       metadata=table_metadata,
+                       tx=schema.tx)

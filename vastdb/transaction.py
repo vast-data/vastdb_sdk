@@ -7,8 +7,13 @@ A transcation is used as a context manager, since every Database-related operati
 """
 
 import logging
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Iterable, Optional
+
+from vastdb._table_interface import ITable
+from vastdb.table import TableInTransaction
+from vastdb.table_metadata import TableMetadata
 
 from . import bucket, errors, schema, session
 
@@ -101,3 +106,7 @@ class Transaction:
         if self.txid is None:
             raise TransactionNotActiveError()
         return self.txid
+
+    def table_from_metadata(self, metadata: TableMetadata) -> ITable:
+        """Create Table from TableMetadata."""
+        return TableInTransaction(deepcopy(metadata), tx=self)

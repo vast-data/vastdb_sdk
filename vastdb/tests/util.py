@@ -9,6 +9,7 @@ from packaging.version import Version
 
 from vastdb.session import Session
 from vastdb.table import Table
+from vastdb.transaction import Transaction
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +35,17 @@ def prepare_data(session: Session,
         yield t
         t.drop()
         s.drop()
+
+
+@contextmanager
+def prepare_data_get_tx(session: Session,
+                        clean_bucket_name: str,
+                        schema_name: str,
+                        table_name: str,
+                        arrow_table: pa.Table,
+                        sorting_key: List[str] = []) -> Iterator[Transaction]:
+    with prepare_data(session, clean_bucket_name, schema_name, table_name, arrow_table, sorting_key) as table:
+        yield table.tx
 
 
 def compare_pyarrow_tables(t1, t2):

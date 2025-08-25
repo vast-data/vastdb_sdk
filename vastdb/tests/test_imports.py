@@ -14,6 +14,7 @@ from vastdb.errors import (
     InvalidArgument,
     NotSupportedVersion,
 )
+from vastdb.session import Session
 
 log = logging.getLogger(__name__)
 
@@ -28,7 +29,7 @@ def zip_import_session(session):
             pytest.skip("Skipped because this test requires version 5.3.1")
 
 
-def test_parallel_imports(session, clean_bucket_name, s3):
+def test_parallel_imports(session: Session, clean_bucket_name: str, s3):
     num_rows = 1000
     num_files = 53
     ds = {'num': [i for i in range(num_rows)]}

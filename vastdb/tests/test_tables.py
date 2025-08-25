@@ -25,7 +25,7 @@ log = logging.getLogger(__name__)
 
 
 @pytest.fixture
-def elysium_session(session: Session):
+def elysium_session(session: Session) -> Session:
     with session.transaction() as tx:
         try:
             tx._rpc.features.check_elysium()
@@ -1138,7 +1138,7 @@ def test_tables_elysium(elysium_session, clean_bucket_name):
 #         assert sorted_columns[1].name == 'b'
 
 
-def test_elysium_tx(elysium_session, clean_bucket_name):
+def test_elysium_tx(elysium_session: Session, clean_bucket_name: str):
     columns = pa.schema([
         ('a', pa.int8()),
         ('b', pa.int32()),
