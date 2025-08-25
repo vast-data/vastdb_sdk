@@ -16,6 +16,7 @@ import pyarrow as pa
 import urllib3
 
 from . import _internal, errors, schema, util
+from ._ibis_support import validate_ibis_support_schema
 from .config import ImportConfig, QueryConfig
 
 log = logging.getLogger(__name__)
@@ -173,28 +174,6 @@ class Table:
     _imports_table: bool
     sorted_table: bool
 
-    @staticmethod
-    def validate_ibis_support_schema(arrow_schema: pa.Schema):
-        """Validate that the provided Arrow schema is compatible with Ibis.
-
-        Raises NotSupportedSchema if the schema contains unsupported fields.
-        """
-        unsupported_fields = []
-        first_exception = None
-        for f in arrow_schema:
-            try:
-                ibis.Schema.from_pyarrow(pa.schema([f]))
-            except Exception as e:
-                if first_exception is None:
-                    first_exception = e
-                unsupported_fields.append(f)
-
-        if unsupported_fields:
-            raise errors.NotSupportedSchema(
-                message=f"Ibis does not support the schema {unsupported_fields=}",
-                schema=arrow_schema,
-                cause=first_exception
-            )
 
     def __post_init__(self):
         """Also, load columns' metadata."""
@@ -771,7 +750,7 @@ class Table:
         """Add a new column."""
         if self._imports_table:
             raise errors.NotSupportedCommand(self.bucket.name, self.schema.name, self.name)
-        self.validate_ibis_support_schema(new_column)
+        validate_ibis_support_schema(new_column)
         self.tx._rpc.api.add_columns(self.bucket.name, self.schema.name, self.name, new_column, txid=self.tx.txid)
         log.info("Added column(s): %s", new_column)
         self.arrow_schema = self.columns()
