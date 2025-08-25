@@ -209,7 +209,7 @@ class Table:
         next_key = 0
         while True:
             cur_columns, next_key, is_truncated, _count = self.tx._rpc.api.list_columns(
-                bucket=self.bucket.name, schema=self.schema.name, table=self.name, next_key=next_key, txid=self.tx.txid, list_imports_table=self._imports_table)
+                bucket=self.bucket.name, schema=self.schema.name, table=self.name, next_key=next_key, txid=self.tx.active_txid, list_imports_table=self._imports_table)
             fields.extend(cur_columns)
             if not is_truncated:
                 break
@@ -225,7 +225,7 @@ class Table:
             next_key = 0
             while True:
                 cur_columns, next_key, is_truncated, _count = self.tx._rpc.api.list_sorted_columns(
-                    bucket=self.bucket.name, schema=self.schema.name, table=self.name, next_key=next_key, txid=self.tx.txid, list_imports_table=self._imports_table)
+                    bucket=self.bucket.name, schema=self.schema.name, table=self.name, next_key=next_key, txid=self.tx.active_txid, list_imports_table=self._imports_table)
                 fields.extend(cur_columns)
                 if not is_truncated:
                     break
@@ -265,7 +265,7 @@ class Table:
         while True:
             _bucket_name, _schema_name, _table_name, curr_projections, next_key, is_truncated, _ = \
                 self.tx._rpc.api.list_projections(
-                    bucket=self.bucket.name, schema=self.schema.name, table=self.name, next_key=next_key, txid=self.tx.txid,
+                    bucket=self.bucket.name, schema=self.schema.name, table=self.name, next_key=next_key, txid=self.tx.active_txid,
                     exact_match=exact_match, name_prefix=name_prefix)
             if not curr_projections:
                 break
@@ -338,7 +338,7 @@ class Table:
                             log.info("Starting import batch of %s files", len(files_batch))
                             log.debug(f"starting import of {files_batch}")
                             session.import_data(
-                                self.bucket.name, self.schema.name, self.name, files_batch, txid=self.tx.txid,
+                                self.bucket.name, self.schema.name, self.name, files_batch, txid=self.tx.active_txid,
                                 key_names=key_names)
             except (Exception, KeyboardInterrupt) as e:
                 stop_event.set()
@@ -362,7 +362,7 @@ class Table:
     def get_stats(self) -> TableStats:
         """Get the statistics of this table."""
         stats_tuple = self.tx._rpc.api.get_table_stats(
-            bucket=self.bucket.name, schema=self.schema.name, name=self.name, txid=self.tx.txid,
+            bucket=self.bucket.name, schema=self.schema.name, name=self.name, txid=self.tx.active_txid,
             imports_table_stats=self._imports_table)
         return TableStats(**stats_tuple._asdict())
 
@@ -377,7 +377,7 @@ class Table:
             table=self.name,
             params=query_data_request.serialized,
             split=(0xffffffff - 3, 1, 1),
-            txid=self.tx.txid)
+            txid=self.tx.active_txid)
         batch = _internal.read_first_batch(response.raw)
         return batch.num_rows * 2**16 if batch is not None else 0
 
@@ -481,7 +481,7 @@ class Table:
                 bucket_name=self.schema.bucket.name,
                 schema_name=self.schema.name,
                 table_name=self.name,
-                txid=self.tx.txid,
+                txid=self.tx.active_txid,
                 query_imports_table=self._imports_table,
                 split_id=split,
                 config=split_config
@@ -555,7 +555,7 @@ class Table:
                             bucket_name=self.schema.bucket.name,
                             schema_name=self.schema.name,
                             table_name=self.name,
-                            txid=self.tx.txid,
+                            txid=self.tx.active_txid,
                             query_imports_table=self._imports_table,
                             split_id=split,
                             config=split_config)
@@ -574,7 +574,7 @@ class Table:
         def batches_iterator():
             def propagate_first_exception(futures: Set[concurrent.futures.Future], block=False) -> Set[concurrent.futures.Future]:
                 done, not_done = concurrent.futures.wait(futures, None if block else 0, concurrent.futures.FIRST_EXCEPTION)
-                if self.tx.txid is None:
+                if not self.tx.is_active:
                     raise errors.MissingTransaction()
                 for future in done:
                     future.result()
@@ -659,7 +659,7 @@ class Table:
             serialized_slices = util.iter_serialized_slices(rows, MAX_INSERT_ROWS_PER_PATCH)
             for slice in serialized_slices:
                 res = self.tx._rpc.api.insert_rows(self.bucket.name, self.schema.name, self.name, record_batch=slice,
-                                                   txid=self.tx.txid)
+                                                   txid=self.tx.active_txid)
                 (batch,) = pa.RecordBatchStreamReader(res.content)
                 row_ids.append(batch[INTERNAL_ROW_ID])
             try:
@@ -702,7 +702,7 @@ class Table:
         serialized_slices = util.iter_serialized_slices(update_rows_rb, MAX_ROWS_PER_BATCH)
         for slice in serialized_slices:
             self.tx._rpc.api.update_rows(self.bucket.name, self.schema.name, self.name, record_batch=slice,
-                                         txid=self.tx.txid)
+                                         txid=self.tx.active_txid)
 
     def delete(self, rows: Union[pa.RecordBatch, pa.Table]) -> None:
         """Delete a subset of rows in this table.
@@ -723,11 +723,11 @@ class Table:
         serialized_slices = util.iter_serialized_slices(delete_rows_rb, MAX_ROWS_PER_BATCH)
         for slice in serialized_slices:
             self.tx._rpc.api.delete_rows(self.bucket.name, self.schema.name, self.name, record_batch=slice,
-                                         txid=self.tx.txid, delete_from_imports_table=self._imports_table)
+                                         txid=self.tx.active_txid, delete_from_imports_table=self._imports_table)
 
     def drop(self) -> None:
         """Drop this table."""
-        self.tx._rpc.api.drop_table(self.bucket.name, self.schema.name, self.name, txid=self.tx.txid, remove_imports_table=self._imports_table)
+        self.tx._rpc.api.drop_table(self.bucket.name, self.schema.name, self.name, txid=self.tx.active_txid, remove_imports_table=self._imports_table)
         log.info("Dropped table: %s", self.name)
 
     def rename(self, new_name: str) -> None:
@@ -735,7 +735,7 @@ class Table:
         if self._imports_table:
             raise errors.NotSupportedCommand(self.bucket.name, self.schema.name, self.name)
         self.tx._rpc.api.alter_table(
-            self.bucket.name, self.schema.name, self.name, txid=self.tx.txid, new_name=new_name)
+            self.bucket.name, self.schema.name, self.name, txid=self.tx.active_txid, new_name=new_name)
         log.info("Renamed table from %s to %s ", self.name, new_name)
         self.name = new_name
 
@@ -743,7 +743,7 @@ class Table:
         """Add a sorting key to a table that doesn't have any."""
         self.tx._rpc.features.check_elysium()
         self.tx._rpc.api.alter_table(
-            self.bucket.name, self.schema.name, self.name, txid=self.tx.txid, sorting_key=sorting_key)
+            self.bucket.name, self.schema.name, self.name, txid=self.tx.active_txid, sorting_key=sorting_key)
         log.info("Enabled Elysium for table %s with sorting key %s ", self.name, str(sorting_key))
 
     def add_column(self, new_column: pa.Schema) -> None:
@@ -751,7 +751,7 @@ class Table:
         if self._imports_table:
             raise errors.NotSupportedCommand(self.bucket.name, self.schema.name, self.name)
         validate_ibis_support_schema(new_column)
-        self.tx._rpc.api.add_columns(self.bucket.name, self.schema.name, self.name, new_column, txid=self.tx.txid)
+        self.tx._rpc.api.add_columns(self.bucket.name, self.schema.name, self.name, new_column, txid=self.tx.active_txid)
         log.info("Added column(s): %s", new_column)
         self.arrow_schema = self.columns()
 
@@ -761,7 +761,7 @@ class Table:
             raise errors.NotSupported(self.bucket.name, self.schema.name, self.name)
         if self._imports_table:
             raise errors.NotSupportedCommand(self.bucket.name, self.schema.name, self.name)
-        self.tx._rpc.api.drop_columns(self.bucket.name, self.schema.name, self.name, column_to_drop, txid=self.tx.txid)
+        self.tx._rpc.api.drop_columns(self.bucket.name, self.schema.name, self.name, column_to_drop, txid=self.tx.active_txid)
         log.info("Dropped column(s): %s", column_to_drop)
         self.arrow_schema = self.columns()
 
@@ -770,7 +770,7 @@ class Table:
         if self._imports_table:
             raise errors.NotSupportedCommand(self.bucket.name, self.schema.name, self.name)
         self.tx._rpc.api.alter_column(self.bucket.name, self.schema.name, self.name, name=current_column_name,
-                                       new_name=new_column_name, txid=self.tx.txid)
+                                       new_name=new_column_name, txid=self.tx.active_txid)
         log.info("Renamed column: %s to %s", current_column_name, new_column_name)
         self.arrow_schema = self.columns()
 
@@ -779,7 +779,7 @@ class Table:
         if self._imports_table:
             raise errors.NotSupportedCommand(self.bucket.name, self.schema.name, self.name)
         columns = [(sorted_column, "Sorted") for sorted_column in sorted_columns] + [(unsorted_column, "Unorted") for unsorted_column in unsorted_columns]
-        self.tx._rpc.api.create_projection(self.bucket.name, self.schema.name, self.name, projection_name, columns=columns, txid=self.tx.txid)
+        self.tx._rpc.api.create_projection(self.bucket.name, self.schema.name, self.name, projection_name, columns=columns, txid=self.tx.active_txid)
         log.info("Created projection: %s", projection_name)
         return self.projection(projection_name)
 
@@ -787,7 +787,7 @@ class Table:
         """Create imports table."""
         self.tx._rpc.features.check_imports_table()
         empty_schema = pa.schema([])
-        self.tx._rpc.api.create_table(self.bucket.name, self.schema.name, self.name, empty_schema, txid=self.tx.txid,
+        self.tx._rpc.api.create_table(self.bucket.name, self.schema.name, self.name, empty_schema, txid=self.tx.active_txid,
                                         create_imports_table=True)
         log.info("Created imports table for table: %s", self.name)
         return self.imports_table()  # type: ignore[return-value]
@@ -862,14 +862,14 @@ class Projection:
     def rename(self, new_name: str) -> None:
         """Rename this projection."""
         self.tx._rpc.api.alter_projection(self.bucket.name, self.schema.name,
-                                                self.table.name, self.name, txid=self.tx.txid, new_name=new_name)
+                                                self.table.name, self.name, txid=self.tx.active_txid, new_name=new_name)
         log.info("Renamed projection from %s to %s ", self.name, new_name)
         self.name = new_name
 
     def drop(self) -> None:
         """Drop this projection."""
         self.tx._rpc.api.drop_projection(self.bucket.name, self.schema.name, self.table.name,
-                                         self.name, txid=self.tx.txid)
+                                         self.name, txid=self.tx.active_txid)
         log.info("Dropped projection: %s", self.name)
 
 

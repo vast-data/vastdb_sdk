@@ -28,6 +28,12 @@ AUDIT_LOG_SCHEMA_NAME = 'vast_audit_log_schema'
 AUDIT_LOG_TABLE_NAME = 'vast_audit_log_table'
 
 
+class TransactionNotActiveError(Exception):
+    """Transaction is not active error."""
+
+    pass
+
+
 @dataclass
 class Transaction:
     """A holder of a single VAST transaction."""
@@ -83,3 +89,15 @@ class Transaction:
         b = bucket.Bucket(AUDIT_LOG_BUCKET_NAME, self)
         s = schema.Schema(AUDIT_LOG_SCHEMA_NAME, b)
         return s.table(name=AUDIT_LOG_TABLE_NAME, fail_if_missing=fail_if_missing)
+
+    @property
+    def is_active(self) -> bool:
+        """Return whether transaction is active."""
+        return self.txid is not None
+
+    @property
+    def active_txid(self) -> int:
+        """Return active transaction ID."""
+        if self.txid is None:
+            raise TransactionNotActiveError()
+        return self.txid
