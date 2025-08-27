@@ -819,16 +819,6 @@ class Table(TableInTransaction):
         self._handle = handle
 
     @property
-    def schema(self):
-        """Deprecated property."""
-        return DeprecationWarning("`schema` property is deprecated, to get the schema name use `self.ref.schema`")
-
-    @property
-    def bucket(self):
-        """Deprecated property."""
-        return DeprecationWarning("`bucket` property is deprecated, to get the bucket name use `self.ref.bucket`")
-
-    @property
     def handle(self) -> int:
         """Table Handle."""
         return self._handle

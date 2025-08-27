@@ -148,16 +148,18 @@ class TableMetadata:
             imports_table_stats=self.is_imports_table)
         self._stats = TableStats(**stats_tuple._asdict())
 
-        if self._table_type is not None:
-            pass
-        elif self._stats.sorting_key_enabled and self._table_type is TableType.Regular:
-            raise ValueError(
-                "Actual table is sorted (TableType.Elysium), was init with TableType.Regular"
-            )
-        elif self._stats.sorting_key_enabled:
-            self._set_sorted_table(tx)
+        is_elysium_table = self._stats.sorting_key_enabled
+
+        if self._table_type is None:
+            if is_elysium_table:
+                self._set_sorted_table(tx)
+            else:
+                self._set_regular_table()
         else:
-            self._set_regular_table()
+            if is_elysium_table and self.table_type is not TableType.Elysium:
+                raise ValueError(
+                    "Actual table is sorted (TableType.Elysium), was not inited as TableType.Elysium"
+                )
 
     def _set_sorted_table(self, tx: "Transaction"):
         self._table_type = TableType.Elysium
@@ -216,4 +218,4 @@ class TableMetadata:
     @property
     def is_imports_table(self) -> bool:
         """Is table an imports table."""
-        return self.table_type is TableType.TableImports
+        return self._table_type is TableType.TableImports
