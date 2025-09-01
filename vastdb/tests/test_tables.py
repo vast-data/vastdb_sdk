@@ -900,7 +900,7 @@ def test_select_stop(session, clean_bucket_name):
     # the tabular server splits the batches is not true anymore and we need to
     # rewrite the test.
     assert read_batches == qc.num_splits * qc.num_sub_splits
-    qc.query_id = str(random.randint(0, 2**32))
+    qc.query_id = str(random.randint(0, 2 ** 32 - 1))
     log.info("query id is: %s", qc.query_id)
 
     def active_threads():

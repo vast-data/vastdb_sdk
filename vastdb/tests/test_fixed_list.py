@@ -89,7 +89,7 @@ def test_vectors(session, clean_bucket_name):
     columns = pa.schema(
         [("id", pa.int64()), ("vec", pa.list_(pa.field(name="item", type=element_type, nullable=False), dimension),)]
     )
-    ids = range(num_rows)
+    ids = list(range(num_rows))
     expected = pa.table(
         schema=columns,
         data=[
@@ -106,7 +106,7 @@ def test_vectors(session, clean_bucket_name):
         assert actual == expected
 
         # Select by id.
-        select_id = random.randint(0, num_rows)
+        select_id = random.choice(ids)
         actual = t.select(predicate=(t["id"] == select_id)).read_all()
         assert actual.to_pydict()["vec"] == [[select_id] * dimension]
         assert actual == expected.filter(pc.field("id") == select_id)
@@ -231,9 +231,10 @@ def test_fixed_list_type_values(session, clean_bucket_name, element_field):
     vec_type = pa.list_(element_field, list_size)
     schema = pa.schema(
         {"id": pa.int64(), "vec": vec_type, "random_int": pa.int64()})
+    ids = list(range(num_rows))
     expected = pa.table(
         schema=schema,
-        data=[list(range(num_rows))] + [[generate_random_pyarrow_value(schema.field(col_name)) for _ in range(num_rows)]
+        data=[ids] + [[generate_random_pyarrow_value(schema.field(col_name)) for _ in range(num_rows)]
                                         for col_name in
                                         schema.names[1:]],
     )
@@ -246,7 +247,7 @@ def test_fixed_list_type_values(session, clean_bucket_name, element_field):
         assert actual == expected
 
         # Select by id.
-        id_to_select = random.randint(0, num_rows - 1)
+        id_to_select = random.choice(ids)
         select_by_id = table.select(predicate=(table["id"] == id_to_select)).read_all()
         assert len(select_by_id) == 1  # ID is unique.
         assert select_by_id == expected.filter(pc.field("id") == id_to_select)
