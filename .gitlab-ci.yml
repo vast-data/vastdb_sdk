@@ -82,27 +82,16 @@ upload_to_artifactory:
 
 upload_to_pypi:
   stage: deploy
-  interruptible: true
   image: $PYSDK_BUILDER_IMAGE
   tags:
     - vast-dev-builder
-
   variables:
     PYSDK_IMAGE: ${PYSDK_IMAGE_PREFIX}-3.12 # use latest Python image for deployment
-
-  when: manual
   rules:
-    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH == "main"
       when: manual
-
   script:
-  - echo "Releasing to PyPI from $PYSDK_IMAGE (tag=$CI_COMMIT_TAG)..."
-  - docker run
-    -e TWINE_REPOSITORY_URL=$TWINE_REPOSITORY_URL
-    -e TWINE_USERNAME=$TWINE_USERNAME
-    -e TWINE_PASSWORD=$TWINE_PASSWORD
-    $PYSDK_IMAGE scripts/release.sh
-
+    - scripts/upload-to-pypi-and-open-source.sh
 
 # Keep latest image built from 'dev' branch - to allow smoke testing not-yet-released SDK versions
 # '-latest-' is a special substring, that prevents Docker image deletion for 1 year
