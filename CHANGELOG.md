@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.5.0] (2025-09-02)
+[1.5.0]: https://github.com/vast-data/vastdb_sdk/compare/v1.4.0...v1.5.0
+
+### Added
+- Support for split select - allowing user to manage concurrent reads of splits
+- Support predicate pushdown of a FixedSizeList
+
 ## [1.4.0] (2025-07-28)
 [1.4.0]: https://github.com/vast-data/vastdb_sdk/compare/v1.3.11...v1.4.0
 
