@@ -27,7 +27,7 @@ if os.environ.get('VASTDB_APPEND_VERSION_SUFFIX'):
 
 setup(
     name='vastdb',
-    python_requires='>=3.9.0',
+    python_requires='>=3.10.0',
     description='VAST Data SDK',
     version='1.4.0' + suffix,
     url='https://github.com/vast-data/vastdb_sdk',
@@ -42,10 +42,10 @@ setup(
         'Development Status :: 5 - Production/Stable',
         'License :: OSI Approved :: Apache Software License',
         'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.9',
         'Programming Language :: Python :: 3.10',
         'Programming Language :: Python :: 3.11',
         'Programming Language :: Python :: 3.12',
+        'Programming Language :: Python :: 3.13',
         'Topic :: Database',
         'Topic :: Database :: Front-Ends',
     ],

@@ -113,7 +113,7 @@ def calculate_aggregate_stats(
     )
     agg_df["duration_sec"] = (
         r_df.groupby(group_flds)
-        .apply(calc_total_time_coverage_seconds, include_groups=False)
+        .apply(calc_total_time_coverage_seconds, include_groups=False)  # type: ignore
         .sort_index()
     )
     agg_df["M_rows_per_sec"] = (agg_df["n_rows"] / agg_df["duration_sec"] / 1e6).astype(
