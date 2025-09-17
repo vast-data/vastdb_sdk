@@ -14,13 +14,13 @@ import pyarrow.compute as pc
 import pyarrow.parquet as pq
 import pytest
 from requests.exceptions import HTTPError
-from session import Session
 
 from vastdb import errors
 from vastdb.session import Session
 from vastdb.table import INTERNAL_ROW_ID, QueryConfig
 
 from .util import assert_row_ids_ascending_on_first_insertion_to_table, prepare_data
+
 
 log = logging.getLogger(__name__)
 
