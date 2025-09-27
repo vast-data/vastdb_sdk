@@ -25,11 +25,12 @@ def assert_row_ids_ascending_on_first_insertion_to_table(row_ids, expected_num_r
 @contextmanager
 def prepare_data(session: Session,
                  clean_bucket_name: str, schema_name: str, table_name: str,
-                 arrow_table: pa.Table, sorting_key: List[str] = []) -> Iterator[Table]:
+                 arrow_table: pa.Table, sorting_key: List[str] = [],
+                 insert_by_columns: bool = True) -> Iterator[Table]:
     with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).create_schema(schema_name)
         t = s.create_table(table_name, arrow_table.schema, sorting_key=sorting_key)
-        row_ids_array = t.insert(arrow_table)
+        row_ids_array = t.insert(arrow_table, by_columns=insert_by_columns)
         row_ids = row_ids_array.to_pylist()
         assert_row_ids_ascending_on_first_insertion_to_table(row_ids, arrow_table.num_rows, t.sorted_table)
         yield t

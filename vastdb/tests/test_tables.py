@@ -1,5 +1,6 @@
 import datetime as dt
 import decimal
+import itertools
 import logging
 import random
 import threading
@@ -17,7 +18,7 @@ from requests.exceptions import HTTPError
 
 from vastdb import errors
 from vastdb.session import Session
-from vastdb.table import INTERNAL_ROW_ID, QueryConfig
+from vastdb.table import INTERNAL_ROW_ID, MAX_COLUMN_IN_BATCH, QueryConfig
 
 from .util import assert_row_ids_ascending_on_first_insertion_to_table, prepare_data
 
@@ -91,6 +92,39 @@ def test_insert_wide_row(session, clean_bucket_name):
     expected = pa.table(schema=columns, data=data)
 
     with prepare_data(session, clean_bucket_name, 's', 't', expected) as t:
+        actual = t.select().read_all()
+        assert actual == expected
+
+
+@pytest.mark.parametrize("num_columns,insert_by_columns", itertools.product([
+        MAX_COLUMN_IN_BATCH // 2,
+        MAX_COLUMN_IN_BATCH - 1,
+        MAX_COLUMN_IN_BATCH,
+        MAX_COLUMN_IN_BATCH + 1,
+        MAX_COLUMN_IN_BATCH * 2,
+        MAX_COLUMN_IN_BATCH * 10,
+    ],
+    [False, True]
+    )
+)
+def test_insert_by_columns_variations(session, clean_bucket_name, num_columns, insert_by_columns):
+    columns = pa.schema([pa.field(f'i{i}', pa.int64()) for i in range(num_columns)])
+    data = [[i] for i in range(num_columns)]
+    expected = pa.table(schema=columns, data=data)
+
+    with prepare_data(session, clean_bucket_name, 's', 't', expected, insert_by_columns=insert_by_columns) as t:
+        actual = t.select().read_all()
+        assert actual == expected
+
+
+@pytest.mark.parametrize("sorting_key", [0, 40, 80, 120])
+def test_insert_by_columns_sorted(session, clean_bucket_name, sorting_key):
+    num_columns = 160
+    columns = pa.schema([pa.field(f'i{i}', pa.int64()) for i in range(num_columns)])
+    data = [[i] for i in range(num_columns)]
+    expected = pa.table(schema=columns, data=data)
+
+    with prepare_data(session, clean_bucket_name, 's', 't', expected, sorting_key=[sorting_key], insert_by_columns=True) as t:
         actual = t.select().read_all()
         assert actual == expected
 

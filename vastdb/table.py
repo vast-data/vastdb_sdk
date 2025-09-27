@@ -222,7 +222,7 @@ class TableInTransaction(ITable):
     def _internal_rowid_field(self) -> pa.Field:
         return INTERNAL_ROW_ID_SORTED_FIELD if self._is_sorted_table else INTERNAL_ROW_ID_FIELD
 
-    def sorted_columns(self) -> list[str]:
+    def sorted_columns(self) -> list[pa.Field]:
         """Return sorted columns' metadata."""
         return self._metadata.sorted_columns
 
@@ -631,35 +631,41 @@ class TableInTransaction(ITable):
         return pa.RecordBatchReader.from_batches(query_data_request.response_schema, batches_iterator())
 
     def insert_in_column_batches(self, rows: pa.RecordBatch) -> pa.ChunkedArray:
-        """Split the RecordBatch into max_columns that can be inserted in single RPC.
+        """Split the RecordBatch into an insert + updates.
 
+        This is both to support rows that won't fit into an RPC and for performance for wide rows.
         Insert first MAX_COLUMN_IN_BATCH columns and get the row_ids. Then loop on the rest of the columns and
         update in groups of MAX_COLUMN_IN_BATCH.
         """
-        column_record_batch = pa.RecordBatch.from_arrays([_combine_chunks(rows.column(i)) for i in range(0, MAX_COLUMN_IN_BATCH)],
-                                                         schema=pa.schema([rows.schema.field(i) for i in range(0, MAX_COLUMN_IN_BATCH)]))
-        row_ids = self.insert(rows=column_record_batch)  # type: ignore
-
         columns_names = [field.name for field in rows.schema]
-        columns = list(rows.schema)
-        arrays = [_combine_chunks(rows.column(i))
-                  for i in range(len(rows.schema))]
-        for start in range(MAX_COLUMN_IN_BATCH, len(rows.schema), MAX_COLUMN_IN_BATCH):
+        # Sorted columns must be in the first insert as those can't be updated later.
+        if self._is_sorted_table:
+            sorted_columns_names = [field.name for field in self.sorted_columns()]
+            columns_names = sorted_columns_names + [column_name for column_name in columns_names if column_name not in sorted_columns_names]
+        columns = [rows.schema.field(column_name) for column_name in columns_names]
+
+        arrays = [_combine_chunks(rows.column(column_name)) for column_name in columns_names]
+        for start in range(0, len(rows.schema), MAX_COLUMN_IN_BATCH):
             end = start + MAX_COLUMN_IN_BATCH if start + \
                 MAX_COLUMN_IN_BATCH < len(rows.schema) else len(rows.schema)
             columns_name_chunk = columns_names[start:end]
             columns_chunks = columns[start:end]
             arrays_chunks = arrays[start:end]
-            columns_chunks.append(self._internal_rowid_field)
-            arrays_chunks.append(row_ids.to_pylist())
-            column_record_batch = pa.RecordBatch.from_arrays(
-                arrays_chunks, schema=pa.schema(columns_chunks))
-            self.update(rows=column_record_batch, columns=columns_name_chunk)
+            if start == 0:
+                column_record_batch = pa.RecordBatch.from_arrays(
+                    arrays_chunks, schema=pa.schema(columns_chunks))
+                row_ids = self.insert(rows=column_record_batch, by_columns=False)  # type: ignore
+            else:
+                columns_chunks.append(self._internal_rowid_field)
+                arrays_chunks.append(row_ids.to_pylist())
+                column_record_batch = pa.RecordBatch.from_arrays(
+                    arrays_chunks, schema=pa.schema(columns_chunks))
+                self.update(rows=column_record_batch, columns=columns_name_chunk)
         return row_ids
 
     def insert(self,
                rows: Union[pa.RecordBatch, pa.Table],
-               by_columns: bool = False) -> pa.ChunkedArray:
+               by_columns: bool = True) -> pa.ChunkedArray:
         """Insert a RecordBatch into this table."""
         self._assert_not_imports_table()
 
@@ -667,9 +673,14 @@ class TableInTransaction(ITable):
             log.debug("Ignoring empty insert into %s", self.ref)
             return pa.chunked_array([], type=self._internal_rowid_field.type)
 
+        # inserting by columns is faster, so default to doing that
+        # if the cluster supports it
         if by_columns:
-            self._tx._rpc.features.check_return_row_ids()
-            return self.insert_in_column_batches(rows)
+            try:
+                self._tx._rpc.features.check_return_row_ids()
+                return self.insert_in_column_batches(rows)
+            except errors.NotSupportedVersion:
+                pass
 
         try:
             row_ids = []
