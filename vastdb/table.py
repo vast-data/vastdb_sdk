@@ -674,8 +674,8 @@ class TableInTransaction(ITable):
             return pa.chunked_array([], type=self._internal_rowid_field.type)
 
         # inserting by columns is faster, so default to doing that
-        # if the cluster supports it
-        if by_columns:
+        # if the cluster supports it and there are actually columns in the rows
+        if by_columns and len(rows.schema):
             try:
                 self._tx._rpc.features.check_return_row_ids()
                 return self.insert_in_column_batches(rows)
