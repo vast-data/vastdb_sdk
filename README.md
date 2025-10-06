@@ -158,7 +158,7 @@ batches = snaps[0].schema('schema-name').table('table-name').select()
 
 ## Interactive and Non-Interactive Workflows
 
-Interactive `Table` created via the `Schema` object (`tx.bucket('..').schema('..').table('..')`) loads metadata and stats eagrly allowing for interactive development.
+Interactive `Table`, created via the `Schema` object (`tx.bucket('..').schema('..').table('..')`), loads metadata and stats eagerly allowing for interactive development.
 
 For more efficient use-cases where the extra round-trips to the server hurt use the Non-Interactive workflow.
 
