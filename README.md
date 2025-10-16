@@ -19,15 +19,11 @@ For technical details about VAST Database architecture, see the [whitepaper](htt
 ### Requirements
 
 - Linux client with Python 3.10 - 3.13, and network access to the VAST Cluster
+- VAST Cluster release `5.0.0-sp10` or later
+  - If your VAST Cluster is running an older release, please contact customer.support@vastdata.com.
 - [Virtual IP pool configured with DNS service](https://support.vastdata.com/s/topic/0TOV40000000FThOAM/configuring-network-access-v50)
 - [S3 access & secret keys on the VAST cluster](https://support.vastdata.com/s/article/UUID-4d2e7e23-b2fb-7900-d98f-96c31a499626)
 - [Tabular identity policy with the proper permissions](https://support.vastdata.com/s/article/UUID-14322b60-d6a2-89ac-3df0-3dfbb6974182)
-
-### Required VAST Cluster release
-
-VAST DB Python SDK requires VAST Cluster release `5.0.0-sp10` or later.
-
-If your VAST Cluster is running an older release, please contact customer.support@vastdata.com.
 
 ### Installation
 
@@ -80,61 +76,81 @@ with session.transaction() as tx:
     # the transaction is automatically committed when exiting the context
 ```
 
-For configuration examples, see [here](docs/config.md).
+Note: the transaction must be remain open while the returned [pyarrow.RecordBatchReader](https://arrow.apache.org/docs/python/generated/pyarrow.RecordBatchReader.html) generator is being used.
 
 The list of supported data types can be found [here](docs/types.md).
 
-Note: the transaction must be remain open while the returned [pyarrow.RecordBatchReader](https://arrow.apache.org/docs/python/generated/pyarrow.RecordBatchReader.html) generator is being used.
+## Features
 
-## Use Cases
+### Select Performance
+
+The `Table.select()` method accepts a [QueryConfig](vastdb/config.py) object that modifies how the select is fulfilled.
+
+The most important setting is the `data_endpoints` parameter that, when set, will allow the SDK to parallelize the select across multiple CNodes. Without this, only the CNode specified in the `connect()` will service the select.
+
+```python
+from vastdb.config import QueryConfig
+
+# load default configuration values
+cfg = QueryConfig()
+
+# set data_endpoints to CNode VIPs
+cfg.data_endpoints = [
+    "http://172.19.196.1",
+    "http://172.19.196.2",
+    "http://172.19.196.3",
+    "http://172.19.196.4",
+]
+
+table.select(columns=['c1'], predicate=(_.c2 > 2), config=cfg)
+```
+
+If using DNS with either TTL=0 or multi-response per the [Best Practice on Load Balancing CNodes](https://support.vastdata.com/s/document-item?bundleId=z-kb-articles-publications-prod&topicId=6058049537.html&_LANG=enus), passing in the same DNS name equal to the number of VIPs is a decent proxy.
+
+```python
+cfg.data_endpoints = ["http://vip-pool.v123-xy.VastENG.lab"] * 16  # assuming 16 VIPs in the pool
+```
 
 ### Filters and Projections
 
-The SDK supports predicate and projection pushdown:
+The SDK supports predicate and projection pushdown using Ibis:
 
 ```python
-    from ibis import _
+from ibis import _
 
-    # SELECT c1 FROM t WHERE (c2 > 2) AND (c3 IS NULL)
-    table.select(columns=['c1'],
-                 predicate=(_.c2 > 2) & _.c3.isnull())
+# SELECT c1 FROM t WHERE (c2 > 2) AND (c3 IS NULL)
+table.select(columns=['c1'],
+             predicate=(_.c2 > 2) & _.c3.isnull())
 
-    # SELECT c2, c3 FROM t WHERE (c2 BETWEEN 0 AND 1) OR (c2 > 10)
-    table.select(columns=['c2', 'c3'],
-                 predicate=(_.c2.between(0, 1) | (_.c2 > 10))
+# SELECT c2, c3 FROM t WHERE (c2 BETWEEN 0 AND 1) OR (c2 > 10)
+table.select(columns=['c2', 'c3'],
+             predicate=(_.c2.between(0, 1) | (_.c2 > 10))
 
-    # SELECT * FROM t WHERE c3 LIKE '%substring%'
-    table.select(predicate=_.c3.contains('substring'))
+# SELECT * FROM t WHERE c3 LIKE '%substring%'
+table.select(predicate=_.c3.contains('substring'))
 ```
 
-See [here for more details](docs/predicate.md).
+See the [Predicate pushdown support document](docs/predicate.md) for more information on constructing predicates using Ibis.
 
-### Import a single Parquet file via S3 protocol
+### Import Parquet files via S3 protocol
 
-You can efficiently create tables from Parquet files (without copying them via the client):
+You can efficiently create tables from Parquet files that already exist in an S3 bucket on VAST without copying them via the client. If more than one file is included in `parquet_files` they will be loaded concurrently.
 
 ```python
-    with tempfile.NamedTemporaryFile() as f:
-        pa.parquet.write_table(arrow_table, f.name)
-        s3.put_object(Bucket='bucket-name', Key='staging/file.parquet', Body=f)
-
-    schema = tx.bucket('bucket-name').schema('schema-name')
+with session.transaction() as tx:
+    schema = tx.bucket('database-name').schema('schema-name')
     table = util.create_table_from_files(
         schema=schema, table_name='imported-table',
         parquet_files=['/bucket-name/staging/file.parquet'])
 ```
 
-### Import multiple Parquet files concurrently via S3 protocol
-
-Import multiple files concurrently into a table (by using multiple CNodes' cores):
+If the table already exists, you can use the `table.import_files()` method to add more data to the table from Parquet files that already exist in an S3 bucket on VAST.
 
 ```python
-    schema = tx.bucket('bucket-name').schema('schema-name')
-    table = util.create_table_from_files(
-        schema=schema, table_name='large-imported-table',
-        parquet_files=[f'/bucket-name/staging/file{i}.parquet' for i in range(10)])
+with session.transaction() as tx:
+    table = tx.bucket('database-name').schema('schema-name').table('table-name')
+    table.import_files(["/bucket-name/staging/file2.parquet"])
 ```
-
 
 ### Semi-sorted Projections
 
@@ -158,9 +174,9 @@ batches = snaps[0].schema('schema-name').table('table-name').select()
 
 ## Interactive and Non-Interactive Workflows
 
-Interactive `Table` created via the `Schema` object (`tx.bucket('..').schema('..').table('..')`) loads metadata and stats eagrly allowing for interactive development.
+A `Table` created via the `Schema` object (`tx.bucket('..').schema('..').table('..')`) loads metadata and stats eagerly allowing for interactive development. Each object (bucket, schema, table) requires one or more round-trips to the server and `.table()` will fetch the full table schema.
 
-For more efficient use-cases where the extra round-trips to the server hurt use the Non-Interactive workflow.
+It's generally more efficient to use the `TableMetadata` interface that allows for both lazy loading of the schemas as it's needed, as well as allowing reusing the metadata across transactions.
 
 ```python
 # load the table schema & stats into an object we can use across transactions
@@ -172,7 +188,7 @@ with session.transaction() as tx:
 table_md = TableMetadata(TableRef("bucket-name", "schema-name", "table-name"),
                          arrow_schema=<some-arrow-schema>)
 
-# now we can reuse without the overhead of reloading the schema and stats,
+# now we can reuse it without the overhead of reloading the schema and stats,
 # such as for inserts:
 with session.transaction() as tx:
     table = tx.table_from_metadata(table_md)
@@ -188,6 +204,15 @@ with session.transaction() as tx:
     print(results)
 ```
 
+Some table operations, like `table.import_files()`, does not require the client to know the table schema, and using the `TableMetadata` interface will bypass fetching the schema entirely.
+
+```python
+table_md = TableMetadata(TableRef("bucket-name", "schema-name", "table-name"))
+
+with session.transaction() as tx:
+    table = tx.table_from_metadata(table_md)
+    table.import_files(["/bucket-name/staging/file2.parquet"])
+```
 
 ## Post-processing
 
@@ -248,9 +273,6 @@ with session.transaction() as tx:
     print(distinct_elements)
 ```
 
-
-
-
 ## More Information
 
 See these blog posts for more examples:
@@ -259,5 +281,3 @@ See these blog posts for more examples:
 - https://vastdata.com/blog/the-vast-catalog-in-action-part-2
 
 See also the [full Vast DB Python SDK documentation](https://vastdb-sdk.readthedocs.io/en/latest/)
-
-
