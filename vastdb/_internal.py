@@ -17,6 +17,7 @@ import requests
 import urllib3
 import xmltodict
 from aws_requests_auth.aws_auth import AWSRequestsAuth
+from ibis.expr.operations import Field, Node
 from ibis.expr.operations.generic import (
     IsNull,
     Literal,
@@ -34,7 +35,6 @@ from ibis.expr.operations.logical import (
     NotEquals,
     Or,
 )
-from ibis.expr.operations.relations import Field
 from ibis.expr.operations.strings import StartsWith, StringContains
 from ibis.expr.operations.structs import StructField
 
@@ -2350,9 +2350,36 @@ def get_response_schema(schema: 'pa.Schema' = pa.schema([]), field_names: Option
     return pa.schema([schema.field(name) for name in field_names])
 
 
-def build_query_data_request(schema: 'pa.Schema' = pa.schema([]),
+def _column_names_in_node_tree(expr: ibis.expr.types.Expr) -> set[str]:
+    def walk_op(op: Node):
+        if isinstance(op, Field):
+            names.add(op.name)
+        elif isinstance(op, (list, tuple)):
+            for item in op:
+                walk_op(item)
+        else:
+            for arg in getattr(op, "args", ()):
+                walk_op(arg)
+
+    names: set[str] = set()
+    walk_op(expr.op())
+    return names
+
+
+def build_query_data_request(schema: pa.Schema,
                              predicate: ibis.expr.types.BooleanColumn = None,
-                             field_names: Optional[List[str]] = None) -> QueryDataRequest:
+                             field_names: Optional[list[str]] = None) -> QueryDataRequest:
+    if field_names is None:
+        queried_columns = [f.name for f in schema]
+    else:
+        # apparently there are some tests that send a tuple despite the signature asking for a list
+        queried_columns = list(field_names)
+
+    column_names_in_predicate = set() if predicate is None else _column_names_in_node_tree(predicate)
+    column_names_required_by_predicate = column_names_in_predicate - set(queried_columns)
+    queried_columns.extend(column_names_required_by_predicate)
+    schema = pa.schema((schema.field(name) for name in queried_columns))
+
     builder = flatbuffers.Builder(1024)
 
     source_name = builder.CreateString('')  # required
@@ -2374,18 +2401,17 @@ def build_query_data_request(schema: 'pa.Schema' = pa.schema([]),
     parser = QueryDataParser(schema)
     leaves_map = {node.field.name: [leaf.index for leaf in node._iter_leaves()] for node in parser.nodes}
 
-    response_schema = get_response_schema(schema, field_names)
-    field_names = [field.name for field in response_schema]
-
     projection_fields = []
-    for field_name in field_names:
+    for field in schema:
         # TODO: only root-level projection pushdown is supported (i.e. no support for SELECT s.x FROM t)
-        positions = leaves_map[field_name]
+        positions = leaves_map[field.name]
+
         for leaf_position in positions:
             fb_field_index.Start(builder)
             fb_field_index.AddPosition(builder, leaf_position)
             offset = fb_field_index.End(builder)
             projection_fields.append(offset)
+
     fb_source.StartProjectionVector(builder, len(projection_fields))
     for offset in reversed(projection_fields):
         builder.PrependUOffsetTRelative(offset)
@@ -2405,4 +2431,4 @@ def build_query_data_request(schema: 'pa.Schema' = pa.schema([]),
 
     builder.Finish(relation)
 
-    return QueryDataRequest(serialized=builder.Output(), response_schema=response_schema, response_parser=QueryDataParser(response_schema))
+    return QueryDataRequest(serialized=builder.Output(), response_schema=schema, response_parser=QueryDataParser(schema))
