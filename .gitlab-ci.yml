@@ -1,10 +1,17 @@
+stages:
+  - .pre
+  - build
+  - test
+  - security
+  - deploy
+
 variables:
   DOCKER_REGISTRY: 110450271409.dkr.ecr.eu-west-1.amazonaws.com
   PYSDK_BUILDER_IMAGE: $DOCKER_REGISTRY/dev/infra:vastdb-python-sdk-builder-latest
   ORION_PREFIX: $DOCKER_REGISTRY/dev/orion
   PYSDK_IMAGE_PREFIX: $ORION_PREFIX:vastdb-python-sdk-pipe-$CI_PIPELINE_ID
   VASTDB_PYTHON_SDK_REPO: $DOCKER_REGISTRY/dev/vastdb-python-sdk
-  ORION_BRANCH: QP/Q/yoni.doron/pysdk_vector_index_export # for the vector index feature
+  ORION_BRANCH: TEAM/tabular-5.5
   BUILDER_DOCKER_BASE_IMAGE: $VASTDB_PYTHON_SDK_REPO:alonid-rockylinux-rpm-builder-8.6.20227707
 
 
@@ -82,27 +89,17 @@ upload_to_artifactory:
 
 upload_to_pypi:
   stage: deploy
-  interruptible: true
   image: $PYSDK_BUILDER_IMAGE
   tags:
     - vast-dev-builder
-
   variables:
     PYSDK_IMAGE: ${PYSDK_IMAGE_PREFIX}-3.13 # use latest Python image for deployment
-
   when: manual
   rules:
-    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH == "main"
       when: manual
-
   script:
-  - echo "Releasing to PyPI from $PYSDK_IMAGE (tag=$CI_COMMIT_TAG)..."
-  - docker run
-    -e TWINE_REPOSITORY_URL=$TWINE_REPOSITORY_URL
-    -e TWINE_USERNAME=$TWINE_USERNAME
-    -e TWINE_PASSWORD=$TWINE_PASSWORD
-    $PYSDK_IMAGE scripts/release.sh
-
+    - scripts/upload-to-pypi-and-open-source.sh
 
 # Keep latest image built from 'dev' branch - to allow smoke testing not-yet-released SDK versions
 # '-latest-' is a special substring, that prevents Docker image deletion for 1 year
@@ -156,3 +153,22 @@ keep_latest_release:
   parallel:
     matrix:
       - PYTHON_VERSION: ['3.10', '3.11', '3.12', '3.13']
+
+security_scan:
+  stage: security
+  script:
+    - echo "Running secrets scanning with trufflehog for ${SCAN_TARGET}"
+    - curl -sSfL https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh | sh -s --
+    - |
+      ./bin/trufflehog filesystem . \
+      --results=verified,unknown \
+      --json \
+      --fail-on-scan-errors \
+      --fail \
+      --exclude-paths=<(echo ".git/") > report.json
+  artifacts:
+    paths:
+      - report.json
+    when: always
+  tags:
+    - devops-runner-linux-large
