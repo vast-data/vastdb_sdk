@@ -68,7 +68,12 @@ def test_create_table_with_vector_index_metadata(session: Session,
         log.info(f"Vector index metadata: {result_vector_index}")
 
         # Assert expected values (should match input parameters)
-        assert result_vector_index == vector_index
+        result_vector_index_spec = (
+            None
+            if result_vector_index is None
+            else result_vector_index.to_vector_index_spec()
+        )
+        assert result_vector_index_spec == vector_index
 
         log.info(f"✓ Test passed for table '{table_name}'")
 

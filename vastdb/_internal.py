@@ -820,6 +820,10 @@ class VectorIndex:
     distance_metric: str
     sql_distance_function: str
 
+    def to_vector_index_spec(self) -> VectorIndexSpec:
+        return VectorIndexSpec(self.column,
+                               self.distance_metric)
+
 
 @dataclass
 class TableStats:
