@@ -8,6 +8,9 @@ from vastdb.table import QueryConfig
 log = logging.getLogger(__name__)
 
 
+DELAY_TO_LET_SERVER_UPDATE: int = 3
+
+
 def test_basic_projections(session, clean_bucket_name):
     with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).create_schema('s1')
@@ -94,7 +97,7 @@ def test_query_data_with_projection(session, clean_bucket_name):
         actual = pa.Table.from_batches(t.select(columns=['a', 'b', 's']))
         assert actual == expected
 
-    time.sleep(3)
+    time.sleep(DELAY_TO_LET_SERVER_UPDATE)
 
     with session.transaction() as tx:
         config = QueryConfig()
@@ -120,6 +123,51 @@ def test_query_data_with_projection(session, clean_bucket_name):
         projection_actual = pa.Table.from_batches(t.select(columns=['a', 'b', 's'], predicate=(t['b'] < 5), config=config))
         # expecting results of projection p2 since we asked it specificaly
         assert expected_projection_p2 == projection_actual
+
+        t.drop()
+        s.drop()
+
+
+def test_projection_stats(session, clean_bucket_name):
+    columns = pa.schema([
+        ('a', pa.int64()),
+        ('b', pa.int64()),
+    ])
+
+    # min size to be considered as a projection
+    GROUP_SIZE = 64 * 1024
+    expected = pa.table(schema=columns, data=[
+        [i for i in range(GROUP_SIZE)],
+        [i for i in reversed(range(GROUP_SIZE))],
+    ])
+
+    schema_name = "schema"
+    table_name = "table"
+    with session.transaction() as tx:
+        s = tx.bucket(clean_bucket_name).create_schema(schema_name)
+        t = s.create_table(table_name, expected.schema)
+
+        sorted_columns = ['b']
+        unsorted_columns = ['a']
+        t.create_projection('p1', sorted_columns, unsorted_columns)
+
+    with session.transaction() as tx:
+        s = tx.bucket(clean_bucket_name).schema(schema_name)
+        t = s.table(table_name)
+        t.insert(expected)
+        actual = pa.Table.from_batches(t.select(columns=['a', 'b']))
+        assert actual == expected
+
+    time.sleep(DELAY_TO_LET_SERVER_UPDATE)
+
+    with session.transaction() as tx:
+        s = tx.bucket(clean_bucket_name).schema(schema_name)
+        t = s.table(table_name)
+        projections = t.projections()
+        assert len(projections) == 1
+        stats = projections[0].stats
+        assert stats.num_rows == GROUP_SIZE
+        assert stats.size_in_bytes > 0
 
         t.drop()
         s.drop()

@@ -4,12 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2.0.2] (2025-10-22)
+[2.0.2]: https://github.com/vast-data/vastdb_sdk/compare/v2.0.1...v2.0.2
+
+### Fixed
+- Get correct rows count and size in bytes when asking for a table projections
+
 ## [2.0.1] (2025-10-22)
 [2.0.1]: https://github.com/vast-data/vastdb_sdk/compare/v2.0.0...v2.0.1
 
 ### Fixed
 - Performance improvement in query data flow - sending only required columns instead of entire schema
-
 
 ## [2.0.0] (2025-09-17)
 [2.0.0]: https://github.com/vast-data/vastdb_sdk/compare/v1.4.0...v2.0.0

@@ -231,11 +231,11 @@ class TableInTransaction(ITable):
             raise errors.NotSupportedCommand(
                 self.ref.bucket, self.ref.schema, self.ref.table)
 
-    def projection(self, name: str) -> "Projection":
+    def projection(self, name: str, include_stats: bool = True) -> "Projection":
         """Get a specific semi-sorted projection of this table."""
         self._assert_not_imports_table()
 
-        projs = tuple(self.projections(projection_name=name))
+        projs = tuple(self.projections(projection_name=name, include_stats=include_stats))
         if not projs:
             raise errors.MissingProjection(
                 self.ref.bucket, self.ref.schema, self.ref.table, name)
@@ -245,7 +245,7 @@ class TableInTransaction(ITable):
         log.debug("Found projection: %s", projs[0])
         return projs[0]
 
-    def projections(self, projection_name: str = "") -> Iterable["Projection"]:
+    def projections(self, projection_name: str = "", include_stats: bool = True) -> Iterable["Projection"]:
         """List all semi-sorted projections of this table if `projection_name` is empty.
 
         Otherwise, list only the specific projection (if exists).
@@ -260,7 +260,7 @@ class TableInTransaction(ITable):
             _bucket_name, _schema_name, _table_name, curr_projections, next_key, is_truncated, _ = \
                 self._tx._rpc.api.list_projections(
                     bucket=self.ref.bucket, schema=self.ref.schema, table=self.ref.table, next_key=next_key, txid=self._tx.active_txid,
-                    exact_match=exact_match, name_prefix=name_prefix)
+                    exact_match=exact_match, name_prefix=name_prefix, include_list_stats=include_stats)
             if not curr_projections:
                 break
             projections.extend(curr_projections)
