@@ -10,6 +10,7 @@ For more details see:
 import os
 from typing import TYPE_CHECKING, Optional
 
+from vastdb._adbc import AdbcDriver
 from vastdb.transaction import Transaction
 
 if TYPE_CHECKING:
@@ -23,7 +24,8 @@ class Session:
                  *,
                  ssl_verify=True,
                  timeout=None,
-                 backoff_config: Optional["BackoffConfig"] = None):
+                 backoff_config: Optional["BackoffConfig"] = None,
+                 adbc_driver: Optional[AdbcDriver] = None):
         """Connect to a VAST Database endpoint, using specified credentials."""
         from . import _internal, features
 
@@ -34,14 +36,19 @@ class Session:
         if endpoint is None:
             endpoint = os.environ['AWS_S3_ENDPOINT_URL']
 
+        self.endpoint = endpoint
+        self.access = access
+        self.secret = secret
+
         self.api = _internal.VastdbApi(
-            endpoint=endpoint,
-            access_key=access,
-            secret_key=secret,
+            endpoint=self.endpoint,
+            access_key=self.access,
+            secret_key=self.secret,
             ssl_verify=ssl_verify,
             timeout=timeout,
             backoff_config=backoff_config)
         self.features = features.Features(self.api.vast_version)
+        self.adbc_driver: Optional[AdbcDriver] = adbc_driver
 
     def __repr__(self):
         """Don't show the secret key."""
@@ -56,4 +63,4 @@ class Session:
                 tx.bucket("bucket").create_schema("schema")
         """
         from . import transaction
-        return transaction.Transaction(self)
+        return transaction.Transaction(self, _adbc_driver=self.adbc_driver)

@@ -8,6 +8,7 @@ import pytest
 
 import vastdb
 import vastdb.errors
+from vastdb._adbc import AdbcDriver
 from vastdb.schema import Schema
 from vastdb.session import Session
 
@@ -45,12 +46,18 @@ def pytest_addoption(parser):
     parser.addoption("--num-workers", help="Number of concurrent workers", default=1)
 
 
+def _get_adbc_driver_url(pipeline: str) -> str:
+    return f"https://artifactory.vastdata.com/artifactory/files/vastdb-native-client/{pipeline}/libadbc_driver_vastdb.so"
+
+
 @pytest.fixture(scope="session")
 def session_kwargs(request: pytest.FixtureRequest, tabular_endpoint_urls):
     return dict(
         access=request.config.getoption("--tabular-access-key"),
         secret=request.config.getoption("--tabular-secret-key"),
         endpoint=tabular_endpoint_urls[0],
+        # TODO use other not hard coded driver
+         adbc_driver=AdbcDriver.from_url(url=_get_adbc_driver_url("2091272"))
     )
 
 

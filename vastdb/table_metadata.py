@@ -39,6 +39,11 @@ class TableRef:
         """Table full path."""
         return f"{self.bucket}/{self.schema}/{self.table}"
 
+    @property
+    def query_engine_full_path(self) -> str:
+        """Table full path for VastDB Query Engine."""
+        return f'"{self.bucket}/{self.schema}\".{self.table}'
+
     def __str__(self) -> str:
         """Table full path."""
         return self.full_path
@@ -68,10 +73,12 @@ class TableMetadata:
     _ibis_table: ibis.Table
     _stats: Optional[TableStats]
 
-    def __init__(self,
-                 ref: TableRef,
-                 arrow_schema: Optional[pa.Schema] = None,
-                 table_type: Optional[TableType] = None):
+    def __init__(
+        self,
+        ref: TableRef,
+        arrow_schema: Optional[pa.Schema] = None,
+        table_type: Optional[TableType] = None,
+    ):
         """Table Metadata."""
         self._ref = deepcopy(ref)
         self._table_type = table_type
@@ -84,8 +91,7 @@ class TableMetadata:
         if not isinstance(other, TableMetadata):
             return False
 
-        return (self._ref == other._ref and
-                self._table_type == other._table_type)
+        return self._ref == other._ref and self._table_type == other._table_type
 
     def rename_table(self, name: str) -> None:
         """Rename table metadata's table name."""
@@ -110,7 +116,8 @@ class TableMetadata:
                 table=self.ref.table,
                 next_key=next_key,
                 txid=tx.active_txid,
-                list_imports_table=self.is_imports_table)
+                list_imports_table=self.is_imports_table,
+            )
             fields.extend(cur_columns)
             if not is_truncated:
                 break
@@ -123,9 +130,16 @@ class TableMetadata:
         try:
             next_key = 0
             while True:
-                cur_columns, next_key, is_truncated, _count = tx._rpc.api.list_sorted_columns(
-                    bucket=self.ref.bucket, schema=self.ref.schema, table=self.ref.table,
-                    next_key=next_key, txid=tx.active_txid, list_imports_table=self.is_imports_table)
+                cur_columns, next_key, is_truncated, _count = (
+                    tx._rpc.api.list_sorted_columns(
+                        bucket=self.ref.bucket,
+                        schema=self.ref.schema,
+                        table=self.ref.table,
+                        next_key=next_key,
+                        txid=tx.active_txid,
+                        list_imports_table=self.is_imports_table,
+                    )
+                )
                 fields.extend(cur_columns)
                 if not is_truncated:
                     break
@@ -133,7 +147,9 @@ class TableMetadata:
             raise
         except errors.InternalServerError as ise:
             log.warning(
-                "Failed to get the sorted columns Elysium might not be supported: %s", ise)
+                "Failed to get the sorted columns Elysium might not be supported: %s",
+                ise,
+            )
             raise
         except errors.NotSupportedVersion:
             log.warning("Failed to get the sorted columns, Elysium not supported")
@@ -144,8 +160,12 @@ class TableMetadata:
     def load_stats(self, tx: "Transaction") -> None:
         """Load/Reload table stats."""
         stats_tuple = tx._rpc.api.get_table_stats(
-            bucket=self.ref.bucket, schema=self.ref.schema, name=self.ref.table, txid=tx.active_txid,
-            imports_table_stats=self.is_imports_table)
+            bucket=self.ref.bucket,
+            schema=self.ref.schema,
+            name=self.ref.table,
+            txid=tx.active_txid,
+            imports_table_stats=self.is_imports_table,
+        )
         self._stats = TableStats(**stats_tuple._asdict())
 
         is_elysium_table = self._stats.sorting_key_enabled
@@ -184,7 +204,9 @@ class TableMetadata:
         if arrow_schema:
             validate_ibis_support_schema(arrow_schema)
             self._arrow_schema = arrow_schema
-            self._ibis_table = ibis.table(ibis.Schema.from_pyarrow(arrow_schema), self._ref.full_path)
+            self._ibis_table = ibis.table(
+                ibis.Schema.from_pyarrow(arrow_schema), self._ref.full_path
+            )
         else:
             self._arrow_schema = None
             self._ibis_table = None
@@ -211,7 +233,8 @@ class TableMetadata:
         """Table's type."""
         if self._table_type is None:
             raise ValueError(
-                "TableType was not loaded. load using TableMetadata.load_stats")
+                "TableType was not loaded. load using TableMetadata.load_stats"
+            )
 
         return self._table_type
 

@@ -167,3 +167,11 @@ vastdb/bench/perf_bench/benchmark_results
 
 
 .direnv
+
+
+# Emacs
+*~
+#*#
+.#*
+.projectile
+.dir-locals.el

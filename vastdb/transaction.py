@@ -11,6 +11,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Iterable, Optional
 
+from vastdb._adbc import AdbcConnection, AdbcDriver
 from vastdb._table_interface import ITable
 from vastdb.table import TableInTransaction
 from vastdb.table_metadata import TableMetadata
@@ -39,17 +40,35 @@ class TransactionNotActiveError(Exception):
     pass
 
 
+class NoAdbcConnectionError(Exception):
+    """No Adbc Connection Error."""
+
+    pass
+
+
 @dataclass
 class Transaction:
     """A holder of a single VAST transaction."""
 
     _rpc: "session.Session"
     txid: Optional[int] = None
+    _adbc_driver: Optional[AdbcDriver] = None
+    _adbc_conn: Optional[AdbcConnection] = None
 
     def __enter__(self):
         """Create a transaction and store its ID."""
         response = self._rpc.api.begin_transaction()
         self.txid = int(response.headers['tabular-txid'])
+
+        if self._adbc_driver is not None:
+            self._adbc_conn = AdbcConnection(
+                self._adbc_driver,
+                self._rpc.endpoint,
+                self._rpc.access,
+                self._rpc.secret,
+                self.txid,
+            )
+
         log.debug("opened txid=%016x", self.txid)
         return self
 
@@ -57,6 +76,10 @@ class Transaction:
         """On success, the transaction is committed. Otherwise, it is rolled back."""
         txid = self.txid
         self.txid = None
+        if self._adbc_conn is not None:
+            self.adbc_conn.close()
+            self._adbc_conn = None
+
         if (exc_type, exc_value, exc_traceback) == (None, None, None):
             log.debug("committing txid=%016x", txid)
             self._rpc.api.commit_transaction(txid)
@@ -110,3 +133,10 @@ class Transaction:
     def table_from_metadata(self, metadata: TableMetadata) -> ITable:
         """Create Table from TableMetadata."""
         return TableInTransaction(deepcopy(metadata), tx=self)
+
+    @property
+    def adbc_conn(self) -> AdbcConnection:
+        """ADBC connection in transaction."""
+        if self._adbc_conn is None:
+            raise NoAdbcConnectionError("Adbc Driver may not have been supplied")
+        return self._adbc_conn

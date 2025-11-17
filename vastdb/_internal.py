@@ -2339,7 +2339,7 @@ def build_field(builder: flatbuffers.Builder, f: pa.Field, include_name=True):
 class QueryDataRequest:
     def __init__(self, serialized, response_schema, response_parser):
         self.serialized = serialized
-        self.response_schema = response_schema
+        self.response_schema: pa.Schema = response_schema
         self.response_parser = response_parser
 
 
