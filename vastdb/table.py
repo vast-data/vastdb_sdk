@@ -274,6 +274,31 @@ class TableInTransaction(ITable):
                 break
         return [_parse_projection_info(projection, self._metadata, self._tx) for projection in projections]
 
+    def blob_expansion(self, source_column_name: str) -> "BlobExpansion":
+        """Get blob expansion by source column name."""
+        self._assert_not_imports_table()
+
+        try:
+            result = self._tx._rpc.api.show_blob_expansion(
+                self.ref.bucket, self.ref.schema, self.ref.table,
+                source_column_name, txid=self._tx.active_txid)
+        except errors.InternalServerError as e:
+            # Server returns InternalError for invalid/missing blob expansion configuration
+            if "Invalid blob expansion configuration" in str(e):
+                raise errors.MissingBlobExpansion(
+                    self.ref.bucket, self.ref.schema, self.ref.table, source_column_name) from e
+            raise
+
+        if not result or result[0] is None:
+            raise errors.MissingBlobExpansion(
+                self.ref.bucket, self.ref.schema, self.ref.table, source_column_name)
+
+        return _parse_blob_expansion_info(result, self._metadata, self._tx)
+
+    def blob_expansions(self) -> Iterable["BlobExpansion"]:
+        """List all blob expansions (not implemented - use blob_expansion with source_column_name)."""
+        raise NotImplementedError("Listing all blob expansions requires iteration over columns")
+
     def import_files(self,
                      files_to_import: Iterable[str],
                      config: Optional[ImportConfig] = None) -> None:
@@ -993,6 +1018,50 @@ class Table(TableInTransaction):
         log.info("Created projection: %s", projection_name)
         return self.projection(projection_name)
 
+    def create_blob_expansion(self, source_column_name: str, expansion_schema: pa.Schema,
+                             target_table_name: str, expansion_format: str = "json",
+                             copy_source_column: bool = False, flatten_path: bool = False,
+                             flatten_delimiter: str = "__", target_table_schema: Optional[str] = None,
+                             add_missing_values_output: bool = True,
+                             add_excessive_values_output: bool = True) -> "BlobExpansion":
+        """Create a blob expansion.
+
+        Parameters
+        ----------
+        source_column_name : str
+            The name of the source column to expand.
+        expansion_schema : pa.Schema
+            The schema for the expanded columns.
+        target_table_name : str
+            The name of the target table.
+        expansion_format : str, optional
+            The format of the expanded data (default: "json").
+        copy_source_column : bool, optional
+            Whether to copy the source column to the target table (default: False).
+        flatten_path : bool, optional
+            Whether to flatten nested struct columns (default: False).
+        flatten_delimiter : str, optional
+            Delimiter for flattened path column names (default: "__").
+        target_table_schema : str, optional
+            The schema where the target table will be created (defaults to source table's schema).
+        add_missing_values_output : bool, optional
+            Whether to add the missing values output column (default: True).
+        add_excessive_values_output : bool, optional
+            Whether to add the excessive values output column (default: True).
+
+        """
+        self._assert_not_imports_table()
+
+        self._tx._rpc.api.create_blob_expansion(
+            self.ref.bucket, self.ref.schema, self.ref.table,
+            source_column_name, expansion_schema, target_table_name,
+            expansion_format, copy_source_column, flatten_path, flatten_delimiter,
+            target_table_schema, add_missing_values_output, add_excessive_values_output,
+            txid=self._tx.active_txid)
+        log.info("Created blob expansion: source_column=%s target_table=%s",
+                 source_column_name, target_table_name)
+        return self.blob_expansion(source_column_name)
+
     def create_imports_table(self, fail_if_exists=True) -> ITable:
         """Create imports table."""
         self._tx._rpc.features.check_imports_table()
@@ -1005,6 +1074,8 @@ class Table(TableInTransaction):
                                        create_imports_table=True)
         log.info("Created imports table for table: %s", self.name)
         return self.imports_table()  # type: ignore[return-value]
+
+        # todo add here all the new API functions
 
 
 @dataclass
@@ -1068,6 +1139,102 @@ def _parse_projection_info(projection_info, table_metadata: "TableMetadata", tx:
                       stats=stats,
                       handle=int(projection_info.handle),
                       tx=tx)
+
+
+@dataclass
+class BlobExpansion:
+    """VAST blob expansion."""
+
+    source_column_name: str
+    target_table_name: str
+    expansion_format: str
+    columns: list  # [(name, type, metadata), ...]
+    copy_source_column: bool
+    table_metadata: TableMetadata
+    tx: "Transaction"
+
+    def add_columns(self, expansion_schema: pa.Schema = None,
+                   add_copy_source_column: bool = False,
+                   add_missing_values_output: bool = False,
+                   add_excessive_values_output: bool = False) -> None:
+        """Add columns to blob expansion.
+
+        Parameters
+        ----------
+        expansion_schema : pa.Schema, optional
+            The schema for the columns to add.
+        add_copy_source_column : bool, optional
+            If True, add a copy source column to the expansion.
+        add_missing_values_output : bool, optional
+            If True, add the missing values output column.
+        add_excessive_values_output : bool, optional
+            If True, add the excessive values output column.
+
+        """
+        self.tx._rpc.api.alter_blob_expansion_add_columns(
+            self.table_metadata.ref.bucket,
+            self.table_metadata.ref.schema,
+            self.table_metadata.ref.table,
+            self.source_column_name,
+            expansion_schema,
+            add_copy_source_column,
+            add_missing_values_output,
+            add_excessive_values_output,
+            txid=self.tx.active_txid)
+        log.info("Added columns to blob expansion: %s", self.source_column_name)
+
+    def drop_columns(self, expansion_schema: pa.Schema = None,
+                    remove_copy_source_column: bool = False,
+                    remove_missing_values_output: bool = False,
+                    remove_excessive_values_output: bool = False) -> None:
+        """Drop columns from blob expansion.
+
+        Parameters
+        ----------
+        expansion_schema : pa.Schema, optional
+            The schema for the columns to remove.
+        remove_copy_source_column : bool, optional
+            If True, remove a copy source column from the expansion.
+        remove_missing_values_output : bool, optional
+            If True, remove the missing values output column.
+        remove_excessive_values_output : bool, optional
+            If True, remove the excessive values output column.
+
+        """
+        self.tx._rpc.api.alter_blob_expansion_drop_columns(
+            self.table_metadata.ref.bucket,
+            self.table_metadata.ref.schema,
+            self.table_metadata.ref.table,
+            self.source_column_name,
+            expansion_schema,
+            remove_copy_source_column,
+            remove_missing_values_output,
+            remove_excessive_values_output,
+            txid=self.tx.active_txid)
+        log.info("Dropped columns from blob expansion: %s", self.source_column_name)
+
+    def drop(self) -> None:
+        """Drop blob expansion."""
+        self.tx._rpc.api.drop_blob_expansion(
+            self.table_metadata.ref.bucket,
+            self.table_metadata.ref.schema,
+            self.table_metadata.ref.table,
+            self.source_column_name,
+            txid=self.tx.active_txid)
+        log.info("Dropped blob expansion: %s", self.source_column_name)
+
+
+def _parse_blob_expansion_info(result, table_metadata, tx):
+    """Parse show_blob_expansion result into BlobExpansion object."""
+    source_column_name, target_table_name, expansion_format, columns, copy_source_column = result
+    return BlobExpansion(
+        source_column_name=source_column_name,
+        target_table_name=target_table_name,
+        expansion_format=expansion_format,
+        columns=columns,
+        copy_source_column=copy_source_column,
+        table_metadata=table_metadata,
+        tx=tx)
 
 
 def _parse_bucket_and_object_names(path: str) -> tuple[str, str]:

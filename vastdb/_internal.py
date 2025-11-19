@@ -120,6 +120,13 @@ from vastdb.vast_flatbuf.tabular.ListTablesResponse import (
 )
 from vastdb.vast_flatbuf.tabular.VectorIndexMetadata import VectorIndexMetadata
 
+# Blob expansion protobuf messages
+from vastdb.vast_protobuf.tabular.blob_expansion_pb2 import (
+    AlterBlobExpansionRequest,
+    CreateBlobExpansionRequest,
+    GetBlobExpansionResponse,
+)
+
 from . import errors, util
 from .config import BackoffConfig
 
@@ -876,6 +883,102 @@ def _backoff_giveup(exc: Exception) -> bool:
 class UnsupportedServer(NotImplementedError):
     """Raised when the response comes back from non-VAST DB server."""
     pass
+
+
+def build_create_blob_expansion_request(expansion_schema, target_table_name=None, expansion_format="json",
+                                        copy_source_column=False, flatten_path=False, flatten_delimiter="__",
+                                        target_table_schema=None, add_missing_values_output=True,
+                                        add_excessive_values_output=True):
+    """Build a CreateBlobExpansionRequest protobuf message.
+
+    Parameters
+    ----------
+    expansion_schema : pyarrow.Schema
+        The schema for the expanded columns.
+    target_table_name : string, optional
+        The name of the target table.
+    expansion_format : string, optional
+        The format of the expanded data (default: "json").
+    copy_source_column : bool, optional
+        Whether to copy the source column to the target table (default: False).
+    flatten_path : bool, optional
+        Whether to flatten nested struct columns (default: False).
+    flatten_delimiter : string, optional
+        Delimiter for flattened path column names (default: "__").
+    target_table_schema : string, optional
+        The schema where the target table will be created.
+    add_missing_values_output : bool, optional
+        Whether to add the missing values output column (default: True).
+    add_excessive_values_output : bool, optional
+        Whether to add the excessive values output column (default: True).
+
+    Returns
+    -------
+    bytes
+        Serialized protobuf message.
+    """
+    req = CreateBlobExpansionRequest()
+    if target_table_name:
+        req.target_table_name = target_table_name
+    req.expansion_format = expansion_format
+    req.arrow_schema = bytes(expansion_schema.serialize())
+    req.copy_source_column = copy_source_column
+    req.flatten_path = flatten_path
+    req.flatten_delimiter = flatten_delimiter
+    if target_table_schema:
+        req.target_table_schema = target_table_schema
+    req.add_missing_values_output = add_missing_values_output
+    req.add_excessive_values_output = add_excessive_values_output
+    return req.SerializeToString()
+
+
+def build_alter_blob_expansion_request(expansion_schema=None, remove=False, add_copy_source_column=False,
+                                       remove_copy_source_column=False, add_missing_values_output=False,
+                                       remove_missing_values_output=False, add_excessive_values_output=False,
+                                       remove_excessive_values_output=False):
+    """Build an AlterBlobExpansionRequest protobuf message.
+
+    Parameters
+    ----------
+    expansion_schema : pyarrow.Schema, optional
+        The schema for the columns to add or remove.
+    remove : bool
+        If True, remove columns from the expansion. If False, add columns.
+    add_copy_source_column : bool
+        If True, add a copy source column to the expansion.
+    remove_copy_source_column : bool
+        If True, remove a copy source column from the expansion.
+    add_missing_values_output : bool
+        If True, add the missing values output column.
+    remove_missing_values_output : bool
+        If True, remove the missing values output column.
+    add_excessive_values_output : bool
+        If True, add the excessive values output column.
+    remove_excessive_values_output : bool
+        If True, remove the excessive values output column.
+
+    Returns
+    -------
+    bytes
+        Serialized protobuf message.
+    """
+    req = AlterBlobExpansionRequest()
+    if expansion_schema is not None:
+        req.arrow_schema = bytes(expansion_schema.serialize())
+    req.remove = remove
+    if add_copy_source_column:
+        req.add_copy_source_column = add_copy_source_column
+    if remove_copy_source_column:
+        req.remove_copy_source_column = remove_copy_source_column
+    if add_missing_values_output:
+        req.add_missing_values_output = add_missing_values_output
+    if remove_missing_values_output:
+        req.remove_missing_values_output = remove_missing_values_output
+    if add_excessive_values_output:
+        req.add_excessive_values_output = add_excessive_values_output
+    if remove_excessive_values_output:
+        req.remove_excessive_values_output = remove_excessive_values_output
+    return req.SerializeToString()
 
 
 class VastdbApi:
@@ -2032,6 +2135,264 @@ class VastdbApi:
             method="DELETE",
             url=self._url(bucket=bucket, schema=schema, table=table, command="projection", url_params=url_params),
             headers=headers)
+
+    def create_blob_expansion(self, bucket, schema, table, source_column_name, expansion_schema,
+                             target_table_name, expansion_format="json", copy_source_column=False,
+                             flatten_path=False, flatten_delimiter="__", target_table_schema=None,
+                             add_missing_values_output=True, add_excessive_values_output=True,
+                             txid=0, client_tags=[], expected_retvals=[]):
+        """
+        Create a blob expansion by expanding a source table column into a target table
+        POST /bucket/schema/table?blob-expansion HTTP/1.1
+
+        Parameters
+        ----------
+        bucket : string
+            The bucket containing the source table.
+        schema : string
+            The schema containing the source table.
+        table : string
+            The source table name.
+        source_column_name : string
+            The name of the blob column to expand.
+        target_table_name : string, optional
+            The name of the target table. If not provided, defaults to source table name + "_expanded".
+        expansion_format : string, optional
+            The format of the expanded data (default: "json").
+        expansion_schema : pyarrow.Schema
+            The schema for the expanded columns.
+        copy_source_column : bool, optional
+            Whether to copy the source column to the target table (default: False).
+        flatten_path : bool, optional
+            Whether to flatten nested struct columns (default: False).
+        flatten_delimiter : string, optional
+            Delimiter for flattened path column names (default: "__").
+        target_table_schema : string, optional
+            The schema where the target table will be created (defaults to source table's schema).
+        add_missing_values_output : bool, optional
+            Whether to add the missing values output column (default: True).
+        add_excessive_values_output : bool, optional
+            Whether to add the excessive values output column (default: True).
+        """
+        create_blob_expansion_req = build_create_blob_expansion_request(
+            expansion_schema=expansion_schema,
+            target_table_name=target_table_name,
+            expansion_format=expansion_format,
+            copy_source_column=copy_source_column,
+            flatten_path=flatten_path,
+            flatten_delimiter=flatten_delimiter,
+            target_table_schema=target_table_schema,
+            add_missing_values_output=add_missing_values_output,
+            add_excessive_values_output=add_excessive_values_output)
+
+        headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
+        headers['Content-Length'] = str(len(create_blob_expansion_req))
+        url_params = {'source-column-name': source_column_name}
+
+        self._request(
+            method="POST",
+            url=self._url(bucket=bucket, schema=schema, table=table, command="blob-expansion", url_params=url_params),
+            data=create_blob_expansion_req,
+            headers=headers)
+
+    def alter_blob_expansion(self, bucket, schema, table, source_column_name,
+                            expansion_schema=None, remove=False, add_copy_source_column=False,
+                            remove_copy_source_column=False, add_missing_values_output=False,
+                            remove_missing_values_output=False, add_excessive_values_output=False,
+                            remove_excessive_values_output=False, txid=0, client_tags=[],
+                            expected_retvals=[]):
+        """
+        Alter a blob expansion by adding or removing columns to/from the target table
+        PUT /bucket/schema/table?blob-expansion HTTP/1.1
+
+        Parameters
+        ----------
+        bucket : string
+            The bucket containing the source table.
+        schema : string
+            The schema containing the source table.
+        table : string
+            The source table name.
+        source_column_name : string
+            The name of the blob column to expand.
+        expansion_schema : pyarrow.Schema, optional
+            The schema for the columns to add or remove.
+        remove : bool
+            If True, remove columns from the expansion. If False, add columns.
+        add_copy_source_column : bool
+            If True, add a copy source column to the expansion.
+        remove_copy_source_column : bool
+            If True, remove a copy source column from the expansion.
+        add_missing_values_output : bool
+            If True, add the missing values output column.
+        remove_missing_values_output : bool
+            If True, remove the missing values output column.
+        add_excessive_values_output : bool
+            If True, add the excessive values output column.
+        remove_excessive_values_output : bool
+            If True, remove the excessive values output column.
+        """
+        alter_blob_expansion_req = build_alter_blob_expansion_request(
+            expansion_schema=expansion_schema,
+            remove=remove,
+            add_copy_source_column=add_copy_source_column,
+            remove_copy_source_column=remove_copy_source_column,
+            add_missing_values_output=add_missing_values_output,
+            remove_missing_values_output=remove_missing_values_output,
+            add_excessive_values_output=add_excessive_values_output,
+            remove_excessive_values_output=remove_excessive_values_output)
+
+        headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
+        headers['Content-Length'] = str(len(alter_blob_expansion_req))
+        url_params = {'source-column-name': source_column_name}
+
+        self._request(
+            method="PUT",
+            url=self._url(bucket=bucket, schema=schema, table=table, command="blob-expansion", url_params=url_params),
+            data=alter_blob_expansion_req,
+            headers=headers)
+
+    def alter_blob_expansion_add_columns(self, bucket, schema, table, source_column_name,
+                                        expansion_schema=None, add_copy_source_column=False,
+                                        add_missing_values_output=False, add_excessive_values_output=False,
+                                        txid=0, client_tags=[], expected_retvals=[]):
+        """
+        Alter a blob expansion by adding columns to the target table
+        PUT /bucket/schema/table?blob-expansion HTTP/1.1
+
+        Parameters
+        ----------
+        bucket : string
+            The bucket containing the source table.
+        schema : string
+            The schema containing the source table.
+        table : string
+            The source table name.
+        source_column_name : string
+            The name of the blob column to expand.
+        expansion_schema : pyarrow.Schema, optional
+            The schema for the expanded columns to add.
+        add_copy_source_column : bool
+            If True, add a copy source column to the expansion.
+        add_missing_values_output : bool
+            If True, add the missing values output column.
+        add_excessive_values_output : bool
+            If True, add the excessive values output column.
+        """
+        return self.alter_blob_expansion(bucket=bucket, schema=schema, table=table,
+                                        source_column_name=source_column_name,
+                                        expansion_schema=expansion_schema,
+                                        remove=False,
+                                        add_copy_source_column=add_copy_source_column,
+                                        add_missing_values_output=add_missing_values_output,
+                                        add_excessive_values_output=add_excessive_values_output,
+                                        txid=txid, client_tags=client_tags,
+                                        expected_retvals=expected_retvals)
+
+    def alter_blob_expansion_drop_columns(self, bucket, schema, table, source_column_name,
+                                         expansion_schema=None, remove_copy_source_column=False,
+                                         remove_missing_values_output=False, remove_excessive_values_output=False,
+                                         txid=0, client_tags=[], expected_retvals=[]):
+        """
+        Alter a blob expansion by removing columns from the target table
+        PUT /bucket/schema/table?blob-expansion HTTP/1.1
+
+        Parameters
+        ----------
+        bucket : string
+            The bucket containing the source table.
+        schema : string
+            The schema containing the source table.
+        table : string
+            The source table name.
+        source_column_name : string
+            The name of the blob column to expand.
+        expansion_schema : pyarrow.Schema, optional
+            The schema for the expanded columns to remove.
+        remove_copy_source_column : bool
+            If True, remove a copy source column from the expansion.
+        remove_missing_values_output : bool
+            If True, remove the missing values output column.
+        remove_excessive_values_output : bool
+            If True, remove the excessive values output column.
+        """
+        return self.alter_blob_expansion(bucket=bucket, schema=schema, table=table,
+                                        source_column_name=source_column_name,
+                                        expansion_schema=expansion_schema,
+                                        remove=True,
+                                        remove_copy_source_column=remove_copy_source_column,
+                                        remove_missing_values_output=remove_missing_values_output,
+                                        remove_excessive_values_output=remove_excessive_values_output,
+                                        txid=txid, client_tags=client_tags,
+                                        expected_retvals=expected_retvals)
+
+    def drop_blob_expansion(self, bucket, schema, table, source_column_name,
+                           txid=0, client_tags=[], expected_retvals=[]):
+        """
+        Drop a blob expansion and stop the blob expansion mechanism.
+        Keeps the target table as-is but removes blob expansion metadata and clears flags.
+        DELETE /bucket/schema/table?blob-expansion HTTP/1.1
+
+        Parameters
+        ----------
+        bucket : string
+            The bucket containing the source table.
+        schema : string
+            The schema containing the source table.
+        table : string
+            The source table name.
+        source_column_name : string
+            The name of the blob column that was expanded.
+        """
+        headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
+        url_params = {'source-column-name': source_column_name}
+
+        self._request(
+            method="DELETE",
+            url=self._url(bucket=bucket, schema=schema, table=table, command="blob-expansion", url_params=url_params),
+            headers=headers)
+
+    def show_blob_expansion(self, bucket, schema, table, source_column_name,
+                           txid=0, client_tags=[], expected_retvals=[]):
+        """
+        Show a blob expansion by showing the target table
+        GET /bucket/schema/table?blob-expansion HTTP/1.1
+
+        Parameters
+        ----------
+        bucket : string
+            The bucket containing the source table.
+        schema : string
+            The schema containing the source table.
+        table : string
+            The source table name.
+        source_column_name : string
+            The name of the blob column to expand.
+
+        Returns
+        -------
+        tuple
+            (source_column_name, target_table_name, expansion_format, columns, copy_source_column)
+            where columns is a list of [column_name, column_type, column_metadata] tuples
+        """
+        headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
+        url_params = {'source-column-name': source_column_name}
+
+        res = self._request(
+            method="GET",
+            url=self._url(bucket=bucket, schema=schema, table=table, command="blob-expansion", url_params=url_params),
+            headers=headers)
+
+        rsp = GetBlobExpansionResponse()
+        rsp.ParseFromString(res.content)
+
+        columns = []
+        if rsp.arrow_schema:
+            arrow_schema = pa.ipc.read_schema(pa.py_buffer(rsp.arrow_schema))
+            for field in arrow_schema:
+                columns.append([field.name, field.type, field.metadata])
+
+        return rsp.source_column_name, rsp.target_table_name, rsp.expansion_format, columns, rsp.copy_source_column
 
     def list_projections(self, bucket, schema, table, txid=0, client_tags=[], max_keys=1000, next_key=0, name_prefix="",
                          exact_match=False, expected_retvals=[], include_list_stats=False, count_only=False):

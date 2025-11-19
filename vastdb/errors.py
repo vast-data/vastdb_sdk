@@ -170,6 +170,17 @@ class MissingProjection(Missing):
         self.args = [vars(self)]
 
 
+@dataclass
+class MissingBlobExpansion(Missing):
+    bucket: str
+    schema: str
+    table: str
+    source_column: str
+
+    def __post_init__(self):
+        self.args = [vars(self)]
+
+
 class Exists(Exception):
     pass
 
