@@ -95,74 +95,51 @@ class ObjectDetails(object):
             return self._tab.Get(flatbuffers.number_types.Int64Flags, o + self._tab.Pos)
         return 0
 
+def Start(builder): builder.StartObject(10)
 def ObjectDetailsStart(builder):
-    builder.StartObject(10)
-
-def Start(builder):
-    ObjectDetailsStart(builder)
-
+    """This method is deprecated. Please switch to Start."""
+    return Start(builder)
+def AddName(builder, name): builder.PrependUOffsetTRelativeSlot(0, flatbuffers.number_types.UOffsetTFlags.py_type(name), 0)
 def ObjectDetailsAddName(builder, name):
-    builder.PrependUOffsetTRelativeSlot(0, flatbuffers.number_types.UOffsetTFlags.py_type(name), 0)
-
-def AddName(builder, name):
-    ObjectDetailsAddName(builder, name)
-
+    """This method is deprecated. Please switch to AddName."""
+    return AddName(builder, name)
+def AddProperties(builder, properties): builder.PrependUOffsetTRelativeSlot(1, flatbuffers.number_types.UOffsetTFlags.py_type(properties), 0)
 def ObjectDetailsAddProperties(builder, properties):
-    builder.PrependUOffsetTRelativeSlot(1, flatbuffers.number_types.UOffsetTFlags.py_type(properties), 0)
-
-def AddProperties(builder, properties):
-    ObjectDetailsAddProperties(builder, properties)
-
+    """This method is deprecated. Please switch to AddProperties."""
+    return AddProperties(builder, properties)
+def AddHandle(builder, handle): builder.PrependUOffsetTRelativeSlot(2, flatbuffers.number_types.UOffsetTFlags.py_type(handle), 0)
 def ObjectDetailsAddHandle(builder, handle):
-    builder.PrependUOffsetTRelativeSlot(2, flatbuffers.number_types.UOffsetTFlags.py_type(handle), 0)
-
-def AddHandle(builder, handle):
-    ObjectDetailsAddHandle(builder, handle)
-
+    """This method is deprecated. Please switch to AddHandle."""
+    return AddHandle(builder, handle)
+def AddNumRows(builder, numRows): builder.PrependUint64Slot(3, numRows, 0)
 def ObjectDetailsAddNumRows(builder, numRows):
-    builder.PrependUint64Slot(3, numRows, 0)
-
-def AddNumRows(builder, numRows):
-    ObjectDetailsAddNumRows(builder, numRows)
-
+    """This method is deprecated. Please switch to AddNumRows."""
+    return AddNumRows(builder, numRows)
+def AddSizeInBytes(builder, sizeInBytes): builder.PrependUint64Slot(4, sizeInBytes, 0)
 def ObjectDetailsAddSizeInBytes(builder, sizeInBytes):
-    builder.PrependUint64Slot(4, sizeInBytes, 0)
-
-def AddSizeInBytes(builder, sizeInBytes):
-    ObjectDetailsAddSizeInBytes(builder, sizeInBytes)
-
+    """This method is deprecated. Please switch to AddSizeInBytes."""
+    return AddSizeInBytes(builder, sizeInBytes)
+def AddNumPartitions(builder, numPartitions): builder.PrependUint64Slot(5, numPartitions, 0)
 def ObjectDetailsAddNumPartitions(builder, numPartitions):
-    builder.PrependUint64Slot(5, numPartitions, 0)
-
-def AddNumPartitions(builder, numPartitions):
-    ObjectDetailsAddNumPartitions(builder, numPartitions)
-
+    """This method is deprecated. Please switch to AddNumPartitions."""
+    return AddNumPartitions(builder, numPartitions)
+def AddSortingKeyEnabled(builder, sortingKeyEnabled): builder.PrependBoolSlot(6, sortingKeyEnabled, 0)
 def ObjectDetailsAddSortingKeyEnabled(builder, sortingKeyEnabled):
-    builder.PrependBoolSlot(6, sortingKeyEnabled, 0)
-
-def AddSortingKeyEnabled(builder, sortingKeyEnabled):
-    ObjectDetailsAddSortingKeyEnabled(builder, sortingKeyEnabled)
-
+    """This method is deprecated. Please switch to AddSortingKeyEnabled."""
+    return AddSortingKeyEnabled(builder, sortingKeyEnabled)
+def AddSortingScore(builder, sortingScore): builder.PrependInt64Slot(7, sortingScore, 0)
 def ObjectDetailsAddSortingScore(builder, sortingScore):
-    builder.PrependInt64Slot(7, sortingScore, 0)
-
-def AddSortingScore(builder, sortingScore):
-    ObjectDetailsAddSortingScore(builder, sortingScore)
-
+    """This method is deprecated. Please switch to AddSortingScore."""
+    return AddSortingScore(builder, sortingScore)
+def AddWriteAmplification(builder, writeAmplification): builder.PrependInt64Slot(8, writeAmplification, 0)
 def ObjectDetailsAddWriteAmplification(builder, writeAmplification):
-    builder.PrependInt64Slot(8, writeAmplification, 0)
-
-def AddWriteAmplification(builder, writeAmplification):
-    ObjectDetailsAddWriteAmplification(builder, writeAmplification)
-
+    """This method is deprecated. Please switch to AddWriteAmplification."""
+    return AddWriteAmplification(builder, writeAmplification)
+def AddAcummulativeRowInseritionCount(builder, acummulativeRowInseritionCount): builder.PrependInt64Slot(9, acummulativeRowInseritionCount, 0)
 def ObjectDetailsAddAcummulativeRowInseritionCount(builder, acummulativeRowInseritionCount):
-    builder.PrependInt64Slot(9, acummulativeRowInseritionCount, 0)
-
-def AddAcummulativeRowInseritionCount(builder, acummulativeRowInseritionCount):
-    ObjectDetailsAddAcummulativeRowInseritionCount(builder, acummulativeRowInseritionCount)
-
+    """This method is deprecated. Please switch to AddAcummulativeRowInseritionCount."""
+    return AddAcummulativeRowInseritionCount(builder, acummulativeRowInseritionCount)
+def End(builder): return builder.EndObject()
 def ObjectDetailsEnd(builder):
-    return builder.EndObject()
-
-def End(builder):
-    return ObjectDetailsEnd(builder)
+    """This method is deprecated. Please switch to End."""
+    return End(builder)

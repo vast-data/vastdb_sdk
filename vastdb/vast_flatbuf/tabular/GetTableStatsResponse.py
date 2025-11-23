@@ -105,74 +105,66 @@ class GetTableStatsResponse(object):
             return self._tab.Get(flatbuffers.number_types.Int64Flags, o + self._tab.Pos)
         return 0
 
+    # GetTableStatsResponse
+    def VectorIndexMetadata(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(22))
+        if o != 0:
+            x = self._tab.Indirect(o + self._tab.Pos)
+            from vastdb.vast_flatbuf.tabular.VectorIndexMetadata import VectorIndexMetadata
+            obj = VectorIndexMetadata()
+            obj.Init(self._tab.Bytes, x)
+            return obj
+        return None
+
+def Start(builder): builder.StartObject(10)
 def GetTableStatsResponseStart(builder):
-    builder.StartObject(9)
-
-def Start(builder):
-    GetTableStatsResponseStart(builder)
-
+    """This method is deprecated. Please switch to Start."""
+    return Start(builder)
+def AddNumRows(builder, numRows): builder.PrependInt64Slot(0, numRows, 0)
 def GetTableStatsResponseAddNumRows(builder, numRows):
-    builder.PrependInt64Slot(0, numRows, 0)
-
-def AddNumRows(builder, numRows):
-    GetTableStatsResponseAddNumRows(builder, numRows)
-
+    """This method is deprecated. Please switch to AddNumRows."""
+    return AddNumRows(builder, numRows)
+def AddSizeInBytes(builder, sizeInBytes): builder.PrependInt64Slot(1, sizeInBytes, 0)
 def GetTableStatsResponseAddSizeInBytes(builder, sizeInBytes):
-    builder.PrependInt64Slot(1, sizeInBytes, 0)
-
-def AddSizeInBytes(builder, sizeInBytes):
-    GetTableStatsResponseAddSizeInBytes(builder, sizeInBytes)
-
+    """This method is deprecated. Please switch to AddSizeInBytes."""
+    return AddSizeInBytes(builder, sizeInBytes)
+def AddIsExternalRowidAlloc(builder, isExternalRowidAlloc): builder.PrependBoolSlot(2, isExternalRowidAlloc, 0)
 def GetTableStatsResponseAddIsExternalRowidAlloc(builder, isExternalRowidAlloc):
-    builder.PrependBoolSlot(2, isExternalRowidAlloc, 0)
-
-def AddIsExternalRowidAlloc(builder, isExternalRowidAlloc):
-    GetTableStatsResponseAddIsExternalRowidAlloc(builder, isExternalRowidAlloc)
-
+    """This method is deprecated. Please switch to AddIsExternalRowidAlloc."""
+    return AddIsExternalRowidAlloc(builder, isExternalRowidAlloc)
+def AddAddressType(builder, addressType): builder.PrependUOffsetTRelativeSlot(3, flatbuffers.number_types.UOffsetTFlags.py_type(addressType), 0)
 def GetTableStatsResponseAddAddressType(builder, addressType):
-    builder.PrependUOffsetTRelativeSlot(3, flatbuffers.number_types.UOffsetTFlags.py_type(addressType), 0)
-
-def AddAddressType(builder, addressType):
-    GetTableStatsResponseAddAddressType(builder, addressType)
-
+    """This method is deprecated. Please switch to AddAddressType."""
+    return AddAddressType(builder, addressType)
+def AddVips(builder, vips): builder.PrependUOffsetTRelativeSlot(4, flatbuffers.number_types.UOffsetTFlags.py_type(vips), 0)
 def GetTableStatsResponseAddVips(builder, vips):
-    builder.PrependUOffsetTRelativeSlot(4, flatbuffers.number_types.UOffsetTFlags.py_type(vips), 0)
-
-def AddVips(builder, vips):
-    GetTableStatsResponseAddVips(builder, vips)
-
+    """This method is deprecated. Please switch to AddVips."""
+    return AddVips(builder, vips)
+def StartVipsVector(builder, numElems): return builder.StartVector(4, numElems, 4)
 def GetTableStatsResponseStartVipsVector(builder, numElems):
-    return builder.StartVector(4, numElems, 4)
-
-def StartVipsVector(builder, numElems):
-    return GetTableStatsResponseStartVipsVector(builder, numElems)
-
+    """This method is deprecated. Please switch to Start."""
+    return StartVipsVector(builder, numElems)
+def AddSortingKeyEnabled(builder, sortingKeyEnabled): builder.PrependBoolSlot(5, sortingKeyEnabled, 0)
 def GetTableStatsResponseAddSortingKeyEnabled(builder, sortingKeyEnabled):
-    builder.PrependBoolSlot(5, sortingKeyEnabled, 0)
-
-def AddSortingKeyEnabled(builder, sortingKeyEnabled):
-    GetTableStatsResponseAddSortingKeyEnabled(builder, sortingKeyEnabled)
-
+    """This method is deprecated. Please switch to AddSortingKeyEnabled."""
+    return AddSortingKeyEnabled(builder, sortingKeyEnabled)
+def AddSortingScore(builder, sortingScore): builder.PrependInt64Slot(6, sortingScore, 0)
 def GetTableStatsResponseAddSortingScore(builder, sortingScore):
-    builder.PrependInt64Slot(6, sortingScore, 0)
-
-def AddSortingScore(builder, sortingScore):
-    GetTableStatsResponseAddSortingScore(builder, sortingScore)
-
+    """This method is deprecated. Please switch to AddSortingScore."""
+    return AddSortingScore(builder, sortingScore)
+def AddWriteAmplification(builder, writeAmplification): builder.PrependInt64Slot(7, writeAmplification, 0)
 def GetTableStatsResponseAddWriteAmplification(builder, writeAmplification):
-    builder.PrependInt64Slot(7, writeAmplification, 0)
-
-def AddWriteAmplification(builder, writeAmplification):
-    GetTableStatsResponseAddWriteAmplification(builder, writeAmplification)
-
+    """This method is deprecated. Please switch to AddWriteAmplification."""
+    return AddWriteAmplification(builder, writeAmplification)
+def AddAcummulativeRowInseritionCount(builder, acummulativeRowInseritionCount): builder.PrependInt64Slot(8, acummulativeRowInseritionCount, 0)
 def GetTableStatsResponseAddAcummulativeRowInseritionCount(builder, acummulativeRowInseritionCount):
-    builder.PrependInt64Slot(8, acummulativeRowInseritionCount, 0)
-
-def AddAcummulativeRowInseritionCount(builder, acummulativeRowInseritionCount):
-    GetTableStatsResponseAddAcummulativeRowInseritionCount(builder, acummulativeRowInseritionCount)
-
+    """This method is deprecated. Please switch to AddAcummulativeRowInseritionCount."""
+    return AddAcummulativeRowInseritionCount(builder, acummulativeRowInseritionCount)
+def AddVectorIndexMetadata(builder, vectorIndexMetadata): builder.PrependUOffsetTRelativeSlot(9, flatbuffers.number_types.UOffsetTFlags.py_type(vectorIndexMetadata), 0)
+def GetTableStatsResponseAddVectorIndexMetadata(builder, vectorIndexMetadata):
+    """This method is deprecated. Please switch to AddVectorIndexMetadata."""
+    return AddVectorIndexMetadata(builder, vectorIndexMetadata)
+def End(builder): return builder.EndObject()
 def GetTableStatsResponseEnd(builder):
-    return builder.EndObject()
-
-def End(builder):
-    return GetTableStatsResponseEnd(builder)
+    """This method is deprecated. Please switch to End."""
+    return End(builder)

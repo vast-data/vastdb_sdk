@@ -38,19 +38,26 @@ class VipRange(object):
             return self._tab.Get(flatbuffers.number_types.Uint16Flags, o + self._tab.Pos)
         return 0
 
-def Start(builder): builder.StartObject(2)
 def VipRangeStart(builder):
-    """This method is deprecated. Please switch to Start."""
-    return Start(builder)
-def AddStartAddress(builder, startAddress): builder.PrependUOffsetTRelativeSlot(0, flatbuffers.number_types.UOffsetTFlags.py_type(startAddress), 0)
+    builder.StartObject(2)
+
+def Start(builder):
+    VipRangeStart(builder)
+
 def VipRangeAddStartAddress(builder, startAddress):
-    """This method is deprecated. Please switch to AddStartAddress."""
-    return AddStartAddress(builder, startAddress)
-def AddAddressCount(builder, addressCount): builder.PrependUint16Slot(1, addressCount, 0)
+    builder.PrependUOffsetTRelativeSlot(0, flatbuffers.number_types.UOffsetTFlags.py_type(startAddress), 0)
+
+def AddStartAddress(builder, startAddress):
+    VipRangeAddStartAddress(builder, startAddress)
+
 def VipRangeAddAddressCount(builder, addressCount):
-    """This method is deprecated. Please switch to AddAddressCount."""
-    return AddAddressCount(builder, addressCount)
-def End(builder): return builder.EndObject()
+    builder.PrependUint16Slot(1, addressCount, 0)
+
+def AddAddressCount(builder, addressCount):
+    VipRangeAddAddressCount(builder, addressCount)
+
 def VipRangeEnd(builder):
-    """This method is deprecated. Please switch to End."""
-    return End(builder)
+    return builder.EndObject()
+
+def End(builder):
+    return VipRangeEnd(builder)
