@@ -4,16 +4,18 @@ import logging
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Optional, Tuple
+from typing import TYPE_CHECKING, Optional
 
 import ibis
 import pyarrow as pa
 
 from vastdb import errors
 from vastdb._ibis_support import validate_ibis_support_schema
+from vastdb._internal import TableStats, VectorIndex
 
 if TYPE_CHECKING:
     from .transaction import Transaction
+
 
 log = logging.getLogger(__name__)
 
@@ -42,26 +44,11 @@ class TableRef:
     @property
     def query_engine_full_path(self) -> str:
         """Table full path for VastDB Query Engine."""
-        return f'"{self.bucket}/{self.schema}\".{self.table}'
+        return f'"{self.bucket}/{self.schema}".{self.table}'
 
     def __str__(self) -> str:
         """Table full path."""
         return self.full_path
-
-
-@dataclass
-class TableStats:
-    """Table-related information."""
-
-    num_rows: int
-    size_in_bytes: int
-    sorting_score: int
-    write_amplification: int
-    acummulative_row_inserition_count: int
-    is_external_rowid_alloc: bool = False
-    sorting_key_enabled: bool = False
-    sorting_done: bool = False
-    endpoints: Tuple[str, ...] = ()
 
 
 class TableMetadata:
@@ -72,12 +59,14 @@ class TableMetadata:
     _sorted_columns: Optional[list[str]]
     _ibis_table: ibis.Table
     _stats: Optional[TableStats]
+    _vector_index: Optional[VectorIndex]
 
     def __init__(
         self,
         ref: TableRef,
         arrow_schema: Optional[pa.Schema] = None,
         table_type: Optional[TableType] = None,
+        vector_index: Optional[VectorIndex] = None,
     ):
         """Table Metadata."""
         self._ref = deepcopy(ref)
@@ -85,6 +74,7 @@ class TableMetadata:
         self.arrow_schema = deepcopy(arrow_schema)
         self._sorted_columns = None
         self._stats = None
+        self._vector_index = vector_index
 
     def __eq__(self, other: object) -> bool:
         """TableMetadata Equal."""
@@ -159,14 +149,13 @@ class TableMetadata:
 
     def load_stats(self, tx: "Transaction") -> None:
         """Load/Reload table stats."""
-        stats_tuple = tx._rpc.api.get_table_stats(
+        self._stats = tx._rpc.api.get_table_stats(
             bucket=self.ref.bucket,
             schema=self.ref.schema,
             name=self.ref.table,
             txid=tx.active_txid,
             imports_table_stats=self.is_imports_table,
         )
-        self._stats = TableStats(**stats_tuple._asdict())
 
         is_elysium_table = self._stats.sorting_key_enabled
 
@@ -180,6 +169,18 @@ class TableMetadata:
                 raise ValueError(
                     "Actual table is sorted (TableType.Elysium), was not inited as TableType.Elysium"
                 )
+
+        self._parse_stats_vector_index()
+
+    def _parse_stats_vector_index(self):
+        vector_index_is_set = self._vector_index is not None
+
+        if vector_index_is_set and self._stats.vector_index != self._vector_index:
+            raise ValueError(
+                f"Table has index {self._stats.vector_index}, but was initialized as {self._vector_index}"
+                )
+        else:
+            self._vector_index = self._stats.vector_index
 
     def _set_sorted_table(self, tx: "Transaction"):
         self._table_type = TableType.Elysium

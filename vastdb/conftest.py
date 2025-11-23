@@ -1,7 +1,7 @@
 import os
 import sqlite3
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Protocol
 
 import boto3
 import pytest
@@ -56,14 +56,29 @@ def session_kwargs(request: pytest.FixtureRequest, tabular_endpoint_urls):
         access=request.config.getoption("--tabular-access-key"),
         secret=request.config.getoption("--tabular-secret-key"),
         endpoint=tabular_endpoint_urls[0],
-        # TODO use other not hard coded driver
-         adbc_driver=AdbcDriver.from_url(url=_get_adbc_driver_url("2091272"))
     )
 
 
 @pytest.fixture(scope="session")
 def session(session_kwargs):
     return vastdb.connect(**session_kwargs)
+
+
+class SessionFactory(Protocol):
+    def __call__(self, *, with_adbc: bool) -> Session: ...
+
+
+@pytest.fixture(scope="session")
+def session_factory(session_kwargs) -> SessionFactory:
+    def create_session(with_adbc: bool = False) -> Session:
+
+        if with_adbc:
+            # TODO use other not hard coded driver
+            session_kwargs['adbc_driver'] = AdbcDriver.from_url(url=_get_adbc_driver_url("2091272"))
+
+        return vastdb.connect(**session_kwargs)
+
+    return create_session
 
 
 @pytest.fixture(scope="session")

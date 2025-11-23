@@ -6,6 +6,7 @@ import struct
 import time
 import urllib.parse
 from collections import defaultdict, namedtuple
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union, cast
 
@@ -803,10 +804,26 @@ def _parse_table_info(obj, parse_properties):
                      sorting_score, write_amplification, acummulative_row_insertion_count, sorting_done)
 
 
-# Results that returns from tablestats
+@dataclass
+class VectorIndex:
+    column: str
+    distance_metric: str
 
 
-TableStatsResult = namedtuple("TableStatsResult", 'num_rows size_in_bytes is_external_rowid_alloc sorting_key_enabled sorting_score write_amplification acummulative_row_inserition_count sorting_done endpoints')
+@dataclass
+class TableStats:
+    """Table-related information."""
+
+    num_rows: int
+    size_in_bytes: int
+    sorting_score: int
+    write_amplification: int
+    acummulative_row_inserition_count: int
+    is_external_rowid_alloc: bool = False
+    sorting_key_enabled: bool = False
+    sorting_done: bool = False
+    endpoints: Tuple[str, ...] = ()
+    vector_index: Optional[VectorIndex] = None
 
 
 _RETRIABLE_EXCEPTIONS = (
@@ -1128,10 +1145,12 @@ class VastdbApi:
     def create_table(self, bucket, schema, name, arrow_schema=None,
                      txid=0, client_tags=[], expected_retvals=[],
                      create_imports_table=False, use_external_row_ids_allocation=False, table_props=None,
-                     sorting_key=[]):
+                     sorting_key=[], vector_index: Optional[VectorIndex] = None):
         self._create_table_internal(bucket=bucket, schema=schema, name=name, arrow_schema=arrow_schema,
-                                    txid=txid, client_tags=client_tags, expected_retvals=expected_retvals,
-                                    create_imports_table=create_imports_table, use_external_row_ids_allocation=use_external_row_ids_allocation,
+                                    txid=txid, client_tags=client_tags,
+                                    expected_retvals=expected_retvals,
+                                    create_imports_table=create_imports_table,
+                                    use_external_row_ids_allocation=use_external_row_ids_allocation,
                                     table_props=table_props, sorting_key=sorting_key)
 
     def create_topic(self, bucket, name, topic_partitions, expected_retvals=[],
@@ -1188,10 +1207,10 @@ class VastdbApi:
             url=self._url(bucket=bucket, schema=schema, table=name, command="table", url_params=url_params),
             data=serialized_schema, headers=headers)
 
-    def get_topic_stats(self, bucket, name, expected_retvals=[]):
+    def get_topic_stats(self, bucket, name, expected_retvals=[]) -> TableStats:
         return self.get_table_stats(bucket=bucket, schema=KAFKA_TOPICS_SCHEMA_NAME, name=name, expected_retvals=expected_retvals)
 
-    def get_table_stats(self, bucket, schema, name, txid=0, client_tags=[], expected_retvals=[], imports_table_stats=False):
+    def get_table_stats(self, bucket, schema, name, txid=0, client_tags=[], expected_retvals=[], imports_table_stats=False) -> TableStats:
         """
         GET /mybucket/myschema/mytable?stats HTTP/1.1
         tabular-txid: TransactionId
@@ -1219,7 +1238,17 @@ class VastdbApi:
         sorting_done = bool(sorting_score_raw >> 63)
 
         endpoints = [self.url]  # we cannot replace the host by a VIP address in HTTPS-based URLs
-        return TableStatsResult(num_rows, size_in_bytes, is_external_rowid_alloc, sorting_key_enabled, sorting_score, write_amplification, acummulative_row_inserition_count, sorting_done, tuple(endpoints))
+
+        return TableStats(
+          num_rows=num_rows,
+          size_in_bytes=size_in_bytes,
+          sorting_score=sorting_score,
+          write_amplification=write_amplification,
+          acummulative_row_inserition_count=acummulative_row_inserition_count,
+          is_external_rowid_alloc=is_external_rowid_alloc,
+          sorting_key_enabled=sorting_key_enabled,
+          sorting_done=sorting_done,
+          endpoints=tuple(endpoints))
 
     def alter_topic(self, bucket, name,
                     new_name="", expected_retvals=[],

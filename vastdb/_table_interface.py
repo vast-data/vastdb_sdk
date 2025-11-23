@@ -1,14 +1,17 @@
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Iterable, Optional, Union
+from typing import TYPE_CHECKING, Iterable, Optional, TypeAlias, Union
 
 import ibis
 import pyarrow as pa
 
+from ._internal import VectorIndex
 from .config import ImportConfig, QueryConfig
 from .table_metadata import TableRef
 
 if TYPE_CHECKING:
     from .table import Projection
+
+IbisPredicate: TypeAlias = Union[ibis.expr.types.BooleanColumn, ibis.common.deferred.Deferred]
 
 
 class ITable(ABC):
@@ -71,8 +74,7 @@ class ITable(ABC):
     @abstractmethod
     def select(self,
                columns: Optional[list[str]] = None,
-               predicate: Union[ibis.expr.types.BooleanColumn,
-                                ibis.common.deferred.Deferred] = None,
+               predicate: Optional[IbisPredicate] = None,
                config: Optional[QueryConfig] = None,
                *,
                internal_row_id: bool = False,
@@ -133,4 +135,19 @@ class ITable(ABC):
 
         It is useful for constructing expressions for predicate pushdown in `ITable.select()` method.
         """
+        pass
+
+    @property
+    @abstractmethod
+    def vector_index(self) -> Optional[VectorIndex]:
+        """Table's Vector Index if exists."""
+        pass
+
+    @abstractmethod
+    def vector_search(self,
+                      vec: list[float],
+                      columns: list[str],
+                      limit: int,
+                      predicate: Optional[IbisPredicate] = None) -> pa.RecordBatchReader:
+        """Top-n on vector-column."""
         pass

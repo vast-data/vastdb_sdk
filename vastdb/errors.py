@@ -231,6 +231,11 @@ class ConnectionError(Exception):
         self.args = [vars(self)]
 
 
+class ApiResponseError(Exception):
+    """Indicates a logically invalid or inconsistent server response."""
+    pass
+
+
 def handle_unavailable(**kwargs):
     if kwargs['code'] == 'SlowDown':
         raise Slowdown(**kwargs)

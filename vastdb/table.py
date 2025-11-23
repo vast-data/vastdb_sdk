@@ -22,11 +22,12 @@ import ibis
 import pyarrow as pa
 import urllib3
 
-from vastdb._table_interface import ITable
+from vastdb._table_interface import IbisPredicate, ITable
 from vastdb.table_metadata import TableMetadata, TableRef, TableStats, TableType
 
 from . import _internal, errors, util
 from ._ibis_support import validate_ibis_support_schema
+from ._internal import VectorIndex
 from .config import ImportConfig, QueryConfig
 
 if TYPE_CHECKING:
@@ -212,6 +213,11 @@ class TableInTransaction(ITable):
     def reload_sorted_columns(self) -> None:
         """Reload Sorted Columns."""
         self._metadata.load_sorted_columns(self._tx)
+
+    @property
+    def vector_index(self) -> Optional[VectorIndex]:
+        """Table's Vector Index if exists."""
+        return self._metadata._vector_index
 
     @property
     def path(self) -> str:
@@ -812,6 +818,25 @@ class TableInTransaction(ITable):
     @property
     def _is_sorted_table(self) -> bool:
         return self._metadata.table_type is TableType.Elysium
+
+    def vector_search(
+        self,
+        vec: list[float],
+        columns: list[str],
+        limit: int,
+        predicate: Optional[IbisPredicate] = None,
+    ) -> pa.RecordBatchReader:
+        """Vector Search over vector indexed columns."""
+        assert self.vector_index is not None, "Table is either not vector indexed. (maybe try reloading the TableMetadata)"
+
+        return self._tx.adbc_conn.vector_search(
+            vec,
+            self.vector_index,
+            self.ref,
+            columns,
+            limit,
+            predicate=predicate,
+        )
 
 
 class Table(TableInTransaction):

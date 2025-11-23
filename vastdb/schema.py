@@ -14,6 +14,7 @@ from vastdb.table_metadata import TableMetadata, TableRef, TableType
 
 from . import bucket, errors, schema, table
 from ._ibis_support import validate_ibis_support_schema
+from ._internal import VectorIndex
 
 if TYPE_CHECKING:
     from .table import Table
@@ -80,7 +81,8 @@ class Schema:
         return result
 
     def create_table(self, table_name: str, columns: pa.Schema, fail_if_exists=True,
-                     use_external_row_ids_allocation=False, sorting_key=[]) -> "Table":
+                     use_external_row_ids_allocation=False, sorting_key=[],
+                     vector_index: Optional[VectorIndex] = None) -> "Table":
         """Create a new table under this schema.
 
         A virtual `vastdb_rowid` column (of `int64` type) can be created to access and filter by internal VAST row IDs.
