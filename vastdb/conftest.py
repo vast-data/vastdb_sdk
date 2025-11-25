@@ -74,7 +74,7 @@ def session_factory(session_kwargs) -> SessionFactory:
 
         if with_adbc:
             # TODO use other not hard coded driver
-            session_kwargs['adbc_driver'] = AdbcDriver.from_url(url=_get_adbc_driver_url("2091272"))
+            session_kwargs['adbc_driver'] = AdbcDriver.from_url(url=_get_adbc_driver_url("2103686"))
 
         return vastdb.connect(**session_kwargs)
 

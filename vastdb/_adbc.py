@@ -16,7 +16,7 @@ from vastdb.table_metadata import TableRef
 log = logging.getLogger(__name__)
 
 
-TXID_OVERRIDE_PROPERTY: str = "external_txid"
+TXID_OVERRIDE_PROPERTY: str = "vast.db.external_txid"
 VAST_DIST_ALIAS = "vast_pysdk_vector_dist"
 DEFAULT_ADBC_DRIVER_CACHE_DIR: str = "~/.vast/adbc_drivers_cache"
 DEFAULT_ADBC_DRIVER_CACHE_BY_URL_DIR: str = f"{DEFAULT_ADBC_DRIVER_CACHE_DIR}/by_url"
@@ -93,8 +93,7 @@ def _get_adbc_connection(
             "vast.db.access_key": access_key,
             "vast.db.secret_key": secret_key,
         },
-        # TODO re-add this after almog finishes
-        # conn_kwargs={TXID_OVERRIDE_PROPERTY: str(txid)},
+        conn_kwargs={TXID_OVERRIDE_PROPERTY: str(txid)},
     )
 
 
