@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2.0.3] (2025-11-25)
+[2.0.2]: https://github.com/vast-data/vastdb_sdk/compare/v2.0.2...v2.0.3
+
+### Added
+- Support for vastdb's adbc driver
+  - Session now gets an Optional[AdbcDriver]
+  - AdbcDriver is created out of a local path to a driver `.so` (shared library) or a url
+- Vector Search capability
+  - `Table.vector_search` - Approximate Top-N closest vectors
+
 ## [2.0.2] (2025-10-22)
 [2.0.2]: https://github.com/vast-data/vastdb_sdk/compare/v2.0.1...v2.0.2
 
