@@ -130,15 +130,8 @@ def _vector_search_sql(
 ) -> str:
     query_vector_dim = len(query_vector)
 
-    if vector_index.distance_metric == "l2sq":
-        dist_func_name = "array_distance"
-    else:
-        raise NotImplementedError(
-            f"distance metric {vector_index.distance_metric} is unsupported"
-        )
-
     query_vector_literal = f"{query_vector}::FLOAT[{query_vector_dim}]"
-    dist_func = f"{dist_func_name}({vector_index.column}::FLOAT[{query_vector_dim}], {query_vector_literal})"
+    dist_func = f"{vector_index.sql_distance_function}({vector_index.column}::FLOAT[{query_vector_dim}], {query_vector_literal})"
     dist_alias = f"{dist_func} as {VAST_DIST_ALIAS}"
 
     projection_str = ",".join(columns + [dist_alias])

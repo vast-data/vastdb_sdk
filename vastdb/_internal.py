@@ -117,6 +117,7 @@ from vastdb.vast_flatbuf.tabular.ListSchemasResponse import (
 from vastdb.vast_flatbuf.tabular.ListTablesResponse import (
     ListTablesResponse as list_tables,
 )
+from vastdb.vast_flatbuf.tabular.VectorIndexMetadata import VectorIndexMetadata
 
 from . import errors, util
 from .config import BackoffConfig
@@ -805,9 +806,19 @@ def _parse_table_info(obj, parse_properties):
 
 
 @dataclass
+class VectorIndexSpec:
+    """
+    Vector Index Specification when creating a table.
+    """
+    column: str
+    distance_metric: str
+
+
+@dataclass
 class VectorIndex:
     column: str
     distance_metric: str
+    sql_distance_function: str
 
 
 @dataclass
@@ -1145,13 +1156,31 @@ class VastdbApi:
     def create_table(self, bucket, schema, name, arrow_schema=None,
                      txid=0, client_tags=[], expected_retvals=[],
                      create_imports_table=False, use_external_row_ids_allocation=False, table_props=None,
-                     sorting_key=[], vector_index: Optional[VectorIndex] = None):
+                     sorting_key=[], vector_index: Optional[VectorIndexSpec] = None):
+        """
+        Create a table in the specified bucket and schema.
+
+        Args:
+            bucket: Name of the bucket
+            schema: Name of the schema
+            name: Name of the table
+            arrow_schema: PyArrow schema defining the table columns
+            txid: Transaction ID
+            client_tags: Client tags for the request
+            expected_retvals: Expected return values
+            create_imports_table: Whether this is an imports table
+            use_external_row_ids_allocation: Whether to use external row ID allocation
+            table_props: Table properties
+            sorting_key: List of column indices to sort by (for Elysium tables)
+            vector_index: Optional vector index
+        """
         self._create_table_internal(bucket=bucket, schema=schema, name=name, arrow_schema=arrow_schema,
                                     txid=txid, client_tags=client_tags,
                                     expected_retvals=expected_retvals,
                                     create_imports_table=create_imports_table,
                                     use_external_row_ids_allocation=use_external_row_ids_allocation,
-                                    table_props=table_props, sorting_key=sorting_key)
+                                    table_props=table_props, sorting_key=sorting_key,
+                                    vector_index=vector_index)
 
     def create_topic(self, bucket, name, topic_partitions, expected_retvals=[],
                      message_timestamp_type=None, retention_ms=None, message_timestamp_after_max_ms=None,
@@ -1168,8 +1197,9 @@ class VastdbApi:
 
     def _create_table_internal(self, bucket, schema, name, arrow_schema=None,
                                txid=0, client_tags=[], expected_retvals=[], topic_partitions=0,
-                               create_imports_table=False, use_external_row_ids_allocation=False, table_props=None,
-                               sorting_key=[]):
+                               create_imports_table=False, use_external_row_ids_allocation=False,
+                               table_props=None, sorting_key=[],
+                               vector_index: Optional[VectorIndexSpec] = None):
         """
         Create a table, use the following request
         POST /bucket/schema/table?table HTTP/1.1
@@ -1194,6 +1224,10 @@ class VastdbApi:
         headers['Content-Length'] = str(len(serialized_schema))
         if use_external_row_ids_allocation:
             headers['use-external-row-ids-alloc'] = str(use_external_row_ids_allocation)
+
+        if vector_index is not None:
+            headers['tabular-vector-index-column'] = vector_index.column
+            headers['tabular-vector-index-distance-metric'] = vector_index.distance_metric
 
         url_params = {'topic_partitions': str(topic_partitions)} if topic_partitions else {}
         if create_imports_table:
@@ -1237,6 +1271,27 @@ class VastdbApi:
         sorting_score = sorting_score_raw & ((1 << 63) - 1)
         sorting_done = bool(sorting_score_raw >> 63)
 
+        vector_index_metadata: Optional[VectorIndexMetadata] = stats.VectorIndexMetadata()
+
+        if vector_index_metadata is not None:
+            column_name = vector_index_metadata.ColumnName()
+            distance_metric = vector_index_metadata.DistanceMetric()
+            sql_distance_function = vector_index_metadata.SqlFunctionName()
+
+            if (column_name is None or
+                distance_metric is None or
+                sql_distance_function is None):
+                raise errors.ApiResponseError(
+                    "VectorIndexMetadata properties (column_name, distance_metric, sql_function_name) must all be set."
+                )
+
+            vector_index = VectorIndex(
+                column=column_name.decode('utf-8'),
+                distance_metric=distance_metric.decode('utf-8'),
+                sql_distance_function=sql_distance_function.decode('utf-8'))
+        else:
+            vector_index = None
+
         endpoints = [self.url]  # we cannot replace the host by a VIP address in HTTPS-based URLs
 
         return TableStats(
@@ -1248,7 +1303,8 @@ class VastdbApi:
           is_external_rowid_alloc=is_external_rowid_alloc,
           sorting_key_enabled=sorting_key_enabled,
           sorting_done=sorting_done,
-          endpoints=tuple(endpoints))
+          endpoints=tuple(endpoints),
+          vector_index=vector_index)
 
     def alter_topic(self, bucket, name,
                     new_name="", expected_retvals=[],

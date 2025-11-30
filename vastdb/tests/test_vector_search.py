@@ -5,12 +5,14 @@ import pyarrow as pa
 import pytest
 
 from vastdb._adbc import _ibis_to_qe_predicates
-from vastdb._internal import VectorIndex
+from vastdb._internal import VectorIndex, VectorIndexSpec
 from vastdb._table_interface import IbisPredicate
 from vastdb.conftest import SessionFactory
 from vastdb.table_metadata import TableMetadata, TableRef, TableType
 
 DIM = 8
+TEST_DISTANCE_FUNC = 'array_distance'
+TEST_DISTANCE_METRIC = 'l2sq'
 
 VectorColumnArrowType = pa.list_(
     pa.field(name='item', type=pa.float32(), nullable=False), DIM)
@@ -87,7 +89,9 @@ def test_sanity(session_factory: SessionFactory, clean_bucket_name: str):
     table_md = TableMetadata(ref,
                              arrow_schema,
                              TableType.Regular,
-                             vector_index=VectorIndex(vector_column_name, 'l2sq'))
+                             vector_index=VectorIndex(vector_column_name,
+                                                      TEST_DISTANCE_METRIC,
+                                                      TEST_DISTANCE_FUNC))
     data_table = pa.table(schema=arrow_schema, data=into_arrow_arrays(data))
 
     with session.transaction() as tx:
@@ -118,7 +122,9 @@ def test_with_predicates(session_factory: SessionFactory, clean_bucket_name: str
 
     ref = TableRef(clean_bucket_name, 's', 't')
     table_md = TableMetadata(ref, arrow_schema, TableType.Regular,
-                             vector_index=VectorIndex(vector_column_name, 'l2sq'))
+                             vector_index=VectorIndex(vector_column_name,
+                                                      TEST_DISTANCE_METRIC,
+                                                      TEST_DISTANCE_FUNC))
     data_table = pa.table(schema=arrow_schema, data=into_arrow_arrays(data))
 
     with session.transaction() as tx:
@@ -155,3 +161,50 @@ table_md = TableMetadata(ref, arrow_schema, TableType.Regular)
 ])
 def test_ibis_to_query_engine_predicates(ibis_predicate: IbisPredicate, expected: str):
     assert _ibis_to_qe_predicates(ibis_predicate) == expected
+
+
+def test_with_predicates_get_vector_index_properties_from_server(
+    session_factory: SessionFactory,
+    clean_bucket_name: str
+    ):
+    session = session_factory(with_adbc=True)
+
+    vector_column_name = 'vector_column'
+    vector_index_distance_metric = 'l2sq'
+    vector_index_sql_distance_function = "array_distance"
+
+    arrow_schema = pa.schema([('id', pa.int32()), ('n1', pa.int32(
+    )), ('n2', pa.int32()), (vector_column_name, VectorColumnArrowType),])
+    limit = 3
+
+    ref = TableRef(clean_bucket_name, 's', 't')
+    table_md = TableMetadata(ref, arrow_schema, TableType.Regular)
+    data_table = pa.table(schema=arrow_schema, data=into_arrow_arrays(data))
+
+    with session.transaction() as tx:
+        table = (tx.bucket(clean_bucket_name)
+                 .create_schema('s')
+                 .create_table('t',
+                               arrow_schema,
+                               vector_index=VectorIndexSpec(vector_column_name,
+                                                            vector_index_distance_metric)))
+        table.insert(data_table)
+
+    with session.transaction() as tx:
+        table = tx.table_from_metadata(table_md)
+
+        table.reload_stats()
+        assert table.vector_index == VectorIndex(
+            column=vector_column_name,
+            distance_metric=vector_index_distance_metric,
+            sql_distance_function=vector_index_sql_distance_function)
+
+        pred = table_md.ibis_table['n2'] == 200
+        reader = table.vector_search(vec=query_vector.tolist(),
+                                     columns=['id', 'n1', 'n2'],
+                                     limit=limit,
+                                     predicate=pred)
+
+        result_table = reader.read_all()
+
+        assert set([v.as_py() for v in result_table['n1']]) == {3, 4, 5}

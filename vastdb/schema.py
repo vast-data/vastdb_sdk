@@ -14,7 +14,7 @@ from vastdb.table_metadata import TableMetadata, TableRef, TableType
 
 from . import bucket, errors, schema, table
 from ._ibis_support import validate_ibis_support_schema
-from ._internal import VectorIndex
+from ._internal import VectorIndexSpec
 
 if TYPE_CHECKING:
     from .table import Table
@@ -82,11 +82,23 @@ class Schema:
 
     def create_table(self, table_name: str, columns: pa.Schema, fail_if_exists=True,
                      use_external_row_ids_allocation=False, sorting_key=[],
-                     vector_index: Optional[VectorIndex] = None) -> "Table":
+                     vector_index: Optional[VectorIndexSpec] = None) -> "Table":
         """Create a new table under this schema.
 
         A virtual `vastdb_rowid` column (of `int64` type) can be created to access and filter by internal VAST row IDs.
         See https://support.vastdata.com/s/article/UUID-48d0a8cf-5786-5ef3-3fa3-9c64e63a0967 for more details.
+
+        Args:
+            table_name: Name of the table to create
+            columns: PyArrow schema defining the table columns
+            fail_if_exists: Whether to fail if the table already exists
+            use_external_row_ids_allocation: Whether to use external row ID allocation
+            sorting_key: List of column names to use as sorting key (for Elysium tables)
+            vector_index: Optional vector index.
+
+        Returns:
+            The created table
+
         """
         if current := self.table(table_name, fail_if_missing=False):
             if fail_if_exists:
@@ -99,7 +111,8 @@ class Schema:
         validate_ibis_support_schema(columns)
         self.tx._rpc.api.create_table(self.bucket.name, self.name, table_name, columns, txid=self.tx.txid,
                                       use_external_row_ids_allocation=use_external_row_ids_allocation,
-                                      sorting_key=sorting_key)
+                                      sorting_key=sorting_key,
+                                      vector_index=vector_index)
         log.info("Created table: %s", table_name)
         return self.table(table_name)  # type: ignore[return-value]
 
