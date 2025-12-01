@@ -19,6 +19,7 @@ in pkgs.mkShellNoCC {
 
     python312
     python312Packages.autopep8
+    python312Packages.pip
     python312Packages.flatbuffers
   ]);
 }
