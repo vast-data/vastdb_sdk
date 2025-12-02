@@ -11,7 +11,11 @@ chmod 400 $GITHUB_SSH_PRIVATE_KEY
 ssh-add $GITHUB_SSH_PRIVATE_KEY
 
 # Allow connections to any host (GitHub and GitLab) without interactive prompts
-echo -e "Host *\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
+mkdir -p ~/.ssh
+cat <<EOF > ~/.ssh/config
+Host *
+  StrictHostKeyChecking no
+EOF
 
 echo "--- Pre-release checks ---"
 VERSION=$(docker run --rm "$PYSDK_IMAGE" python setup.py --version)
