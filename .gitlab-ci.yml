@@ -68,6 +68,8 @@ test_orion [branch]:
   rules:
     # in non-main run by default. in main don't run by default
     # RUN_INTEG_TEST overrides
+    - if: $CI_COMMIT_BRANCH =~ /^ci\/.+/ || $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^ci\/.+/
+      when: never
     - if: '$RUN_INTEG_TEST == "true"'
     - if: '$RUN_INTEG_TEST == "false"'
       when: never

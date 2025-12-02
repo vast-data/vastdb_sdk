@@ -49,7 +49,7 @@ else
 fi
 
 # Push to GitLab using the CI job token over HTTPS
-git push origin v${VERSION}; then
+git push origin v${VERSION}
 
 echo "--- Pushing tag v${VERSION} to GitHub and updating main branch ---"
 git remote add github git@github.com:vast-data/vastdb_sdk.git
