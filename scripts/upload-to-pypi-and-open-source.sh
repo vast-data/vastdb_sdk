@@ -49,7 +49,8 @@ else
 fi
 
 # Push to GitLab using the CI job token over HTTPS
-git push origin v${VERSION}
+WRITE_URL="https://oauth2:${GITLAB_PUSH_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
+git push $WRITE_URL v${VERSION}
 
 echo "--- Pushing tag v${VERSION} to GitHub and updating main branch ---"
 git remote add github git@github.com:vast-data/vastdb_sdk.git
