@@ -36,7 +36,7 @@ git config --global user.email "${GIT_USER_EMAIL}"
 echo "--- Creating and pushing signed tag v${VERSION} to GitLab ---"
 if git tag -l "v${VERSION}" | grep -q "v${VERSION}"; then
   echo "Git tag v${VERSION} already exists. Skipping tagging"
-  if [[ "$CI_COMMIT_SHA" != "$(git rev-parse v${VERSION})" ]]; then
+  if [[ "$CI_COMMIT_SHA" != "$(git rev-parse v${VERSION}^{commit})" ]]; then
     echo "Error: Pipeline is not running on the commit tagged with current version"
     exit 1
   fi
