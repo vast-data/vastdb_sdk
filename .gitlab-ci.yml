@@ -102,7 +102,7 @@ upload_to_pypi:
   stage: deploy
   image: $PYSDK_BUILDER_IMAGE
   tags:
-    - vast-dev-builder
+    - code-builder-small-shell-azure
   variables:
     PYSDK_IMAGE: ${PYSDK_IMAGE_PREFIX}-3.13 # use latest Python image for deployment
   when: manual
