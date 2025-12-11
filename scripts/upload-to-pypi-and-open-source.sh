@@ -5,12 +5,13 @@ set -euo pipefail
 export GIT_USER_NAME="${GIT_USER_NAME:-vastabase}"
 export GIT_USER_EMAIL="${GIT_USER_EMAIL:-vastabase@vastdata.com}"
 
-echo "--- Setting up SSH for GitHub ---"
-eval $(ssh-agent -s)
-chmod 400 $GITHUB_SSH_PRIVATE_KEY
-ssh-add $GITHUB_SSH_PRIVATE_KEY
+echo "--- Get token for GitHub ---"
+GITHUB_TOKEN=$(docker run --rm \
+  -e GITHUB_CI_BOT_PEM="/github_ci_bot_key.pem" \
+  -v "${GITHUB_CI_BOT_PEM}:/github_ci_bot_key.pem" \
+  110450271409.dkr.ecr.eu-west-1.amazonaws.com/devops/tools:gh-token-generator "$GITHUB_CI_BOT_APP_ID")
 
-# Allow connections to any host (GitHub and GitLab) without interactive prompts
+# Allow connections to any host without interactive prompts
 mkdir -p ~/.ssh
 cat <<EOF > ~/.ssh/config
 Host *
@@ -49,12 +50,12 @@ else
 fi
 
 # Push to GitLab using the CI job token over HTTPS
-WRITE_URL="https://oauth2:${GITLAB_PUSH_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
-git push $WRITE_URL v${VERSION}
+GITLAB_PUSH_URL="https://oauth2:${GITLAB_PUSH_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
+git push $GITLAB_PUSH_URL v${VERSION}
 
 echo "--- Pushing tag v${VERSION} to GitHub and updating main branch ---"
-git remote add github git@github.com:vast-data/vastdb_sdk.git
-git push github "v${VERSION}:main" "v${VERSION}"
+GITHUB_PUSH_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/vast-data/vastdb_sdk.git"
+git push ${GITHUB_PUSH_URL} "v${VERSION}:main" "v${VERSION}"
 
 echo "--- Releasing v${VERSION} to PyPI ---"
 if curl -s ${PYPI_PACKAGE_URL}/json | jq  -e ".releases | has(\"${VERSION}\")"; then
