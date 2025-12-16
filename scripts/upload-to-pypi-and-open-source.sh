@@ -53,10 +53,9 @@ fi
 GITLAB_PUSH_URL="https://oauth2:${GITLAB_PUSH_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
 git push $GITLAB_PUSH_URL v${VERSION}
 
-echo "--- Pushing tag v${VERSION} to GitHub and updating main branch ---"
+echo "--- Pushing tag v${VERSION} to GitHub ---"
 GITHUB_PUSH_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/vast-data/vastdb_sdk.git"
 git push ${GITHUB_PUSH_URL} "v${VERSION}"
-git push -f ${GITHUB_PUSH_URL} "v${VERSION}:main"
 
 echo "--- Releasing v${VERSION} to PyPI ---"
 if curl -s ${PYPI_PACKAGE_URL}/json | jq  -e ".releases | has(\"${VERSION}\")"; then
