@@ -260,7 +260,7 @@ class TableInTransaction(ITable):
 
     @property
     def _internal_rowid_field(self) -> pa.Field:
-        return INTERNAL_ROW_ID_SORTED_FIELD if self._is_sorted_table else INTERNAL_ROW_ID_FIELD
+        return INTERNAL_ROW_ID_SORTED_FIELD if self._metadata.table_type in {TableType.Elysium, TableType.Partitioned, TableType.SortedPartitions} else INTERNAL_ROW_ID_FIELD
 
     def sorted_columns(self) -> list[pa.Field]:
         """Return sorted columns' metadata."""
@@ -917,7 +917,7 @@ class Table(TableInTransaction):
                  tx: "Transaction"):
         """Vast Interactive Table."""
         super().__init__(metadata, tx)
-        self._metadata.load_schema(tx)
+        self._metadata.load(tx)
 
         self._handle = handle
 

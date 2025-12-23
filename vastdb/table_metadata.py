@@ -8,10 +8,13 @@ from typing import TYPE_CHECKING, Optional
 
 import ibis
 import pyarrow as pa
+import pydantic
+from pyiceberg.transforms import parse_transform
 
 from vastdb import errors
 from vastdb._ibis_support import validate_ibis_support_schema
 from vastdb._internal import TableStats, VectorIndex
+from vastdb.partitioning import PartitionKey, PartitionSpec
 
 if TYPE_CHECKING:
     from .transaction import Transaction
@@ -26,6 +29,35 @@ class TableType(Enum):
     Regular = 1
     Elysium = 2
     TableImports = 3
+    Partitioned = 4  # Hydra
+    SortedPartitions = 5  # Lissandra
+
+
+class _ColumnMetadata(pydantic.BaseModel):
+    column_id: Optional[int] = pydantic.Field(alias="VAST:column_id", default=None)
+    partition_key_index: Optional[int] = pydantic.Field(alias="VAST:partition:key_index", default=None)
+    partition_transform: Optional[str] = pydantic.Field(alias="VAST:partition:transform", default=None)
+    partition_transform_arg: Optional[int] = pydantic.Field(
+        alias="VAST:partition:transform-arg", default=None
+    )
+
+    class Config:
+        populate_by_name = True
+
+    @pydantic.field_validator("partition_transform")
+    @classmethod
+    def transform_to_lower(cls, v: str) -> str:
+        return v.lower()
+
+    @property
+    def transform_name(self) -> Optional[str]:
+        if self.partition_transform is None:
+            return None
+
+        if self.partition_transform_arg is not None:
+            return f'{self.partition_transform}[{self.partition_transform_arg}]'
+
+        return self.partition_transform
 
 
 @dataclass
@@ -56,10 +88,11 @@ class TableMetadata:
 
     _ref: TableRef
     _arrow_schema: Optional[pa.Schema]
-    _sorted_columns: Optional[list[str]]
+    _sorted_columns: Optional[list[pa.Field]]
     _ibis_table: ibis.Table
     _stats: Optional[TableStats]
     _vector_index: Optional[VectorIndex]
+    _partitioning: Optional[PartitionSpec]
 
     def __init__(
         self,
@@ -67,6 +100,7 @@ class TableMetadata:
         arrow_schema: Optional[pa.Schema] = None,
         table_type: Optional[TableType] = None,
         vector_index: Optional[VectorIndex] = None,
+        partitioning: Optional[PartitionSpec] = None
     ):
         """Table Metadata."""
         self._ref = deepcopy(ref)
@@ -75,6 +109,10 @@ class TableMetadata:
         self._sorted_columns = None
         self._stats = None
         self._vector_index = vector_index
+        self._partitioning = partitioning
+
+        if table_type not in {TableType.SortedPartitions, TableType.Partitioned, None} and partitioning is not None:
+            raise ValueError(f"Only a partitioned table may have partitioning. Given TableType: {table_type} with partitioning: {partitioning}")
 
     def __eq__(self, other: object) -> bool:
         """TableMetadata Equal."""
@@ -92,7 +130,7 @@ class TableMetadata:
         self.load_stats(tx)
         self.load_schema(tx)
 
-        if self._table_type is TableType.Elysium:
+        if self._table_type in {TableType.Elysium, TableType.Partitioned, TableType.SortedPartitions}:
             self.load_sorted_columns(tx)
 
     def load_schema(self, tx: "Transaction") -> None:
@@ -133,6 +171,22 @@ class TableMetadata:
         finally:
             self._sorted_columns = fields
 
+        partition_keys: list[PartitionKey] = []
+
+        for sorted_column in self._sorted_columns:
+            decoded_metadata = {k.decode(): v.decode() for k, v in sorted_column.metadata.items()}
+            column_metadata = _ColumnMetadata.model_validate(decoded_metadata)
+
+            if column_metadata.transform_name is not None:
+                partition_keys.append(
+                    PartitionKey(
+                        column=sorted_column.name,
+                        transform=parse_transform(column_metadata.transform_name),
+                    )
+                )
+
+        self._partitioning = PartitionSpec(partition_keys=partition_keys)
+
     def load_stats(self, tx: "Transaction") -> None:
         """Load/Reload table stats."""
         self._stats = tx._rpc.api.get_table_stats(
@@ -143,17 +197,27 @@ class TableMetadata:
             imports_table_stats=self.is_imports_table,
         )
 
-        is_elysium_table = self._stats.sorting_key_enabled
+        is_sorted = self._stats.sorting_key_enabled
+        is_partitioned = self._stats.partitioning_info is not None
 
         if self._table_type is None:
-            if is_elysium_table:
+            if is_sorted and is_partitioned:
+                self._set_sorted_partitions_table(tx)
+            elif is_sorted:
                 self._set_sorted_table(tx)
+            elif is_partitioned:
+                self._set_partitioned_table(tx)
             else:
                 self._set_regular_table()
         else:
-            if is_elysium_table and self.table_type is not TableType.Elysium:
+            if is_sorted and self.table_type not in {TableType.Elysium, TableType.SortedPartitions}:
                 raise ValueError(
-                    "Actual table is sorted (TableType.Elysium), was not inited as TableType.Elysium"
+                    "Actual table is sorted (TableType.Elysium / TableType.SortedPartitions), was not inited as such"
+                )
+
+            if is_partitioned and self.table_type not in {TableType.Partitioned, TableType.SortedPartitions}:
+                raise ValueError(
+                    "Actual table is partitioned (TableType.Partitioned / TableType.SortedPartitions), was not inited as such"
                 )
 
         self._parse_stats_vector_index()
@@ -168,12 +232,26 @@ class TableMetadata:
         else:
             self._vector_index = self._stats.vector_index
 
-    def _set_sorted_table(self, tx: "Transaction"):
+    def _set_sorted_partitions_table(self, tx: "Transaction") -> None:
+        self._table_type = TableType.SortedPartitions
+        tx._rpc.features.check_elysium()
+        tx._rpc.features.check_partitioned()
+
+    def _set_sorted_table(self, tx: "Transaction") -> None:
         self._table_type = TableType.Elysium
         tx._rpc.features.check_elysium()
 
-    def _set_regular_table(self):
+    def _set_partitioned_table(self, tx: "Transaction") -> None:
+        self._table_type = TableType.Partitioned
+        tx._rpc.features.check_partitioned()
+
+    def _set_regular_table(self) -> None:
         self._table_type = TableType.Regular
+
+    @property
+    def partitioning(self) -> Optional[PartitionSpec]:
+        """Get table's partitioning."""
+        return self._partitioning
 
     @property
     def stats(self) -> Optional[TableStats]:
@@ -199,7 +277,7 @@ class TableMetadata:
             self._ibis_table = None
 
     @property
-    def sorted_columns(self) -> list:
+    def sorted_columns(self) -> list[pa.Field]:
         """Sorted columns."""
         if self._sorted_columns is None:
             raise ValueError("sorted columns not loaded")

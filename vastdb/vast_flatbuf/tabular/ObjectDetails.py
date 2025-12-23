@@ -95,7 +95,14 @@ class ObjectDetails(object):
             return self._tab.Get(flatbuffers.number_types.Int64Flags, o + self._tab.Pos)
         return 0
 
-def Start(builder): builder.StartObject(10)
+    # ObjectDetails
+    def PartitioningKeyEnabled(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(24))
+        if o != 0:
+            return bool(self._tab.Get(flatbuffers.number_types.BoolFlags, o + self._tab.Pos))
+        return False
+
+def Start(builder): builder.StartObject(11)
 def ObjectDetailsStart(builder):
     """This method is deprecated. Please switch to Start."""
     return Start(builder)
@@ -139,6 +146,10 @@ def AddAcummulativeRowInseritionCount(builder, acummulativeRowInseritionCount): 
 def ObjectDetailsAddAcummulativeRowInseritionCount(builder, acummulativeRowInseritionCount):
     """This method is deprecated. Please switch to AddAcummulativeRowInseritionCount."""
     return AddAcummulativeRowInseritionCount(builder, acummulativeRowInseritionCount)
+def AddPartitioningKeyEnabled(builder, partitioningKeyEnabled): builder.PrependBoolSlot(10, partitioningKeyEnabled, 0)
+def ObjectDetailsAddPartitioningKeyEnabled(builder, partitioningKeyEnabled):
+    """This method is deprecated. Please switch to AddPartitioningKeyEnabled."""
+    return AddPartitioningKeyEnabled(builder, partitioningKeyEnabled)
 def End(builder): return builder.EndObject()
 def ObjectDetailsEnd(builder):
     """This method is deprecated. Please switch to End."""
