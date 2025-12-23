@@ -14,6 +14,7 @@ in pkgs.mkShellNoCC {
     pkg-config
 
     pyright
+    basedpyright
     ruff
 
     python312
