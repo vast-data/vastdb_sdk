@@ -163,6 +163,7 @@ def test_ibis_to_query_engine_predicates(ibis_predicate: IbisPredicate, expected
     assert _ibis_to_qe_predicates(ibis_predicate) == expected
 
 
+@pytest.mark.skip(reason="see https://vastdata.atlassian.net/browse/ORION-307908")
 def test_with_predicates_get_vector_index_properties_from_server(
     session_factory: SessionFactory,
     clean_bucket_name: str
