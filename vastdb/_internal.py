@@ -1117,7 +1117,7 @@ class VastdbApi:
         if not bucket.startswith(bucket_name):
             raise ValueError(f'bucket: {bucket} did not start from {bucket_name}')
         schemas_length = lists.SchemasLength()
-        count = int(res_headers['tabular-list-count']) if 'tabular-list-count' in res_headers else schemas_length
+        count = int(res_headers['tabular-list-count']) if count_only else schemas_length
         for i in range(schemas_length):
             schema_obj = lists.Schemas(i)
             name = schema_obj.Name().decode()
@@ -1427,7 +1427,7 @@ class VastdbApi:
         is_truncated = res_headers['tabular-is-truncated'] == 'true'
         lists = list_tables.GetRootAs(res.content)
         tables_length = lists.TablesLength()
-        count = int(res_headers['tabular-list-count']) if 'tabular-list-count' in res_headers else tables_length
+        count = int(res_headers['tabular-list-count']) if count_only else tables_length
         return lists, next_key, is_truncated, count
 
     def _list_tables_internal(self, bucket, schema, parse_properties, txid=0, client_tags=[], max_keys=1000, next_key=0, name_prefix="",
@@ -1574,8 +1574,8 @@ class VastdbApi:
         res_headers = res.headers
         next_key = int(res_headers['tabular-next-key'])
         is_truncated = res_headers['tabular-is-truncated'] == 'true'
-        count = int(res_headers['tabular-list-count'])
         columns = [] if count_only else pa.ipc.open_stream(res.content).schema
+        count = int(res_headers['tabular-list-count']) if count_only else len(columns)
 
         return columns, next_key, is_truncated, count
 
@@ -2044,7 +2044,6 @@ class VastdbApi:
         res_headers = res.headers
         next_key = int(res_headers['tabular-next-key'])
         is_truncated = res_headers['tabular-is-truncated'] == 'true'
-        count = int(res_headers['tabular-list-count'])
         lists = list_projections.GetRootAs(res.content)
         bucket_name = lists.BucketName().decode()
         schema_name = lists.SchemaName().decode()
@@ -2052,6 +2051,7 @@ class VastdbApi:
         if not bucket.startswith(bucket_name):  # ignore snapshot name
             raise ValueError(f'bucket: {bucket} did not start from {bucket_name}')
         projections_length = lists.ProjectionsLength()
+        count = int(res_headers['tabular-list-count']) if count_only else projections_length
         for i in range(projections_length):
             projections.append(_parse_table_info(lists.Projections(i), lambda x: x))
 
@@ -2092,10 +2092,10 @@ class VastdbApi:
         res_headers = res.headers
         next_key = int(res_headers['tabular-next-key'])
         is_truncated = res_headers['tabular-is-truncated'] == 'true'
-        count = int(res_headers['tabular-list-count'])
         columns = [] if count_only else [[f.name, f.type, f.metadata] for f in
                                          pa.ipc.open_stream(res.content).schema]
 
+        count = int(res_headers['tabular-list-count']) if count_only else len(columns)
         return columns, next_key, is_truncated, count
 
 

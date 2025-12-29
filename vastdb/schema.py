@@ -89,6 +89,7 @@ class Schema:
         See https://support.vastdata.com/s/article/UUID-48d0a8cf-5786-5ef3-3fa3-9c64e63a0967 for more details.
 
         Args:
+        ----
             table_name: Name of the table to create
             columns: PyArrow schema defining the table columns
             fail_if_exists: Whether to fail if the table already exists
@@ -97,6 +98,7 @@ class Schema:
             vector_index: Optional vector index.
 
         Returns:
+        -------
             The created table
 
         """
