@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2.0.4] (2025-01-06)
+[2.0.3]: https://github.com/vast-data/vastdb_sdk/compare/v2.0.3...v2.0.4
+
+### Changed
+- Fix race condition in select (get data) mechanism
+
 ## [2.0.3] (2025-11-25)
 [2.0.2]: https://github.com/vast-data/vastdb_sdk/compare/v2.0.2...v2.0.3
 

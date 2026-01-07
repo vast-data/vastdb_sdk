@@ -626,13 +626,12 @@ class TableInTransaction(ITable):
                             log.debug(
                                 "one worker thread finished, remaining: %d", tasks_running)
 
-                    # all host threads ended - wait for all futures to complete
-                    propagate_first_exception(futures, block=True)
                 finally:
                     stop_event.set()
                     while tasks_running > 0:
                         if record_batches_queue.get() is None:
                             tasks_running -= 1
+                    propagate_first_exception(futures, block=True)
 
         return pa.RecordBatchReader.from_batches(query_data_request.response_schema, batches_iterator())
 
