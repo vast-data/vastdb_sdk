@@ -54,6 +54,7 @@ class Transaction:
     txid: Optional[int] = None
     _adbc_driver: Optional[AdbcDriver] = None
     _adbc_conn: Optional[AdbcConnection] = None
+    _end_user: Optional[str] = None
 
     def __enter__(self):
         """Create a transaction and store its ID."""
@@ -67,6 +68,7 @@ class Transaction:
                 self._rpc.access,
                 self._rpc.secret,
                 self.txid,
+                self._end_user
             )
 
         log.debug("opened txid=%016x", self.txid)

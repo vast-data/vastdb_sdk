@@ -25,7 +25,8 @@ class Session:
                  ssl_verify=True,
                  timeout=None,
                  backoff_config: Optional["BackoffConfig"] = None,
-                 adbc_driver: Optional[AdbcDriver] = None):
+                 adbc_driver: Optional[AdbcDriver] = None,
+                 end_user: Optional[str] = None):
         """Connect to a VAST Database endpoint, using specified credentials."""
         from . import _internal, features
 
@@ -49,6 +50,7 @@ class Session:
             backoff_config=backoff_config)
         self.features = features.Features(self.api.vast_version)
         self.adbc_driver: Optional[AdbcDriver] = adbc_driver
+        self._end_user = end_user
 
     def __repr__(self):
         """Don't show the secret key."""
@@ -63,4 +65,4 @@ class Session:
                 tx.bucket("bucket").create_schema("schema")
         """
         from . import transaction
-        return transaction.Transaction(self, _adbc_driver=self.adbc_driver)
+        return transaction.Transaction(self, _adbc_driver=self.adbc_driver, _end_user=self._end_user)

@@ -17,6 +17,7 @@ log = logging.getLogger(__name__)
 
 
 TXID_OVERRIDE_PROPERTY: str = "vast.db.external_txid"
+END_USER_PROPERTY: str = "vast.db.end_user"
 VAST_DIST_ALIAS = "vast_pysdk_vector_dist"
 DEFAULT_ADBC_DRIVER_CACHE_DIR: str = "~/.vast/adbc_drivers_cache"
 DEFAULT_ADBC_DRIVER_CACHE_BY_URL_DIR: str = f"{DEFAULT_ADBC_DRIVER_CACHE_DIR}/by_url"
@@ -83,9 +84,18 @@ class AdbcDriver:
 
 
 def _get_adbc_connection(
-    adbc_driver_path: str, endpoint: str, access_key: str, secret_key: str, txid: int
+    adbc_driver_path: str,
+    endpoint: str,
+    access_key: str,
+    secret_key: str,
+    txid: int,
+    end_user: Optional[str],
 ) -> Connection:
     """Get an adbc connection in transaction."""
+    conn_kwargs = {TXID_OVERRIDE_PROPERTY: str(txid)}
+    if end_user is not None:
+        conn_kwargs[END_USER_PROPERTY] = end_user
+
     return connect(
         driver=adbc_driver_path,
         db_kwargs={
@@ -93,7 +103,7 @@ def _get_adbc_connection(
             "vast.db.access_key": access_key,
             "vast.db.secret_key": secret_key,
         },
-        conn_kwargs={TXID_OVERRIDE_PROPERTY: str(txid)},
+        conn_kwargs=conn_kwargs,
     )
 
 
@@ -157,9 +167,10 @@ class AdbcConnection:
         access_key: str,
         secret_key: str,
         txid: int,
+        end_user: Optional[str] = None,
     ):
         self._adbc_conn = _get_adbc_connection(
-            adbc_driver.local_path, endpoint, access_key, secret_key, txid
+            adbc_driver.local_path, endpoint, access_key, secret_key, txid, end_user
         )
 
         self._cursor = self._adbc_conn.cursor()

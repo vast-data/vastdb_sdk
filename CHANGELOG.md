@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2.0.5] (2025-01-08)
+[2.0.4]: https://github.com/vast-data/vastdb_sdk/compare/v2.0.4...v2.0.5
+
+### Added
+- end-user impersonation for adbc connection configurable via Session
+
+
 ## [2.0.4] (2025-01-06)
 [2.0.3]: https://github.com/vast-data/vastdb_sdk/compare/v2.0.3...v2.0.4
 
