@@ -4,6 +4,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 import pyarrow as pa
+import pytest
 
 from vastdb.table import QueryConfig
 
@@ -34,6 +35,7 @@ def test_concurrent_query(session, test_bucket_name, schema_name, table_name):
     logger.info(f"finished running {amount_of_queries_in_parallel} queries")
 
 
+@pytest.mark.skip(reason="see https://vastdata.atlassian.net/browse/ORION-319356")
 def test_table_stats(session, test_bucket_name, schema_name, table_name):
     """
     Testing stats integrity while altering table
