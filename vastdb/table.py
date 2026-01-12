@@ -226,7 +226,7 @@ class TableInTransaction(ITable):
 
     @property
     def _internal_rowid_field(self) -> pa.Field:
-        return INTERNAL_ROW_ID_SORTED_FIELD if self._is_sorted_table else INTERNAL_ROW_ID_FIELD
+        return INTERNAL_ROW_ID_SORTED_FIELD if self._uses_global_row_ids else INTERNAL_ROW_ID_FIELD
 
     def sorted_columns(self) -> list[pa.Field]:
         """Return sorted columns' metadata."""
@@ -817,6 +817,17 @@ class TableInTransaction(ITable):
     @property
     def _is_sorted_table(self) -> bool:
         return self._metadata.table_type is TableType.Elysium
+
+    @property
+    def _uses_global_row_ids(self) -> bool:
+        """Check if table uses global row IDs (decimal128: ehandle + row_id).
+
+        Both Elysium and Vector Index tables use global row IDs.
+        """
+        # check if table has vector index from loaded stats
+        has_vector_index = (self._metadata.stats is not None and
+                           self._metadata.stats.vector_index is not None)
+        return self._is_sorted_table or has_vector_index
 
     def vector_search(
         self,

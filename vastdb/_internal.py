@@ -788,7 +788,7 @@ def _decode_table_props(s):
     return {y: _prop_coding[x][1](z) for x, y, z in triplets if z != ''}
 
 
-TableInfo = namedtuple('TableInfo', 'name properties handle num_rows size_in_bytes num_partitions sorting_key_enabled sorting_score write_amplification acummulative_row_insertion_count sorting_done')
+TableInfo = namedtuple('TableInfo', 'name properties handle num_rows size_in_bytes num_partitions sorting_key_enabled sorting_score write_amplification acummulative_row_insertion_count sorting_done vector_index_enabled vector_index_column_name vector_index_distance_metric vector_index_sql_function_name')
 
 
 def _parse_table_info(obj, parse_properties):
@@ -806,8 +806,15 @@ def _parse_table_info(obj, parse_properties):
 
     sorting_score = sorting_score_raw & ((1 << 63) - 1)
     sorting_done = bool(sorting_score_raw >> 63)
+
+    vector_index_enabled = obj.VectorIndexEnabled() if hasattr(obj, 'VectorIndexEnabled') else False
+    vector_index_column_name = obj.VectorIndexColumnName().decode() if hasattr(obj, 'VectorIndexColumnName') and obj.VectorIndexColumnName() else None
+    vector_index_distance_metric = obj.VectorIndexDistanceMetric().decode() if hasattr(obj, 'VectorIndexDistanceMetric') and obj.VectorIndexDistanceMetric() else None
+    vector_index_sql_function_name = obj.VectorIndexSqlFunctionName().decode() if hasattr(obj, 'VectorIndexSqlFunctionName') and obj.VectorIndexSqlFunctionName() else None
+
     return TableInfo(name, properties, handle, num_rows, used_bytes, num_partitions, sorting_key_enabled,
-                     sorting_score, write_amplification, acummulative_row_insertion_count, sorting_done)
+                     sorting_score, write_amplification, acummulative_row_insertion_count, sorting_done,
+                     vector_index_enabled, vector_index_column_name, vector_index_distance_metric, vector_index_sql_function_name)
 
 
 @dataclass
@@ -1389,20 +1396,24 @@ class VastdbApi:
                                           parse_properties=_decode_table_props, max_keys=max_keys,
                                           next_key=next_key, name_prefix=name_prefix, exact_match=exact_match,
                                           expected_retvals=expected_retvals,
-                                          include_list_stats=include_list_stats, count_only=count_only)
+                                          include_list_stats=include_list_stats, count_only=count_only,
+                                          include_vector_index_metadata=False)
 
     def list_tables(self, bucket, schema, txid=0, client_tags=[], max_keys=1000, next_key=0, name_prefix="",
-                    exact_match=False, expected_retvals=[], include_list_stats=False, count_only=False):
+                    exact_match=False, expected_retvals=[], include_list_stats=False, count_only=False,
+                    include_vector_index_metadata=False):
         def parse_properties(x):
             return x
         return self._list_tables_internal(bucket=bucket, schema=schema, txid=txid, client_tags=client_tags,
                                           parse_properties=parse_properties, max_keys=max_keys, next_key=next_key,
                                           name_prefix=name_prefix, exact_match=exact_match,
                                           expected_retvals=expected_retvals,
-                                          include_list_stats=include_list_stats, count_only=count_only)
+                                          include_list_stats=include_list_stats, count_only=count_only,
+                                          include_vector_index_metadata=include_vector_index_metadata)
 
     def _list_tables_raw(self, bucket, schema, txid=0, client_tags=[], max_keys=1000, next_key=0, name_prefix="",
-                         exact_match=False, expected_retvals=[], include_list_stats=False, count_only=False):
+                         exact_match=False, expected_retvals=[], include_list_stats=False, count_only=False,
+                         include_vector_index_metadata=False):
         """
         GET /mybucket/schema_path?table HTTP/1.1
         tabular-txid: TransactionId
@@ -1421,6 +1432,7 @@ class VastdbApi:
 
         headers['tabular-list-count-only'] = str(count_only)
         headers['tabular-include-list-stats'] = str(include_list_stats)
+        headers['tabular-include-vector-index-meta-data'] = str(include_vector_index_metadata).lower()
 
         res = self._request(
             method="GET",
@@ -1436,11 +1448,13 @@ class VastdbApi:
         return lists, next_key, is_truncated, count
 
     def _list_tables_internal(self, bucket, schema, parse_properties, txid=0, client_tags=[], max_keys=1000, next_key=0, name_prefix="",
-                              exact_match=False, expected_retvals=[], include_list_stats=False, count_only=False):
+                              exact_match=False, expected_retvals=[], include_list_stats=False, count_only=False,
+                              include_vector_index_metadata=False):
         tables = []
         lists, next_key, is_truncated, count = self._list_tables_raw(bucket, schema, txid=txid, client_tags=client_tags, max_keys=max_keys,
                                  next_key=next_key, name_prefix=name_prefix, exact_match=exact_match, expected_retvals=expected_retvals,
-                                 include_list_stats=include_list_stats, count_only=count_only)
+                                 include_list_stats=include_list_stats, count_only=count_only,
+                                 include_vector_index_metadata=include_vector_index_metadata)
         bucket_name = lists.BucketName().decode()
         schema_name = lists.SchemaName().decode()
         if not bucket.startswith(bucket_name):  # ignore snapshot name

@@ -95,7 +95,42 @@ class ObjectDetails(object):
             return self._tab.Get(flatbuffers.number_types.Int64Flags, o + self._tab.Pos)
         return 0
 
-def Start(builder): builder.StartObject(10)
+    # ObjectDetails
+    def PartitioningKeyEnabled(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(24))
+        if o != 0:
+            return bool(self._tab.Get(flatbuffers.number_types.BoolFlags, o + self._tab.Pos))
+        return False
+
+    # ObjectDetails
+    def VectorIndexEnabled(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(26))
+        if o != 0:
+            return bool(self._tab.Get(flatbuffers.number_types.BoolFlags, o + self._tab.Pos))
+        return False
+
+    # ObjectDetails
+    def VectorIndexColumnName(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(28))
+        if o != 0:
+            return self._tab.String(o + self._tab.Pos)
+        return None
+
+    # ObjectDetails
+    def VectorIndexDistanceMetric(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(30))
+        if o != 0:
+            return self._tab.String(o + self._tab.Pos)
+        return None
+
+    # ObjectDetails
+    def VectorIndexSqlFunctionName(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(32))
+        if o != 0:
+            return self._tab.String(o + self._tab.Pos)
+        return None
+
+def Start(builder): builder.StartObject(15)
 def ObjectDetailsStart(builder):
     """This method is deprecated. Please switch to Start."""
     return Start(builder)
@@ -139,6 +174,26 @@ def AddAcummulativeRowInseritionCount(builder, acummulativeRowInseritionCount): 
 def ObjectDetailsAddAcummulativeRowInseritionCount(builder, acummulativeRowInseritionCount):
     """This method is deprecated. Please switch to AddAcummulativeRowInseritionCount."""
     return AddAcummulativeRowInseritionCount(builder, acummulativeRowInseritionCount)
+def AddPartitioningKeyEnabled(builder, partitioningKeyEnabled): builder.PrependBoolSlot(10, partitioningKeyEnabled, 0)
+def ObjectDetailsAddPartitioningKeyEnabled(builder, partitioningKeyEnabled):
+    """This method is deprecated. Please switch to AddPartitioningKeyEnabled."""
+    return AddPartitioningKeyEnabled(builder, partitioningKeyEnabled)
+def AddVectorIndexEnabled(builder, vectorIndexEnabled): builder.PrependBoolSlot(11, vectorIndexEnabled, 0)
+def ObjectDetailsAddVectorIndexEnabled(builder, vectorIndexEnabled):
+    """This method is deprecated. Please switch to AddVectorIndexEnabled."""
+    return AddVectorIndexEnabled(builder, vectorIndexEnabled)
+def AddVectorIndexColumnName(builder, vectorIndexColumnName): builder.PrependUOffsetTRelativeSlot(12, flatbuffers.number_types.UOffsetTFlags.py_type(vectorIndexColumnName), 0)
+def ObjectDetailsAddVectorIndexColumnName(builder, vectorIndexColumnName):
+    """This method is deprecated. Please switch to AddVectorIndexColumnName."""
+    return AddVectorIndexColumnName(builder, vectorIndexColumnName)
+def AddVectorIndexDistanceMetric(builder, vectorIndexDistanceMetric): builder.PrependUOffsetTRelativeSlot(13, flatbuffers.number_types.UOffsetTFlags.py_type(vectorIndexDistanceMetric), 0)
+def ObjectDetailsAddVectorIndexDistanceMetric(builder, vectorIndexDistanceMetric):
+    """This method is deprecated. Please switch to AddVectorIndexDistanceMetric."""
+    return AddVectorIndexDistanceMetric(builder, vectorIndexDistanceMetric)
+def AddVectorIndexSqlFunctionName(builder, vectorIndexSqlFunctionName): builder.PrependUOffsetTRelativeSlot(14, flatbuffers.number_types.UOffsetTFlags.py_type(vectorIndexSqlFunctionName), 0)
+def ObjectDetailsAddVectorIndexSqlFunctionName(builder, vectorIndexSqlFunctionName):
+    """This method is deprecated. Please switch to AddVectorIndexSqlFunctionName."""
+    return AddVectorIndexSqlFunctionName(builder, vectorIndexSqlFunctionName)
 def End(builder): return builder.EndObject()
 def ObjectDetailsEnd(builder):
     """This method is deprecated. Please switch to End."""

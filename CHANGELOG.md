@@ -4,7 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [2.0.6] (2026-01-15)
+## [2.0.7] (2026-01-19)
+[2.0.7]: https://github.com/vast-data/vastdb_sdk/compare/v2.0.5...v2.0.6
+
+### Added
+- Vector Index table support (ORION-276190):
+  - `sorting_key_enabled` field in `TableInfo` is now exclusive to Elysium tables (no longer `true` for vector index tables)
+  - Vector index tables are now classified as `TableType.Regular` instead of `TableType.Elysium`
+  - Requires VAST Cluster with ORION-276190 support
+- Vector Index metadata fields in `TableInfo` (conditioned on `include_vector_index_metadata`):
+  - `vector_index_enabled`: boolean flag indicating vector index presence
+  - `vector_index_column_name`: name of the column with vector index
+  - `vector_index_distance_metric`: distance metric used (L2, COSINE, etc.)
+  - `vector_index_sql_function_name`: SQL function name for distance calculation (e.g., "array_distance")
+
+## [2.0.6] (2026-01-19)
 [2.0.6]: https://github.com/vast-data/vastdb_sdk/compare/v2.0.5...v2.0.6
 
 ### Added
