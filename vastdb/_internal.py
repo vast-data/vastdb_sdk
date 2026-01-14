@@ -47,6 +47,7 @@ import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.DecimalLiteral as 
 import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.Expression as fb_expression
 import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.FieldIndex as fb_field_index
 import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.FieldRef as fb_field_ref
+import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.Float16Literal as fb_float16_lit
 import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.Float32Literal as fb_float32_lit
 import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.Float64Literal as fb_float64_lit
 import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.Int8Literal as fb_int8_lit
@@ -411,15 +412,19 @@ class Predicate:
 
         if pa.types.is_floating(pa_type):
             impl_type, impl_class = None, None
-            value = float(value)
 
-            if pa.types.is_float32(pa_type):
-                impl_type, impl_class = LiteralImpl.Float32Literal, fb_float32_lit
-            elif pa.types.is_float64(pa_type):
-                impl_type, impl_class = LiteralImpl.Float64Literal, fb_float64_lit
+            if pa.types.is_float16(pa_type):
+                import numpy as np
+                value = np.float16(value).view(np.uint16).item()
+                impl_type, impl_class = LiteralImpl.Float16Literal, fb_float16_lit
             else:
-                # Float16 is not supported by Vast.
-                raise ValueError(f'unsupported floating point predicate type: {pa_type}, value={value}')
+                value = float(value)
+                if pa.types.is_float32(pa_type):
+                    impl_type, impl_class = LiteralImpl.Float32Literal, fb_float32_lit
+                elif pa.types.is_float64(pa_type):
+                    impl_type, impl_class = LiteralImpl.Float64Literal, fb_float64_lit
+                else:
+                    raise ValueError(f'unsupported floating point predicate type: {pa_type}, value={value}')
 
             impl_class.Start(self.builder)
             impl_class.AddValue(self.builder, value)
@@ -2282,6 +2287,12 @@ def get_field_type(builder: flatbuffers.Builder, field: pa.Field):
         fb_int.AddBitWidth(builder, field.type.bit_width)
         fb_int.AddIsSigned(builder, False)
         field_type = fb_int.End(builder)
+
+    elif field.type.equals(pa.float16()):
+        field_type_type = Type.FloatingPoint
+        fb_floating_point.Start(builder)
+        fb_floating_point.AddPrecision(builder, 0)  # half
+        field_type = fb_floating_point.End(builder)
 
     elif field.type.equals(pa.float32()):
         field_type_type = Type.FloatingPoint

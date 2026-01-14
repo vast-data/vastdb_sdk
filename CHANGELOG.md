@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2.0.6] (2026-01-15)
+[2.0.6]: https://github.com/vast-data/vastdb_sdk/compare/v2.0.5...v2.0.6
+
+### Added
+- Float16 (half-precision floating point) type support
+  - Schema serialization for float16 columns with precision.half
+  - Predicate literal handling for float16 values
+  - Fixes 'unsupported column type halffloat' error when creating tables with float16 columns
+
 ## [2.0.5] (2025-01-08)
 [2.0.4]: https://github.com/vast-data/vastdb_sdk/compare/v2.0.4...v2.0.5
 
