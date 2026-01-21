@@ -29,7 +29,7 @@ setup(
     name='vastdb',
     python_requires='>=3.10.0',
     description='VAST Data SDK',
-    version='2.0.7' + suffix,
+    version='2.0.8' + suffix,
     url='https://github.com/vast-data/vastdb_sdk',
     author='VAST DATA',
     author_email='hello@vastdata.com',

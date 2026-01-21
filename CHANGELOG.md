@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2.0.8] (2026-01-21)
+[2.0.8]: https://github.com/vast-data/vastdb_sdk/compare/v2.0.7...v2.0.8
+
+### Changed
+- populate _metadata._vector_index from list_tables response.
+
 ## [2.0.7] (2026-01-19)
 [2.0.7]: https://github.com/vast-data/vastdb_sdk/compare/v2.0.5...v2.0.6
 

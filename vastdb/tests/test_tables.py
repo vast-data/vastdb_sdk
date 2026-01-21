@@ -9,6 +9,7 @@ from contextlib import closing
 from tempfile import NamedTemporaryFile
 
 import ibis
+import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.compute as pc
@@ -390,6 +391,7 @@ def test_types(session, clean_bucket_name):
         ('a2', pa.int16()),
         ('a4', pa.int64()),
         ('b', pa.float32()),
+        ('f16', pa.float16()),
         ('s', pa.string()),
         ('d', pa.decimal128(7, 3)),
         ('bin', pa.binary()),
@@ -410,6 +412,7 @@ def test_types(session, clean_bucket_name):
         [1999, 2000, 2001],
         [11122221, 222111122, 333333],
         [0.5, 1.5, 2.5],
+        [np.float16(0.5), np.float16(1.5), np.float16(2.5)],
         ["a", "v", "s"],
         [decimal.Decimal('110.52'), decimal.Decimal('231.15'), decimal.Decimal('3332.44')],
         [b"\x01\x02", b"\x01\x05", b"\x01\x07"],
@@ -436,6 +439,13 @@ def test_types(session, clean_bucket_name):
             assert select(t['a2'] == 2000) == expected.filter(pc.field('a2') == 2000)
             assert select(t['a4'] == 222111122) == expected.filter(pc.field('a4') == 222111122)
             assert select(t['b'] == 1.5) == expected.filter(pc.field('b') == 1.5)
+
+            # Test float16 predicate (PyArrow compute doesn't support float16, so validate manually)
+            f16_literal = np.float16(1.5)
+            result = select(t['f16'] == f16_literal)
+            assert len(result) == 1, f"Expected 1 row for f16==1.5, got {len(result)}"
+            assert np.float16(result.column('f16')[0].as_py()) == f16_literal
+
             assert select(t['s'] == "v") == expected.filter(pc.field('s') == "v")
             assert select(t['d'] == 231.15) == expected.filter(pc.field('d') == 231.15)
             assert select(t['bin'] == b"\x01\x02") == expected.filter(pc.field('bin') == b"\x01\x02")
@@ -466,6 +476,59 @@ def test_types(session, clean_bucket_name):
 
             ts_literal = dt.datetime(2024, 4, 10, 12, 34, 56, 789789)
             assert select(t['ts9'] == ts_literal) == expected.filter(pc.field('ts9') == ts_literal)
+
+
+@pytest.mark.parametrize("element_type,test_name", [
+    (pa.float32(), "float32"),
+    (pa.float16(), "float16"),
+])
+def test_vector_types(session, clean_bucket_name, element_type, test_name):
+    """Test vector (fixed-size list) columns with different element types."""
+    vector_dim = 3
+    vec_type = pa.list_(pa.field('', element_type, False), vector_dim)
+
+    columns = pa.schema([
+        ('id', pa.int32()),
+        ('vector', vec_type),
+    ])
+
+    # Create test data based on element type
+    if element_type == pa.float16():
+        test_vectors = [
+            [np.float16(1.0), np.float16(2.0), np.float16(3.0)],
+            [np.float16(4.5), np.float16(5.5), np.float16(6.5)],
+            [np.float16(-1.0), np.float16(0.0), np.float16(1.0)],
+        ]
+    else:  # float32
+        test_vectors = [
+            [1.0, 2.0, 3.0],
+            [4.5, 5.5, 6.5],
+            [-1.0, 0.0, 1.0],
+        ]
+
+    expected = pa.table(schema=columns, data=[
+        [0, 1, 2],
+        test_vectors,
+    ])
+
+    with prepare_data(session, clean_bucket_name, 's', 't', expected) as table:
+        # Read back and verify
+        actual = table.select().read_all()
+        assert actual.schema == columns
+        assert len(actual) == 3
+
+        # Verify vector data
+        actual_vectors = actual.column('vector').to_pylist()
+        for i, (actual_vec, expected_vec) in enumerate(zip(actual_vectors, test_vectors)):
+            assert len(actual_vec) == vector_dim, f"Wrong vector dimension at row {i}"
+            for j, (act, exp) in enumerate(zip(actual_vec, expected_vec)):
+                if element_type == pa.float16():
+                    assert np.float16(act) == np.float16(exp), \
+                        f"Mismatch at row {i}, element {j}: {act} != {exp}"
+                else:
+                    assert act == exp, f"Mismatch at row {i}, element {j}: {act} != {exp}"
+
+        log.info(f"Vector type test ({test_name}) passed successfully")
 
 
 @pytest.mark.parametrize("arrow_type,internal_support", [

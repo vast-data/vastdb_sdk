@@ -14,7 +14,7 @@ from vastdb.table_metadata import TableMetadata, TableRef, TableType
 
 from . import bucket, errors, schema, table
 from ._ibis_support import validate_ibis_support_schema
-from ._internal import VectorIndexSpec
+from ._internal import VectorIndex, VectorIndexSpec
 
 if TYPE_CHECKING:
     from .table import Table
@@ -178,7 +178,17 @@ def _parse_table_info(table_info, schema: "schema.Schema"):
                    table=table_info.name)
 
     table_type = TableType.Elysium if table_info.sorting_key_enabled else TableType.Regular
-    table_metadata = TableMetadata(ref, table_type=table_type)
+
+    # populate vector_index from list_tables if vector index is enabled
+    vector_index = None
+    if table_info.vector_index_enabled:
+        vector_index = VectorIndex(
+            column=table_info.vector_index_column_name,
+            distance_metric=table_info.vector_index_distance_metric,
+            sql_distance_function=table_info.vector_index_sql_function_name
+        )
+
+    table_metadata = TableMetadata(ref, table_type=table_type, vector_index=vector_index)
 
     return table.Table(handle=int(table_info.handle),
                        metadata=table_metadata,

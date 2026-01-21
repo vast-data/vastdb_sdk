@@ -808,9 +808,9 @@ def _parse_table_info(obj, parse_properties):
     sorting_done = bool(sorting_score_raw >> 63)
 
     vector_index_enabled = obj.VectorIndexEnabled() if hasattr(obj, 'VectorIndexEnabled') else False
-    vector_index_column_name = obj.VectorIndexColumnName().decode() if hasattr(obj, 'VectorIndexColumnName') and obj.VectorIndexColumnName() else None
-    vector_index_distance_metric = obj.VectorIndexDistanceMetric().decode() if hasattr(obj, 'VectorIndexDistanceMetric') and obj.VectorIndexDistanceMetric() else None
-    vector_index_sql_function_name = obj.VectorIndexSqlFunctionName().decode() if hasattr(obj, 'VectorIndexSqlFunctionName') and obj.VectorIndexSqlFunctionName() else None
+    vector_index_column_name = obj.VectorIndexColumnName().decode() if hasattr(obj, 'VectorIndexColumnName') and obj.VectorIndexColumnName() else ""
+    vector_index_distance_metric = obj.VectorIndexDistanceMetric().decode() if hasattr(obj, 'VectorIndexDistanceMetric') and obj.VectorIndexDistanceMetric() else ""
+    vector_index_sql_function_name = obj.VectorIndexSqlFunctionName().decode() if hasattr(obj, 'VectorIndexSqlFunctionName') and obj.VectorIndexSqlFunctionName() else ""
 
     return TableInfo(name, properties, handle, num_rows, used_bytes, num_partitions, sorting_key_enabled,
                      sorting_score, write_amplification, acummulative_row_insertion_count, sorting_done,

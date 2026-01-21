@@ -173,14 +173,14 @@ class TableMetadata:
         self._parse_stats_vector_index()
 
     def _parse_stats_vector_index(self):
-        vector_index_is_set = self._vector_index is not None
+        if self._vector_index is not None and self._stats.vector_index != self._vector_index:
+            is_empty_placeholder = not self._vector_index.column and not self._vector_index.distance_metric
+            if not is_empty_placeholder:
+                raise ValueError(
+                    f"Table has index {self._stats.vector_index}, but was initialized as {self._vector_index}"
+                    )
 
-        if vector_index_is_set and self._stats.vector_index != self._vector_index:
-            raise ValueError(
-                f"Table has index {self._stats.vector_index}, but was initialized as {self._vector_index}"
-                )
-        else:
-            self._vector_index = self._stats.vector_index
+        self._vector_index = self._stats.vector_index
 
     def _set_sorted_table(self, tx: "Transaction"):
         self._table_type = TableType.Elysium
