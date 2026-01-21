@@ -22,7 +22,7 @@ echo "--- Pre-release checks ---"
 VERSION=$(docker run --rm "$PYSDK_IMAGE" python setup.py --version)
 echo "Found version: v${VERSION}"
 
-if ! grep -q "v${VERSION}" CHANGELOG.md; then
+if ! grep -q "${VERSION}" CHANGELOG.md; then
   echo "Error: CHANGELOG.md does not contain an entry for v${VERSION}"
   exit 1
 fi
