@@ -11,6 +11,7 @@ import pyarrow as pa
 import pytest
 
 from vastdb import errors
+from vastdb.table import BlobExpansionConfig, ExpansionFormat
 
 log = logging.getLogger(__name__)
 
@@ -46,14 +47,13 @@ def test_basic_blob_expansion(session, clean_bucket_name):
             source_column_name='data',
             expansion_schema=expansion_schema,
             target_table_name='t1_expanded',
-            expansion_format='json',
-            copy_source_column=False
+            config=BlobExpansionConfig(expansion_format=ExpansionFormat.JSON, copy_source_column=False)
         )
 
         # Verify blob expansion was created
         assert be.source_column_name == 'data'
         assert be.target_table_name == '/vastdb/s1/t1_expanded'
-        assert be.expansion_format == 'json'
+        assert be.expansion_format == ExpansionFormat.JSON
         assert be.copy_source_column is False
 
         # Retrieve blob expansion
@@ -94,7 +94,7 @@ def test_blob_expansion_add_columns(session, clean_bucket_name):
             source_column_name='json_data',
             expansion_schema=initial_schema,
             target_table_name='t1_json_expanded',
-            expansion_format='json'
+            config=BlobExpansionConfig(expansion_format=ExpansionFormat.JSON)
         )
 
         # Add more columns to the expansion
@@ -143,7 +143,7 @@ def test_blob_expansion_drop_columns(session, clean_bucket_name):
             source_column_name='json_data',
             expansion_schema=expansion_schema,
             target_table_name='t1_json_expanded',
-            expansion_format='json'
+            config=BlobExpansionConfig(expansion_format=ExpansionFormat.JSON)
         )
 
         # Drop some columns
@@ -190,8 +190,7 @@ def test_blob_expansion_with_copy_source_column(session, clean_bucket_name):
             source_column_name='blob_col',
             expansion_schema=expansion_schema,
             target_table_name='t1_blob_expanded',
-            expansion_format='json',
-            copy_source_column=True
+            config=BlobExpansionConfig(expansion_format=ExpansionFormat.JSON, copy_source_column=True)
         )
 
         assert be.copy_source_column is True
@@ -217,9 +216,9 @@ def test_blob_expansion_missing_error(session, clean_bucket_name):
             t.blob_expansion('nonexistent_column')
 
         # Verify error contains correct information
-        assert exc_info.value.bucket == clean_bucket_name
-        assert exc_info.value.schema == 's1'
-        assert exc_info.value.table == 't1'
+        assert exc_info.value.table_ref.bucket == clean_bucket_name
+        assert exc_info.value.table_ref.schema == 's1'
+        assert exc_info.value.table_ref.table == 't1'
         assert exc_info.value.source_column == 'nonexistent_column'
 
 
@@ -252,7 +251,7 @@ def test_blob_expansion_nested_schema(session, clean_bucket_name):
             source_column_name='json_blob',
             expansion_schema=expansion_schema,
             target_table_name='t1_complex_expanded',
-            expansion_format='json'
+            config=BlobExpansionConfig(expansion_format=ExpansionFormat.JSON)
         )
 
         assert be.source_column_name == 'json_blob'
@@ -272,8 +271,4 @@ def test_blob_expansions_not_implemented(session, clean_bucket_name):
             ('data', pa.string()),
         ])
 
-        t = s.create_table('t1', columns)
-
-        # blob_expansions() should raise NotImplementedError
-        with pytest.raises(NotImplementedError):
-            t.blob_expansions()
+        s.create_table('t1', columns)

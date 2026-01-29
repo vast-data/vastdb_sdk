@@ -43,6 +43,10 @@ class Features:
             "Timezone support requires 5.4+ Vast release",
             vast_version >= (5, 4))
 
+        self.check_blob_expansion = self._check(
+            "Blob expansion requires 5.5+ VAST release",
+            vast_version >= (5, 5))
+
     def _check(self, msg, supported):
         log.debug("%s (current version is %s): supported=%s", msg, self.vast_version, supported)
         if not supported:
