@@ -97,42 +97,28 @@ class TableMetadata:
 
     def load_schema(self, tx: "Transaction") -> None:
         """Load/Reload table schema."""
-        fields = []
-        next_key = 0
-        while True:
-            cur_columns, next_key, is_truncated, _count = tx._rpc.api.list_columns(
-                bucket=self.ref.bucket,
-                schema=self.ref.schema,
-                table=self.ref.table,
-                next_key=next_key,
-                txid=tx.active_txid,
-                list_imports_table=self.is_imports_table,
-            )
-            fields.extend(cur_columns)
-            if not is_truncated:
-                break
-
+        fields = tx._rpc.api.list_all_columns(
+            self.ref.bucket,
+            self.ref.schema,
+            self.ref.table,
+            sorted_columns=False,
+            txid=tx.active_txid,
+            list_imports_table=self.is_imports_table
+        )
         self.arrow_schema = pa.schema(fields)
 
     def load_sorted_columns(self, tx: "Transaction") -> None:
         """Return sorted columns' metadata."""
         fields = []
         try:
-            next_key = 0
-            while True:
-                cur_columns, next_key, is_truncated, _count = (
-                    tx._rpc.api.list_sorted_columns(
-                        bucket=self.ref.bucket,
-                        schema=self.ref.schema,
-                        table=self.ref.table,
-                        next_key=next_key,
-                        txid=tx.active_txid,
-                        list_imports_table=self.is_imports_table,
-                    )
-                )
-                fields.extend(cur_columns)
-                if not is_truncated:
-                    break
+            fields = tx._rpc.api.list_all_columns(
+                self.ref.bucket,
+                self.ref.schema,
+                self.ref.table,
+                sorted_columns=True,
+                txid=tx.active_txid,
+                list_imports_table=self.is_imports_table
+            )
         except errors.BadRequest:
             raise
         except errors.InternalServerError as ise:

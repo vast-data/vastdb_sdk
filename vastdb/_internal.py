@@ -1633,9 +1633,10 @@ class VastdbApi:
             url=self._url(bucket=bucket, schema=schema, table=table, command="column"),
             data=serialized_schema, headers=headers)
 
-    def _list_columns_internal(self, command: str, bucket: str, schema: str, table: str, txid, client_tags, max_keys, next_key: int,
-                               count_only: bool, name_prefix: str, exact_match: bool, expected_retvals, bc_list_internals: bool,
-                               list_imports_table: bool) -> tuple[list[pa.Field], int, bool, int]:
+    def list_columns(self, command: str, bucket: str, schema: str, table: str, *, txid=0,
+                               client_tags=None, max_keys=None, next_key: int = 0, count_only: bool = False,
+                               name_prefix: str = "", exact_match: bool = False, bc_list_internals: bool = False,
+                               list_imports_table: bool = False) -> tuple[list[pa.Field], int, bool, int]:
         """
         GET /mybucket/myschema/mytable?columns HTTP/1.1
         tabular-txid: TransactionId
@@ -1648,7 +1649,6 @@ class VastdbApi:
         """
         max_keys = max_keys or self.default_max_list_columns_page_size
         client_tags = client_tags or []
-        expected_retvals = expected_retvals or []
 
         headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
         headers['tabular-max-keys'] = str(max_keys)
@@ -1676,19 +1676,25 @@ class VastdbApi:
 
         return columns, next_key, is_truncated, count
 
-    def list_columns(self, bucket, schema, table, *, txid=0, client_tags=None, max_keys=None, next_key=0,
-                     count_only=False, name_prefix="", exact_match=False,
-                     expected_retvals=None, bc_list_internals=False, list_imports_table=False):
-        return self._list_columns_internal('column', bucket, schema, table, txid, client_tags, max_keys, next_key,
-                                           count_only, name_prefix, exact_match, expected_retvals, bc_list_internals,
-                                           list_imports_table)
+    def list_all_columns(self, bucket: str, schema: str, table: str, *, sorted_columns: bool, txid=0, client_tags=None,
+                         name_prefix: str = "", exact_match: bool = False,
+                         bc_list_internals: bool = False, list_imports_table: bool = False) -> list[pa.Field]:
+        fields = []
+        command = "sorted-columns" if sorted_columns else "column"
+        next_key = 0
 
-    def list_sorted_columns(self, bucket, schema, table, *, txid=0, client_tags=None, max_keys=None, next_key=0,
-                            count_only=False, name_prefix="", exact_match=False,
-                            expected_retvals=None, bc_list_internals=False, list_imports_table=False):
-        return self._list_columns_internal('sorted-columns', bucket, schema, table, txid, client_tags, max_keys, next_key,
-                                           count_only, name_prefix, exact_match, expected_retvals, bc_list_internals,
-                                           list_imports_table)
+        while True:
+            cur_columns, next_key, is_truncated, _ = self.list_columns(
+                command, bucket, schema, table, txid=txid, next_key=next_key,
+                name_prefix=name_prefix, exact_match=exact_match, client_tags=client_tags,
+                bc_list_internals=bc_list_internals, list_imports_table=list_imports_table,
+            )
+            fields.extend(cur_columns)
+
+            if not is_truncated:
+                break
+
+        return fields
 
     def head_bucket(self, bucket_name):
         """
