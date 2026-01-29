@@ -28,7 +28,7 @@ from vastdb.table_metadata import TableMetadata, TableRef, TableStats, TableType
 
 from . import _internal, errors, util
 from ._ibis_support import validate_ibis_support_schema
-from ._internal import VectorIndex
+from ._internal import SortingKey, VectorIndex
 from .config import ImportConfig, QueryConfig
 
 if TYPE_CHECKING:
@@ -986,7 +986,7 @@ class Table(TableInTransaction):
         log.info("Renamed table from %s to %s ", self.ref.table, new_name)
         self._metadata.rename_table(new_name)
 
-    def add_sorting_key(self, sorting_key: list[int]) -> None:
+    def add_sorting_key(self, sorting_key: SortingKey) -> None:
         """Add a sorting key to a table that doesn't have any."""
         self._tx._rpc.features.check_elysium()
         self._tx._rpc.api.alter_table(self.ref.bucket,

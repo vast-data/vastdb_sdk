@@ -155,6 +155,9 @@ IMPORTED_OBJECTS_TABLE_NAME = "vastdb-imported-objects"
 
 KAFKA_TOPICS_SCHEMA_NAME = 'kafka_topics'
 
+SortingKey = Union[list[int]]
+
+
 """
 S3 Tabular API
 """
@@ -1290,10 +1293,10 @@ class VastdbApi:
             self.create_schema(bucket, schema)
         raise Exception(f"Failed to find or create schema {schema} in {timeout_sec} seconds.")
 
-    def create_table(self, bucket, schema, name, arrow_schema=None,
+    def create_table(self, bucket: str, schema: str, name: str, arrow_schema: pa.Schema = None,
                      txid=0, client_tags=[], expected_retvals=[],
-                     create_imports_table=False, use_external_row_ids_allocation=False, table_props=None,
-                     sorting_key=[], vector_index: Optional[VectorIndexSpec] = None):
+                     create_imports_table: bool = False, use_external_row_ids_allocation: bool = False, table_props=None,
+                     sorting_key: SortingKey = [], vector_index: Optional[VectorIndexSpec] = None) -> None:
         """
         Create a table in the specified bucket and schema.
 
@@ -1332,11 +1335,11 @@ class VastdbApi:
                                     expected_retvals=expected_retvals, topic_partitions=topic_partitions,
                                     table_props=table_props)
 
-    def _create_table_internal(self, bucket, schema, name, arrow_schema=None,
+    def _create_table_internal(self, bucket: str, schema: str, name: str, arrow_schema: pa.Schema = None,
                                txid=0, client_tags=[], expected_retvals=[], topic_partitions=0,
-                               create_imports_table=False, use_external_row_ids_allocation=False,
-                               table_props=None, sorting_key=[],
-                               vector_index: Optional[VectorIndexSpec] = None):
+                               create_imports_table: bool = False, use_external_row_ids_allocation: bool = False,
+                               table_props=None, sorting_key: SortingKey = [],
+                               vector_index: Optional[VectorIndexSpec] = None) -> None:
         """
         Create a table, use the following request
         POST /bucket/schema/table?table HTTP/1.1
@@ -1457,8 +1460,8 @@ class VastdbApi:
         self.alter_table(bucket=bucket, schema=KAFKA_TOPICS_SCHEMA_NAME, name=name,
                          table_properties=table_properties, new_name=new_name, expected_retvals=expected_retvals)
 
-    def alter_table(self, bucket, schema, name, txid=0, client_tags=[], table_properties="",
-                    new_name="", expected_retvals=[], sorting_key=[]):
+    def alter_table(self, bucket: str, schema: str, name: str, txid=0, client_tags=[], table_properties="",
+                    new_name: str = "", expected_retvals=[], sorting_key: SortingKey = []) -> None:
         """
         PUT /mybucket/myschema/mytable?table HTTP/1.1
         Content-Length: ContentLength
@@ -1676,9 +1679,9 @@ class VastdbApi:
             url=self._url(bucket=bucket, schema=schema, table=table, command="column"),
             data=serialized_schema, headers=headers)
 
-    def _list_columns_internal(self, command, bucket, schema, table, txid, client_tags, max_keys, next_key,
-                               count_only, name_prefix, exact_match, expected_retvals, bc_list_internals,
-                               list_imports_table):
+    def _list_columns_internal(self, command: str, bucket: str, schema: str, table: str, txid, client_tags, max_keys, next_key: int,
+                               count_only: bool, name_prefix: str, exact_match: bool, expected_retvals, bc_list_internals: bool,
+                               list_imports_table: bool) -> tuple[list[pa.Field], int, bool, int]:
         """
         GET /mybucket/myschema/mytable?columns HTTP/1.1
         tabular-txid: TransactionId

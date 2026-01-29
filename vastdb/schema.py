@@ -14,7 +14,7 @@ from vastdb.table_metadata import TableMetadata, TableRef, TableType
 
 from . import bucket, errors, schema, table
 from ._ibis_support import validate_ibis_support_schema
-from ._internal import VectorIndex, VectorIndexSpec
+from ._internal import SortingKey, VectorIndex, VectorIndexSpec
 
 if TYPE_CHECKING:
     from .table import Table
@@ -80,8 +80,8 @@ class Schema:
                 break
         return result
 
-    def create_table(self, table_name: str, columns: pa.Schema, fail_if_exists=True,
-                     use_external_row_ids_allocation=False, sorting_key=[],
+    def create_table(self, table_name: str, columns: pa.Schema, fail_if_exists: bool = True,
+                     use_external_row_ids_allocation: bool = False, sorting_key: SortingKey = [],
                      vector_index: Optional[VectorIndexSpec] = None) -> "Table":
         """Create a new table under this schema.
 
