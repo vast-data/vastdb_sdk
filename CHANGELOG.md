@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2.0.10] (2026-02-05)
+[2.0.10]: https://github.com/vast-data/vastdb_sdk/compare/v2.0.9...v2.0.10
+
+### Added
+- Support for both `Table.add_sorting_key` and `Schema.create_table` to take a list of column names as a sorting key
+
+### Changed
+- Dead code was removed (topic functionallity) from internal module (_internal.py)
+
 ## [2.0.9] (2026-02-04)
 [2.0.9]: https://github.com/vast-data/vastdb_sdk/compare/v2.0.8...v2.0.9
 

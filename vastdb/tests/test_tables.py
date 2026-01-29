@@ -3,6 +3,7 @@ import decimal
 import itertools
 import logging
 import random
+import re
 import threading
 import time
 from contextlib import closing
@@ -18,6 +19,7 @@ import pytest
 from requests.exceptions import HTTPError
 
 from vastdb import errors
+from vastdb._internal import SortingKey
 from vastdb.session import Session
 from vastdb.table import INTERNAL_ROW_ID, MAX_COLUMN_IN_BATCH, QueryConfig
 
@@ -1193,7 +1195,18 @@ def test_multiple_contains_clauses(session, clean_bucket_name):
                 t.select(predicate=pred(t)).read_all()
 
 
-def test_tables_elysium(elysium_session, clean_bucket_name):
+@pytest.mark.parametrize("sorting",
+    (
+        ([]),
+        ([1]),
+        ([2, 0]),
+        ([2, 0, 1]),
+        (["b",]),
+        (["c", "a",]),
+        (["c", "a", "b"]),
+    )
+)
+def test_tables_elysium(elysium_session, clean_bucket_name, sorting: SortingKey):
     columns = pa.schema([
         ('a', pa.int8()),
         ('b', pa.int32()),
@@ -1204,11 +1217,10 @@ def test_tables_elysium(elysium_session, clean_bucket_name):
         [111111, 222222, 333333],
         [111, 222, 333],
     ])
-    sorting = [2, 1]
     with prepare_data(elysium_session, clean_bucket_name, 's', 't', expected, sorting_key=sorting) as t:
-        sorted_columns = t.sorted_columns()
-        assert sorted_columns[0].name == 'c'
-        assert sorted_columns[1].name == 'b'
+        sorted_names = [f.name for f in t.sorted_columns()]
+        expected_sorted_names = [columns.field(identifier).name if isinstance(identifier, int) else identifier for identifier in sorting]
+        assert sorted_names == expected_sorted_names
 
 
 # Fails because of a known issue: ORION-240102
@@ -1235,7 +1247,17 @@ def test_tables_elysium(elysium_session, clean_bucket_name):
 #         assert sorted_columns[1].name == 'b'
 
 
-def test_elysium_tx(elysium_session: Session, clean_bucket_name: str):
+@pytest.mark.parametrize("sorting",
+    (
+        ([1]),
+        ([2, 0]),
+        ([2, 0, 1]),
+        (["b",]),
+        (["c", "a",]),
+        (["c", "a", "b"]),
+    )
+)
+def test_elysium_tx(elysium_session: Session, clean_bucket_name: str, sorting: SortingKey):
     columns = pa.schema([
         ('a', pa.int8()),
         ('b', pa.int32()),
@@ -1246,7 +1268,6 @@ def test_elysium_tx(elysium_session: Session, clean_bucket_name: str):
         [111111, 222222, 333333],
         [111, 222, 333],
     ])
-    sorting = [2, 1]
     schema_name = 's'
     table_name = 't'
     with elysium_session.transaction() as tx:
@@ -1262,12 +1283,39 @@ def test_elysium_tx(elysium_session: Session, clean_bucket_name: str):
     with elysium_session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).schema(schema_name)
         t = s.table(table_name)
-        sorted_columns = t.sorted_columns()
-        assert len(sorted_columns) == 2
-        assert sorted_columns[0].name == 'c'
-        assert sorted_columns[1].name == 'b'
+        sorted_names = [f.name for f in t.sorted_columns()]
+        expected_sorted_names = [columns.field(identifier).name if isinstance(identifier, int) else identifier for identifier in sorting]
+        assert sorted_names == expected_sorted_names
         t.drop()
         s.drop()
+
+
+def test_tables_elysium_no_such_column(elysium_session, clean_bucket_name):
+    columns = pa.schema([
+        ('a', pa.int8()),
+        ('b', pa.int32()),
+        ('c', pa.int16()),
+    ])
+
+    with elysium_session.transaction() as tx:
+        s = tx.bucket(clean_bucket_name).create_schema("s")
+        str_sorting_keys = ["f", "b", "e"]
+        non_existent_columns = [name for name in str_sorting_keys if columns.get_field_index(name) == -1]
+        int_sorting_keys = [4, 1, 3]
+
+        with pytest.raises(ValueError, match=re.escape(f"The following fields {non_existent_columns} don't exist in the given arrow schema")):
+            s.create_table("t1", columns, sorting_key=str_sorting_keys)
+
+        with pytest.raises(errors.InternalServerError, match="We encountered an internal error"):
+            s.create_table("t1", columns, sorting_key=int_sorting_keys)
+
+        t = s.create_table("t2", columns)
+
+        with pytest.raises(ValueError, match=re.escape(f"The following fields {non_existent_columns} don't exist in the given arrow schema")):
+            t.add_sorting_key(str_sorting_keys)
+
+        with pytest.raises(errors.InternalServerError, match="We encountered an internal error"):
+            t.add_sorting_key(int_sorting_keys)
 
 
 def test_elysium_double_enable(elysium_session, clean_bucket_name):
@@ -1282,11 +1330,13 @@ def test_elysium_double_enable(elysium_session, clean_bucket_name):
         [111, 222, 333],
     ])
     sorting = [2, 1]
-    with pytest.raises(errors.BadRequest):
-        with prepare_data(elysium_session, clean_bucket_name, 's', 't', expected, sorting_key=sorting) as t:
-            sorted_columns = t.sorted_columns()
-            assert sorted_columns[0].name == 'c'
-            assert sorted_columns[1].name == 'b'
+
+    with prepare_data(elysium_session, clean_bucket_name, 's', 't', expected, sorting_key=sorting) as t:
+        sorted_columns = t.sorted_columns()
+        assert sorted_columns[0].name == 'c'
+        assert sorted_columns[1].name == 'b'
+
+        with pytest.raises(errors.BadRequest):
             t.add_sorting_key(sorting)
 
 

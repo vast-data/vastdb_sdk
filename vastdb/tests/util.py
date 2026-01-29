@@ -7,6 +7,7 @@ import pandas as pd
 import pyarrow as pa
 from packaging.version import Version
 
+from vastdb._internal import SortingKey
 from vastdb.session import Session
 from vastdb.table import Table
 from vastdb.transaction import Transaction
@@ -25,7 +26,7 @@ def assert_row_ids_ascending_on_first_insertion_to_table(row_ids, expected_num_r
 @contextmanager
 def prepare_data(session: Session,
                  clean_bucket_name: str, schema_name: str, table_name: str,
-                 arrow_table: pa.Table, sorting_key: List[str] = [],
+                 arrow_table: pa.Table, sorting_key: SortingKey = [],
                  insert_by_columns: bool = True) -> Iterator[Table]:
     with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).create_schema(schema_name)

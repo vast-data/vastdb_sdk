@@ -153,8 +153,7 @@ TABULAR_INVALID_ROW_ID = 0xFFFFFFFFFFFF  # (1<<48)-1
 ESTORE_INVALID_EHANDLE = UINT64_MAX
 IMPORTED_OBJECTS_TABLE_NAME = "vastdb-imported-objects"
 
-SortingKey = Union[list[int]]
-
+SortingKey = Union[list[int], list[str]]
 
 """
 S3 Tabular API
@@ -1340,6 +1339,12 @@ class VastdbApi:
         The request will look like:
         POST /bucket/schema/table?table&sub-table=vastdb-imported-objects HTTP/1.1
         """
+        if len(sorting_key) > 0 and isinstance(sorting_key[0], str):
+            if arrow_schema is None:
+                raise ValueError("Using a sorting key with no schema is not allowed")
+
+            sorting_key = VastdbApi._convert_column_names_to_indices(arrow_schema, cast(list[str], sorting_key))
+
         headers = self._fill_common_headers(txid=txid, client_tags=client_tags, sorting_key=sorting_key)
         if arrow_schema is None:
             arrow_schema = pa.schema([])
@@ -1364,6 +1369,16 @@ class VastdbApi:
             method="POST",
             url=self._url(bucket=bucket, schema=schema, table=name, command="table", url_params=url_params),
             data=serialized_schema, headers=headers)
+
+    @staticmethod
+    def _convert_column_names_to_indices(arrow_schema: pa.Schema, sorting_key: list[str]) -> list[int]:
+        field_and_indices = [(key, arrow_schema.get_field_index(key)) for key in sorting_key]
+        non_existent_fields = [key for key, index in field_and_indices if index == -1]
+
+        if len(non_existent_fields) > 0:
+            raise ValueError(f"The following fields {non_existent_fields} don't exist in the given arrow schema")
+
+        return [index for _, index in field_and_indices]
 
     def get_table_stats(self, bucket, schema, name, txid=0, client_tags=[], expected_retvals=[], imports_table_stats=False) -> TableStats:
         """
@@ -1428,7 +1443,7 @@ class VastdbApi:
           vector_index=vector_index)
 
     def alter_table(self, bucket: str, schema: str, name: str, txid=0, client_tags=[], table_properties="",
-                    new_name: str = "", expected_retvals=[], sorting_key: SortingKey = []) -> None:
+                    new_name: str = "", sorting_key: SortingKey = []) -> None:
         """
         PUT /mybucket/myschema/mytable?table HTTP/1.1
         Content-Length: ContentLength
@@ -1438,6 +1453,12 @@ class VastdbApi:
         Request Body Flatbuffer
         Table properties
         """
+        if len(sorting_key) > 0 and isinstance(sorting_key[0], str):
+            arrow_schema = pa.schema(self.list_all_columns(
+                bucket, schema, name, sorted_columns=False, txid=txid
+            ))
+            sorting_key = VastdbApi._convert_column_names_to_indices(arrow_schema, cast(list[str], sorting_key))
+
         builder = flatbuffers.Builder(1024)
 
         if table_properties is None:

@@ -988,6 +988,9 @@ class Table(TableInTransaction):
 
     def add_sorting_key(self, sorting_key: SortingKey) -> None:
         """Add a sorting key to a table that doesn't have any."""
+        if len(sorting_key) == 0:
+            raise ValueError("Adding a sorting key needs at least one column")
+
         self._tx._rpc.features.check_elysium()
         self._tx._rpc.api.alter_table(self.ref.bucket,
                                       self.ref.schema,
