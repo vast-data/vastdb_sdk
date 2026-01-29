@@ -153,8 +153,6 @@ TABULAR_INVALID_ROW_ID = 0xFFFFFFFFFFFF  # (1<<48)-1
 ESTORE_INVALID_EHANDLE = UINT64_MAX
 IMPORTED_OBJECTS_TABLE_NAME = "vastdb-imported-objects"
 
-KAFKA_TOPICS_SCHEMA_NAME = 'kafka_topics'
-
 SortingKey = Union[list[int]]
 
 
@@ -1294,7 +1292,7 @@ class VastdbApi:
         raise Exception(f"Failed to find or create schema {schema} in {timeout_sec} seconds.")
 
     def create_table(self, bucket: str, schema: str, name: str, arrow_schema: pa.Schema = None,
-                     txid=0, client_tags=[], expected_retvals=[],
+                     txid=0, client_tags=[],
                      create_imports_table: bool = False, use_external_row_ids_allocation: bool = False, table_props=None,
                      sorting_key: SortingKey = [], vector_index: Optional[VectorIndexSpec] = None) -> None:
         """
@@ -1316,27 +1314,13 @@ class VastdbApi:
         """
         self._create_table_internal(bucket=bucket, schema=schema, name=name, arrow_schema=arrow_schema,
                                     txid=txid, client_tags=client_tags,
-                                    expected_retvals=expected_retvals,
                                     create_imports_table=create_imports_table,
                                     use_external_row_ids_allocation=use_external_row_ids_allocation,
                                     table_props=table_props, sorting_key=sorting_key,
                                     vector_index=vector_index)
 
-    def create_topic(self, bucket, name, topic_partitions, expected_retvals=[],
-                     message_timestamp_type=None, retention_ms=None, message_timestamp_after_max_ms=None,
-                     message_timestamp_before_max_ms=None):
-        self._make_sure_schema_exists(bucket, KAFKA_TOPICS_SCHEMA_NAME)
-        table_props = _encode_table_props(message_timestamp_type=message_timestamp_type,
-                                          retention_ms=retention_ms,
-                                          message_timestamp_after_max_ms=message_timestamp_after_max_ms,
-                                          message_timestamp_before_max_ms=message_timestamp_before_max_ms)
-
-        self._create_table_internal(bucket=bucket, schema=KAFKA_TOPICS_SCHEMA_NAME, name=name, arrow_schema=None,
-                                    expected_retvals=expected_retvals, topic_partitions=topic_partitions,
-                                    table_props=table_props)
-
     def _create_table_internal(self, bucket: str, schema: str, name: str, arrow_schema: pa.Schema = None,
-                               txid=0, client_tags=[], expected_retvals=[], topic_partitions=0,
+                               txid=0, client_tags=[], topic_partitions=0,
                                create_imports_table: bool = False, use_external_row_ids_allocation: bool = False,
                                table_props=None, sorting_key: SortingKey = [],
                                vector_index: Optional[VectorIndexSpec] = None) -> None:
@@ -1380,9 +1364,6 @@ class VastdbApi:
             method="POST",
             url=self._url(bucket=bucket, schema=schema, table=name, command="table", url_params=url_params),
             data=serialized_schema, headers=headers)
-
-    def get_topic_stats(self, bucket, name, expected_retvals=[]) -> TableStats:
-        return self.get_table_stats(bucket=bucket, schema=KAFKA_TOPICS_SCHEMA_NAME, name=name, expected_retvals=expected_retvals)
 
     def get_table_stats(self, bucket, schema, name, txid=0, client_tags=[], expected_retvals=[], imports_table_stats=False) -> TableStats:
         """
@@ -1446,20 +1427,6 @@ class VastdbApi:
           endpoints=tuple(endpoints),
           vector_index=vector_index)
 
-    def alter_topic(self, bucket, name,
-                    new_name="", expected_retvals=[],
-                    message_timestamp_type=None, retention_ms=None, message_timestamp_after_max_ms=None,
-                    message_timestamp_before_max_ms=None):
-        table_properties = _encode_table_props(message_timestamp_type=message_timestamp_type,
-                                               retention_ms=retention_ms,
-                                               message_timestamp_after_max_ms=message_timestamp_after_max_ms,
-                                               message_timestamp_before_max_ms=message_timestamp_before_max_ms)
-        if table_properties is None:
-            table_properties = ""
-
-        self.alter_table(bucket=bucket, schema=KAFKA_TOPICS_SCHEMA_NAME, name=name,
-                         table_properties=table_properties, new_name=new_name, expected_retvals=expected_retvals)
-
     def alter_table(self, bucket: str, schema: str, name: str, txid=0, client_tags=[], table_properties="",
                     new_name: str = "", expected_retvals=[], sorting_key: SortingKey = []) -> None:
         """
@@ -1494,10 +1461,6 @@ class VastdbApi:
             url=self._url(bucket=bucket, schema=schema, table=name, command="table", url_params=url_params),
             data=alter_table_req, headers=headers)
 
-    def drop_topic(self, bucket, name, expected_retvals=[]):
-        self.drop_table(bucket=bucket, schema=KAFKA_TOPICS_SCHEMA_NAME, name=name,
-                        expected_retvals=expected_retvals)
-
     def drop_table(self, bucket, schema, name, txid=0, client_tags=[], expected_retvals=[], remove_imports_table=False):
         """
         DELETE /mybucket/schema_path/mytable?table HTTP/1.1
@@ -1513,15 +1476,6 @@ class VastdbApi:
             method="DELETE",
             url=self._url(bucket=bucket, schema=schema, table=name, command="table", url_params=url_params),
             headers=headers)
-
-    def list_topics(self, bucket, max_keys=1000, next_key=0, name_prefix="",
-                    exact_match=False, expected_retvals=[], include_list_stats=False, count_only=False):
-        return self._list_tables_internal(bucket=bucket, schema=KAFKA_TOPICS_SCHEMA_NAME,
-                                          parse_properties=_decode_table_props, max_keys=max_keys,
-                                          next_key=next_key, name_prefix=name_prefix, exact_match=exact_match,
-                                          expected_retvals=expected_retvals,
-                                          include_list_stats=include_list_stats, count_only=count_only,
-                                          include_vector_index_metadata=False)
 
     def list_tables(self, bucket, schema, txid=0, client_tags=[], max_keys=1000, next_key=0, name_prefix="",
                     exact_match=False, expected_retvals=[], include_list_stats=False, count_only=False,
