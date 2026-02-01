@@ -294,7 +294,7 @@ class TableInTransaction(ITable):
                 break
         return [_parse_projection_info(projection, self._metadata, self._tx) for projection in projections]
 
-    def blob_expansion(self, source_column_name: str) -> "BlobExpansion":
+    def blob_expansion(self, source_column_name: str = "value") -> "BlobExpansion":
         """Get a blob expansion by source column name."""
         self._assert_not_imports_table()
         self._tx._rpc.features.check_blob_expansion()
@@ -1042,9 +1042,9 @@ class Table(TableInTransaction):
 
     def create_blob_expansion(
         self,
-        source_column_name: str,
         expansion_schema: pa.Schema,
         target_table_name: str,
+        source_column_name: str = "value",
         config: Optional[BlobExpansionConfig] = None,
         target_table_schema: Optional[str] = None,
     ) -> "BlobExpansion":
@@ -1057,7 +1057,7 @@ class Table(TableInTransaction):
 
         self._tx._rpc.api.create_blob_expansion(
             self.ref,
-            source_column_name, expansion_schema, target_table_name, config, target_table_schema,
+            expansion_schema, target_table_name, source_column_name, config, target_table_schema,
             txid=self._tx.active_txid)
         log.info("Created blob expansion: source_column=%s expanded_table=%s",
                  source_column_name, target_table_name)

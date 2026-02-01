@@ -2157,9 +2157,9 @@ class VastdbApi:
     def create_blob_expansion(
         self,
         table_ref: "TableRef",
-        source_column_name: str,
         expansion_schema: pa.Schema,
         target_table_name: str,
+        source_column_name: str = "value",
         config: Optional["BlobExpansionConfig"] = None,
         target_table_schema: Optional[str] = None,
         txid: int = 0,
@@ -2214,7 +2214,7 @@ class VastdbApi:
     def alter_blob_expansion(
         self,
         table_ref: "TableRef",
-        source_column_name: str,
+        source_column_name: str = "value",
         expansion_schema: Optional[pa.Schema] = None,
         remove: bool = False,
         add_copy_source_column: bool = False,
@@ -2281,7 +2281,7 @@ class VastdbApi:
     def alter_blob_expansion_add_columns(
         self,
         table_ref: "TableRef",
-        source_column_name: str,
+        source_column_name: str = "value",
         columns_to_add: Optional[pa.Schema] = None,
         add_copy_source_column: bool = False,
         add_missing_values_output: bool = False,
@@ -2322,7 +2322,7 @@ class VastdbApi:
     def alter_blob_expansion_drop_columns(
         self,
         table_ref: "TableRef",
-        source_column_name: str,
+        source_column_name: str = "value",
         columns_to_remove: Optional[pa.Schema] = None,
         remove_copy_source_column: bool = False,
         remove_missing_values_output: bool = False,
@@ -2363,7 +2363,7 @@ class VastdbApi:
     def drop_blob_expansion(
         self,
         table_ref: "TableRef",
-        source_column_name: str,
+        source_column_name: str = "value",
         txid: int = 0,
         client_tags: list = [],
         expected_retvals: list = [],
@@ -2391,7 +2391,7 @@ class VastdbApi:
     def show_blob_expansion(
         self,
         table_ref: "TableRef",
-        source_column_name: str,
+        source_column_name: str = "value",
         txid: int = 0,
         client_tags: list = [],
         expected_retvals: list = [],
