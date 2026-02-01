@@ -1,9 +1,4 @@
-"""Tests for blob expansion functionality.
-
-These tests verify the blob expansion API which allows expanding
-blob columns (e.g., JSON) into separate target tables with
-typed columns.
-"""
+"""Tests for blob expansion functionality."""
 
 import logging
 
@@ -21,10 +16,9 @@ def test_basic_blob_expansion(session, clean_bucket_name):
     with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).create_schema('s1')
 
-        # Create a table with a blob column
         columns = pa.schema([
             ('id', pa.int64()),
-            ('data', pa.string()),  # Blob column to expand
+            ('data', pa.string()),
             ('timestamp', pa.int64()),
         ])
 
@@ -32,17 +26,14 @@ def test_basic_blob_expansion(session, clean_bucket_name):
         t = s.create_table('t1', columns)
         assert s.tables() == [t]
 
-        # Define expansion schema
         expansion_schema = pa.schema([
             ('field1', pa.string()),
             ('field2', pa.int32()),
             ('field3', pa.float64()),
         ])
 
-        # Create target table for expansion
         s.create_table('t1_expanded', expansion_schema)
 
-        # Create blob expansion
         be = t.create_blob_expansion(
             source_column_name='data',
             expansion_schema=expansion_schema,
@@ -50,21 +41,17 @@ def test_basic_blob_expansion(session, clean_bucket_name):
             config=BlobExpansionConfig(expansion_format=ExpansionFormat.JSON, copy_source_column=False)
         )
 
-        # Verify blob expansion was created
         assert be.source_column_name == 'data'
         assert be.target_table_name == '/vastdb/s1/t1_expanded'
-        assert be.expansion_format == ExpansionFormat.JSON
-        assert be.copy_source_column is False
+        assert be.config.expansion_format == ExpansionFormat.JSON
+        assert be.config.copy_source_column is False
 
-        # Retrieve blob expansion
         be_retrieved = t.blob_expansion('data')
         assert be_retrieved.source_column_name == be.source_column_name
         assert be_retrieved.target_table_name == be.target_table_name
 
-        # Drop blob expansion
         be.drop()
 
-        # Verify it's gone - should raise MissingBlobExpansion
         with pytest.raises(errors.MissingBlobExpansion):
             t.blob_expansion('data')
 
@@ -81,13 +68,11 @@ def test_blob_expansion_add_columns(session, clean_bucket_name):
 
         t = s.create_table('t1', columns)
 
-        # Initial expansion schema
         initial_schema = pa.schema([
             ('field1', pa.string()),
             ('field2', pa.int32()),
         ])
 
-        # Create target table for expansion
         s.create_table('t1_json_expanded', initial_schema)
 
         be = t.create_blob_expansion(
@@ -97,22 +82,127 @@ def test_blob_expansion_add_columns(session, clean_bucket_name):
             config=BlobExpansionConfig(expansion_format=ExpansionFormat.JSON)
         )
 
-        # Add more columns to the expansion
         additional_schema = pa.schema([
             ('field3', pa.float64()),
             ('field4', pa.bool_()),
         ])
 
         be.add_columns(
-            expansion_schema=additional_schema,
+            columns_to_add=additional_schema,
             add_copy_source_column=False
         )
 
-        # Retrieve and verify
         be_updated = t.blob_expansion('json_data')
         assert be_updated.source_column_name == 'json_data'
 
-        # Cleanup
+        be.drop()
+
+
+def test_blob_expansion_add_already_added_columns(session, clean_bucket_name):
+    """Test that adding already existing columns raises an error."""
+    with session.transaction() as tx:
+        s = tx.bucket(clean_bucket_name).create_schema('s1')
+
+        columns = pa.schema([
+            ('id', pa.int64()),
+            ('json_data', pa.string()),
+        ])
+
+        t = s.create_table('t1', columns)
+
+        initial_schema = pa.schema([
+            ('field1', pa.string()),
+            ('field2', pa.int32()),
+        ])
+
+        s.create_table('t1_json_expanded', initial_schema)
+
+        be = t.create_blob_expansion(
+            source_column_name='json_data',
+            expansion_schema=initial_schema,
+            target_table_name='t1_json_expanded',
+            config=BlobExpansionConfig(expansion_format=ExpansionFormat.JSON)
+        )
+
+        # Try to add columns that already exist
+        with pytest.raises(errors.Conflict):
+            be.add_columns(columns_to_add=initial_schema)
+
+        be.drop()
+
+
+def test_blob_expansion_drop_already_dropped_columns(session, clean_bucket_name):
+    """Test that dropping already dropped columns raises an error."""
+    with session.transaction() as tx:
+        s = tx.bucket(clean_bucket_name).create_schema('s1')
+
+        columns = pa.schema([
+            ('id', pa.int64()),
+            ('json_data', pa.string()),
+        ])
+
+        t = s.create_table('t1', columns)
+
+        expansion_schema = pa.schema([
+            ('field1', pa.string()),
+            ('field2', pa.int32()),
+            ('field3', pa.float64()),
+        ])
+
+        s.create_table('t1_json_expanded', expansion_schema)
+
+        be = t.create_blob_expansion(
+            source_column_name='json_data',
+            expansion_schema=expansion_schema,
+            target_table_name='t1_json_expanded',
+            config=BlobExpansionConfig(expansion_format=ExpansionFormat.JSON)
+        )
+
+        columns_to_drop = pa.schema([
+            ('field3', pa.float64()),
+        ])
+
+        # First drop should succeed
+        be.drop_columns(columns_to_remove=columns_to_drop)
+
+        be.drop_columns(columns_to_remove=columns_to_drop)
+
+        be.drop()
+
+
+def test_blob_expansion_drop_non_existent_columns(session, clean_bucket_name):
+    """Test that dropping non-existent columns raises an error."""
+    with session.transaction() as tx:
+        s = tx.bucket(clean_bucket_name).create_schema('s1')
+
+        columns = pa.schema([
+            ('id', pa.int64()),
+            ('json_data', pa.string()),
+        ])
+
+        t = s.create_table('t1', columns)
+
+        expansion_schema = pa.schema([
+            ('field1', pa.string()),
+            ('field2', pa.int32()),
+        ])
+
+        s.create_table('t1_json_expanded', expansion_schema)
+
+        be = t.create_blob_expansion(
+            source_column_name='json_data',
+            expansion_schema=expansion_schema,
+            target_table_name='t1_json_expanded',
+            config=BlobExpansionConfig(expansion_format=ExpansionFormat.JSON)
+        )
+
+        non_existent_columns = pa.schema([
+            ('non_existent_field', pa.string()),
+        ])
+
+        with pytest.raises(errors.NotFound):
+            be.drop_columns(columns_to_remove=non_existent_columns)
+
         be.drop()
 
 
@@ -128,7 +218,6 @@ def test_blob_expansion_drop_columns(session, clean_bucket_name):
 
         t = s.create_table('t1', columns)
 
-        # Create expansion with multiple columns
         expansion_schema = pa.schema([
             ('field1', pa.string()),
             ('field2', pa.int32()),
@@ -136,7 +225,6 @@ def test_blob_expansion_drop_columns(session, clean_bucket_name):
             ('field4', pa.bool_()),
         ])
 
-        # Create target table for expansion
         s.create_table('t1_json_expanded', expansion_schema)
 
         be = t.create_blob_expansion(
@@ -146,22 +234,19 @@ def test_blob_expansion_drop_columns(session, clean_bucket_name):
             config=BlobExpansionConfig(expansion_format=ExpansionFormat.JSON)
         )
 
-        # Drop some columns
         columns_to_drop = pa.schema([
             ('field3', pa.float64()),
             ('field4', pa.bool_()),
         ])
 
         be.drop_columns(
-            expansion_schema=columns_to_drop,
+            columns_to_remove=columns_to_drop,
             remove_copy_source_column=False
         )
 
-        # Retrieve and verify
         be_updated = t.blob_expansion('json_data')
         assert be_updated.source_column_name == 'json_data'
 
-        # Cleanup
         be.drop()
 
 
@@ -182,10 +267,8 @@ def test_blob_expansion_with_copy_source_column(session, clean_bucket_name):
             ('extracted_field2', pa.int32()),
         ])
 
-        # Create target table for expansion
         s.create_table('t1_blob_expanded', expansion_schema)
 
-        # Create blob expansion with copy_source_column=True
         be = t.create_blob_expansion(
             source_column_name='blob_col',
             expansion_schema=expansion_schema,
@@ -193,9 +276,8 @@ def test_blob_expansion_with_copy_source_column(session, clean_bucket_name):
             config=BlobExpansionConfig(expansion_format=ExpansionFormat.JSON, copy_source_column=True)
         )
 
-        assert be.copy_source_column is True
+        assert be.config.copy_source_column is True
 
-        # Cleanup
         be.drop()
 
 
@@ -211,11 +293,9 @@ def test_blob_expansion_missing_error(session, clean_bucket_name):
 
         t = s.create_table('t1', columns)
 
-        # Try to get non-existent blob expansion
         with pytest.raises(errors.MissingBlobExpansion) as exc_info:
             t.blob_expansion('nonexistent_column')
 
-        # Verify error contains correct information
         assert exc_info.value.table_ref.bucket == clean_bucket_name
         assert exc_info.value.table_ref.schema == 's1'
         assert exc_info.value.table_ref.table == 't1'
@@ -234,7 +314,6 @@ def test_blob_expansion_nested_schema(session, clean_bucket_name):
 
         t = s.create_table('t1', columns)
 
-        # Complex expansion schema with nested types
         expansion_schema = pa.schema([
             ('simple_field', pa.string()),
             ('nested_struct', pa.struct([
@@ -244,7 +323,6 @@ def test_blob_expansion_nested_schema(session, clean_bucket_name):
             ('list_field', pa.list_(pa.int32())),
         ])
 
-        # Create target table for expansion
         s.create_table('t1_complex_expanded', expansion_schema)
 
         be = t.create_blob_expansion(
@@ -257,7 +335,6 @@ def test_blob_expansion_nested_schema(session, clean_bucket_name):
         assert be.source_column_name == 'json_blob'
         assert be.target_table_name == '/vastdb/s1/t1_complex_expanded'
 
-        # Cleanup
         be.drop()
 
 

@@ -175,10 +175,8 @@ class MissingProjection(Missing):
 
 @dataclass
 class MissingBlobExpansion(Missing):
-    """Raised when a blob expansion is not found.
+    """Raised when a blob expansion is not found."""
 
-    Can be initialized with either a TableRef or individual bucket/schema/table fields.
-    """
     table_ref: "TableRef"
     source_column: str
 

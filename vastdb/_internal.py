@@ -8,7 +8,17 @@ import urllib.parse
 from collections import defaultdict, namedtuple
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, Iterator, List, Optional, Tuple, Union, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    Tuple,
+    Union,
+    cast,
+)
 
 import backoff
 import flatbuffers
@@ -129,6 +139,10 @@ from vastdb.vast_protobuf.tabular.blob_expansion_pb2 import (
 
 from . import errors, util
 from .config import BackoffConfig
+
+if TYPE_CHECKING:
+    from .table import BlobExpansionConfig
+    from .table_metadata import TableRef
 
 UINT64_MAX = 18446744073709551615
 
@@ -888,13 +902,8 @@ class UnsupportedServer(NotImplementedError):
 def build_create_blob_expansion_request(
     expansion_schema: pa.Schema,
     target_table_name: Optional[str] = None,
-    expansion_format: str = "json",
-    copy_source_column: bool = False,
-    flatten_path: bool = False,
-    flatten_delimiter: str = "__",
+    config: Optional["BlobExpansionConfig"] = None,
     target_table_schema: Optional[str] = None,
-    add_missing_values_output: bool = True,
-    add_excessive_values_output: bool = True,
 ) -> bytes:
     """Build a CreateBlobExpansionRequest protobuf message.
 
@@ -904,38 +913,34 @@ def build_create_blob_expansion_request(
         The schema for the expanded columns.
     target_table_name : str, optional
         The name of the target table.
-    expansion_format : str, optional
-        The format of the expanded data (default: "json").
-    copy_source_column : bool, optional
-        Whether to copy the source column to the target table (default: False).
-    flatten_path : bool, optional
-        Whether to flatten nested struct columns (default: False).
-    flatten_delimiter : str, optional
-        Delimiter for flattened path column names (default: "__").
+    config : BlobExpansionConfig, optional
+        The configuration for the blob expansion.
     target_table_schema : str, optional
         The schema where the target table will be created.
-    add_missing_values_output : bool, optional
-        Whether to add the missing values output column (default: True).
-    add_excessive_values_output : bool, optional
-        Whether to add the excessive values output column (default: True).
 
     Returns
     -------
     bytes
         Serialized protobuf message.
     """
+    # Import here to avoid circular import
+    from .table import BlobExpansionConfig
+
+    if config is None:
+        config = BlobExpansionConfig()
+
     req = CreateBlobExpansionRequest()
     if target_table_name:
         req.target_table_name = target_table_name
-    req.expansion_format = expansion_format
+    req.expansion_format = config.expansion_format.value
     req.arrow_schema = bytes(expansion_schema.serialize())
-    req.copy_source_column = copy_source_column
-    req.flatten_path = flatten_path
-    req.flatten_delimiter = flatten_delimiter
+    req.copy_source_column = config.copy_source_column
+    req.flatten_path = config.flatten_path
+    req.flatten_delimiter = config.flatten_delimiter
     if target_table_schema:
         req.target_table_schema = target_table_schema
-    req.add_missing_values_output = add_missing_values_output
-    req.add_excessive_values_output = add_excessive_values_output
+    req.add_missing_values_output = config.add_missing_values_output
+    req.add_excessive_values_output = config.add_excessive_values_output
     return req.SerializeToString()
 
 
@@ -2151,19 +2156,12 @@ class VastdbApi:
 
     def create_blob_expansion(
         self,
-        bucket: str,
-        schema: str,
-        table: str,
+        table_ref: "TableRef",
         source_column_name: str,
         expansion_schema: pa.Schema,
         target_table_name: str,
-        expansion_format: str = "json",
-        copy_source_column: bool = False,
-        flatten_path: bool = False,
-        flatten_delimiter: str = "__",
+        config: Optional["BlobExpansionConfig"] = None,
         target_table_schema: Optional[str] = None,
-        add_missing_values_output: bool = True,
-        add_excessive_values_output: bool = True,
         txid: int = 0,
         client_tags: list = [],
         expected_retvals: list = [],
@@ -2174,12 +2172,8 @@ class VastdbApi:
 
         Parameters
         ----------
-        bucket : string
-            The bucket containing the source table.
-        schema : string
-            The schema containing the source table.
-        table : string
-            The source table name.
+        table_ref : TableRef
+            The reference to the source table.
         source_column_name : string
             The name of the blob column to expand.
         target_table_name : string, optional
@@ -2204,13 +2198,8 @@ class VastdbApi:
         create_blob_expansion_req = build_create_blob_expansion_request(
             expansion_schema=expansion_schema,
             target_table_name=target_table_name,
-            expansion_format=expansion_format,
-            copy_source_column=copy_source_column,
-            flatten_path=flatten_path,
-            flatten_delimiter=flatten_delimiter,
-            target_table_schema=target_table_schema,
-            add_missing_values_output=add_missing_values_output,
-            add_excessive_values_output=add_excessive_values_output)
+            config=config,
+            target_table_schema=target_table_schema)
 
         headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
         headers['Content-Length'] = str(len(create_blob_expansion_req))
@@ -2218,15 +2207,13 @@ class VastdbApi:
 
         self._request(
             method="POST",
-            url=self._url(bucket=bucket, schema=schema, table=table, command="blob-expansion", url_params=url_params),
+            url=self._url(table_ref.bucket, table_ref.schema, table_ref.table, command="blob-expansion", url_params=url_params),
             data=create_blob_expansion_req,
             headers=headers)
 
     def alter_blob_expansion(
         self,
-        bucket: str,
-        schema: str,
-        table: str,
+        table_ref: "TableRef",
         source_column_name: str,
         expansion_schema: Optional[pa.Schema] = None,
         remove: bool = False,
@@ -2287,17 +2274,15 @@ class VastdbApi:
 
         self._request(
             method="PUT",
-            url=self._url(bucket=bucket, schema=schema, table=table, command="blob-expansion", url_params=url_params),
+            url=self._url(table_ref.bucket, table_ref.schema, table_ref.table, command="blob-expansion", url_params=url_params),
             data=alter_blob_expansion_req,
             headers=headers)
 
     def alter_blob_expansion_add_columns(
         self,
-        bucket: str,
-        schema: str,
-        table: str,
+        table_ref: "TableRef",
         source_column_name: str,
-        expansion_schema: Optional[pa.Schema] = None,
+        columns_to_add: Optional[pa.Schema] = None,
         add_copy_source_column: bool = False,
         add_missing_values_output: bool = False,
         add_excessive_values_output: bool = False,
@@ -2311,16 +2296,12 @@ class VastdbApi:
 
         Parameters
         ----------
-        bucket : string
-            The bucket containing the source table.
-        schema : string
-            The schema containing the source table.
-        table : string
-            The source table name.
+        table_ref : TableRef
+            The reference to the source table.
         source_column_name : string
             The name of the blob column to expand.
-        expansion_schema : pyarrow.Schema, optional
-            The schema for the expanded columns to add.
+        columns_to_add : pyarrow.Schema, optional
+            The columns to add to the expansion.
         add_copy_source_column : bool
             If True, add a copy source column to the expansion.
         add_missing_values_output : bool
@@ -2328,9 +2309,9 @@ class VastdbApi:
         add_excessive_values_output : bool
             If True, add the excessive values output column.
         """
-        return self.alter_blob_expansion(bucket=bucket, schema=schema, table=table,
+        return self.alter_blob_expansion(table_ref=table_ref,
                                         source_column_name=source_column_name,
-                                        expansion_schema=expansion_schema,
+                                        expansion_schema=columns_to_add,
                                         remove=False,
                                         add_copy_source_column=add_copy_source_column,
                                         add_missing_values_output=add_missing_values_output,
@@ -2340,11 +2321,9 @@ class VastdbApi:
 
     def alter_blob_expansion_drop_columns(
         self,
-        bucket: str,
-        schema: str,
-        table: str,
+        table_ref: "TableRef",
         source_column_name: str,
-        expansion_schema: Optional[pa.Schema] = None,
+        columns_to_remove: Optional[pa.Schema] = None,
         remove_copy_source_column: bool = False,
         remove_missing_values_output: bool = False,
         remove_excessive_values_output: bool = False,
@@ -2358,16 +2337,12 @@ class VastdbApi:
 
         Parameters
         ----------
-        bucket : string
-            The bucket containing the source table.
-        schema : string
-            The schema containing the source table.
-        table : string
-            The source table name.
+        table_ref : TableRef
+            The reference to the source table.
         source_column_name : string
             The name of the blob column to expand.
-        expansion_schema : pyarrow.Schema, optional
-            The schema for the expanded columns to remove.
+        columns_to_remove : pyarrow.Schema, optional
+            The columns to remove from the expansion.
         remove_copy_source_column : bool
             If True, remove a copy source column from the expansion.
         remove_missing_values_output : bool
@@ -2375,9 +2350,9 @@ class VastdbApi:
         remove_excessive_values_output : bool
             If True, remove the excessive values output column.
         """
-        return self.alter_blob_expansion(bucket=bucket, schema=schema, table=table,
+        return self.alter_blob_expansion(table_ref=table_ref,
                                         source_column_name=source_column_name,
-                                        expansion_schema=expansion_schema,
+                                        expansion_schema=columns_to_remove,
                                         remove=True,
                                         remove_copy_source_column=remove_copy_source_column,
                                         remove_missing_values_output=remove_missing_values_output,
@@ -2387,9 +2362,7 @@ class VastdbApi:
 
     def drop_blob_expansion(
         self,
-        bucket: str,
-        schema: str,
-        table: str,
+        table_ref: "TableRef",
         source_column_name: str,
         txid: int = 0,
         client_tags: list = [],
@@ -2402,12 +2375,8 @@ class VastdbApi:
 
         Parameters
         ----------
-        bucket : string
-            The bucket containing the source table.
-        schema : string
-            The schema containing the source table.
-        table : string
-            The source table name.
+        table_ref : TableRef
+            The reference to the source table.
         source_column_name : string
             The name of the blob column that was expanded.
         """
@@ -2416,14 +2385,12 @@ class VastdbApi:
 
         self._request(
             method="DELETE",
-            url=self._url(bucket=bucket, schema=schema, table=table, command="blob-expansion", url_params=url_params),
+            url=self._url(table_ref.bucket, table_ref.schema, table_ref.table, command="blob-expansion", url_params=url_params),
             headers=headers)
 
     def show_blob_expansion(
         self,
-        bucket: str,
-        schema: str,
-        table: str,
+        table_ref: "TableRef",
         source_column_name: str,
         txid: int = 0,
         client_tags: list = [],
@@ -2435,12 +2402,8 @@ class VastdbApi:
 
         Parameters
         ----------
-        bucket : string
-            The bucket containing the source table.
-        schema : string
-            The schema containing the source table.
-        table : string
-            The source table name.
+        table_ref : TableRef
+            The reference to the source table.
         source_column_name : string
             The name of the blob column to expand.
 
@@ -2449,14 +2412,22 @@ class VastdbApi:
         tuple
             (source_column_name, target_table_name, expansion_format, columns, copy_source_column)
             where columns is a list of [column_name, column_type, column_metadata] tuples
+
+        Raises
+        ------
+        errors.MissingBlobExpansion
+            If the blob expansion does not exist or the response is invalid.
         """
         headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
         url_params = {'source-column-name': source_column_name}
 
-        res = self._request(
-            method="GET",
-            url=self._url(bucket=bucket, schema=schema, table=table, command="blob-expansion", url_params=url_params),
-            headers=headers)
+        try:
+            res = self._request(
+                method="GET",
+                url=self._url(table_ref.bucket, table_ref.schema, table_ref.table, command="blob-expansion", url_params=url_params),
+                headers=headers)
+        except errors.InternalServerError as e:
+            raise errors.MissingBlobExpansion(table_ref, source_column_name) from e
 
         rsp = GetBlobExpansionResponse()
         rsp.ParseFromString(res.content)
@@ -2467,7 +2438,16 @@ class VastdbApi:
             for field in arrow_schema:
                 columns.append([field.name, field.type, field.metadata])
 
-        return rsp.source_column_name, rsp.target_table_name, rsp.expansion_format, columns, rsp.copy_source_column
+        result = (rsp.source_column_name, rsp.target_table_name, rsp.expansion_format, columns, rsp.copy_source_column)
+
+        if not result:
+            raise errors.MissingBlobExpansion(table_ref, source_column_name)
+
+        for item in result:
+            if item is None:
+                raise errors.MissingBlobExpansion(table_ref, source_column_name)
+
+        return result
 
     def list_projections(self, bucket, schema, table, txid=0, client_tags=[], max_keys=1000, next_key=0, name_prefix="",
                          exact_match=False, expected_retvals=[], include_list_stats=False, count_only=False):

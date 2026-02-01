@@ -60,27 +60,7 @@ class ExpansionFormat(Enum):
 
 @dataclass
 class BlobExpansionConfig:
-    """Configuration for blob expansion.
-
-    Blob expansion allows extracting structured data from blob columns (e.g., JSON data)
-    into separate table columns. This configuration controls how the expansion is performed.
-
-    Attributes
-    ----------
-    expansion_format : ExpansionFormat
-        The format of the source blob data (default: JSON).
-    copy_source_column : bool
-        If True, copies the original source column to the target table (default: False).
-    flatten_path : bool
-        If True, flattens nested struct columns using the delimiter (default: False).
-    flatten_delimiter : str
-        Delimiter used for flattened path column names (default: "__").
-    add_missing_values_output : bool
-        If True, adds a column tracking missing expected values (default: True).
-    add_excessive_values_output : bool
-        If True, adds a column tracking unexpected extra values (default: True).
-
-    """
+    """Configuration for blob expansion."""
 
     expansion_format: ExpansionFormat = ExpansionFormat.JSON
     copy_source_column: bool = False
@@ -315,48 +295,31 @@ class TableInTransaction(ITable):
         return [_parse_projection_info(projection, self._metadata, self._tx) for projection in projections]
 
     def blob_expansion(self, source_column_name: str) -> "BlobExpansion":
-        """Get a blob expansion by source column name.
-
-        Blob expansion allows extracting structured data from blob columns (e.g., JSON)
-        into separate table columns. A blob expansion is uniquely identified by the
-        combination of (table, source_column_name).
-
-        Parameters
-        ----------
-        source_column_name : str
-            The name of the source column that has the blob expansion configured.
-
-        Returns
-        -------
-        BlobExpansion
-            The blob expansion configuration for the specified source column.
-
-        Raises
-        ------
-        MissingBlobExpansion
-            If no blob expansion exists for the specified source column.
-
-        """
+        """Get a blob expansion by source column name."""
         self._assert_not_imports_table()
         self._tx._rpc.features.check_blob_expansion()
 
+        source_column, target_table_name, expansion_format_str, columns, copy_source_column = \
+            self._tx._rpc.api.show_blob_expansion(
+                self.ref, source_column_name, txid=self._tx.active_txid)
+
+        # Convert string format to enum
         try:
-            result = self._tx._rpc.api.show_blob_expansion(
-                self.ref.bucket, self.ref.schema, self.ref.table,
-                source_column_name, txid=self._tx.active_txid)
-        except errors.InternalServerError as e:
-            raise errors.MissingBlobExpansion(
-                self.ref, source_column_name) from e
+            expansion_format = ExpansionFormat(expansion_format_str)
+        except ValueError:
+            expansion_format = ExpansionFormat.JSON  # Default fallback
 
-        if not result:
-            raise errors.MissingBlobExpansion(self.ref, source_column_name)
+        config = BlobExpansionConfig(
+            expansion_format=expansion_format,
+            copy_source_column=copy_source_column)
 
-        # Validate all results in the response
-        for item in result:
-            if item is None:
-                raise errors.MissingBlobExpansion(self.ref, source_column_name)
-
-        return _parse_blob_expansion_info(result, self._metadata, self._tx)
+        return BlobExpansion(
+            source_column_name=source_column,
+            target_table_name=target_table_name,
+            columns=columns,
+            config=config,
+            _table_metadata=self._metadata,
+            _tx=self._tx)
 
     def import_files(self,
                      files_to_import: Iterable[str],
@@ -1085,47 +1048,7 @@ class Table(TableInTransaction):
         config: Optional[BlobExpansionConfig] = None,
         target_table_schema: Optional[str] = None,
     ) -> "BlobExpansion":
-        """Create a blob expansion.
-
-        Blob expansion extracts structured data from a blob column (e.g., JSON) into
-        a separate table with typed columns. The expanded data is written to a new
-        table that is linked to this source table.
-
-        Parameters
-        ----------
-        source_column_name : str
-            The name of the blob column in this table to expand.
-        expansion_schema : pa.Schema
-            The Arrow schema defining the structure of the expanded data.
-        target_table_name : str
-            The name of the new table that will hold the expanded columns.
-        config : BlobExpansionConfig, optional
-            Configuration options for the blob expansion. If not provided,
-            default values are used (JSON format, no flattening).
-        target_table_schema : str, optional
-            The database schema where the expanded table will be created.
-            If not provided, defaults to this table's schema.
-
-        Returns
-        -------
-        BlobExpansion
-            The created blob expansion object.
-
-        Examples
-        --------
-        >>> config = BlobExpansionConfig(
-        ...     expansion_format=ExpansionFormat.JSON,
-        ...     flatten_path=True,
-        ...     flatten_delimiter="__"
-        ... )
-        >>> expansion = table.create_blob_expansion(
-        ...     source_column_name="json_data",
-        ...     expansion_schema=pa.schema([("field1", pa.string())]),
-        ...     target_table_name="expanded_json",
-        ...     config=config
-        ... )
-
-        """
+        """Create a blob expansion for the given source column."""
         self._assert_not_imports_table()
         self._tx._rpc.features.check_blob_expansion()
 
@@ -1133,12 +1056,8 @@ class Table(TableInTransaction):
             config = BlobExpansionConfig()
 
         self._tx._rpc.api.create_blob_expansion(
-            self.ref.bucket, self.ref.schema, self.ref.table,
-            source_column_name, expansion_schema, target_table_name,
-            config.expansion_format.value, config.copy_source_column,
-            config.flatten_path, config.flatten_delimiter,
-            target_table_schema, config.add_missing_values_output,
-            config.add_excessive_values_output,
+            self.ref,
+            source_column_name, expansion_schema, target_table_name, config, target_table_schema,
             txid=self._tx.active_txid)
         log.info("Created blob expansion: source_column=%s expanded_table=%s",
                  source_column_name, target_table_name)
@@ -1223,139 +1142,68 @@ def _parse_projection_info(projection_info, table_metadata: "TableMetadata", tx:
 
 @dataclass
 class BlobExpansion:
-    """VAST blob expansion configuration.
-
-    A blob expansion extracts structured data from a blob column (e.g., JSON data)
-    into separate typed columns in a linked target table. This allows querying
-    structured data stored as blobs using standard SQL/tabular operations.
-
-    A blob expansion is uniquely identified by the tuple (source_table, source_column_name).
-
-    Attributes
-    ----------
-    source_column_name : str
-        The name of the blob column being expanded.
-    target_table_name : str
-        The name of the table holding the expanded columns.
-    expansion_format : ExpansionFormat
-        The format of the blob data (e.g., JSON).
-    columns : list
-        List of expanded column definitions [(name, type, metadata), ...].
-    copy_source_column : bool
-        Whether the source blob column is copied to the expanded table.
-    table_metadata : TableMetadata
-        Metadata of the source table containing the blob column.
-    tx : Transaction
-        The transaction context.
-
-    """
+    """VAST blob expansion."""
 
     source_column_name: str
     target_table_name: str
-    expansion_format: ExpansionFormat
     columns: list[tuple[str, pa.DataType, dict]]
-    copy_source_column: bool
-    table_metadata: TableMetadata
-    tx: "Transaction"
+    config: BlobExpansionConfig
+    _table_metadata: TableMetadata
+    _tx: "Transaction"
 
     @property
-    def ref(self) -> TableRef:
-        """Reference to the source table."""
-        return self.table_metadata.ref
+    def table_metadata(self) -> TableMetadata:
+        """Return the metadata of the target table."""
+        return self._table_metadata
+
+    @property
+    def tx(self) -> "Transaction":
+        """Return the transaction."""
+        return self._tx
 
     def add_columns(
         self,
-        expansion_schema: Optional[pa.Schema] = None,
+        columns_to_add: Optional[pa.Schema] = None,
         add_copy_source_column: bool = False,
         add_missing_values_output: bool = False,
         add_excessive_values_output: bool = False,
     ) -> None:
-        """Add columns to this blob expansion.
-
-        Parameters
-        ----------
-        expansion_schema : pa.Schema, optional
-            Schema defining new columns to add to the expansion.
-        add_copy_source_column : bool, optional
-            If True, adds a column that copies the original source blob value.
-        add_missing_values_output : bool, optional
-            If True, adds a column that tracks which expected fields were missing
-            in the source blob during expansion.
-        add_excessive_values_output : bool, optional
-            If True, adds a column that tracks which unexpected fields were present
-            in the source blob during expansion.
-
-        """
-        self.tx._rpc.api.alter_blob_expansion_add_columns(
-            self.ref.bucket, self.ref.schema, self.ref.table,
+        """Add columns to this blob expansion."""
+        self._tx._rpc.api.alter_blob_expansion_add_columns(
+            self._table_metadata.ref,
             self.source_column_name,
-            expansion_schema,
+            columns_to_add,
             add_copy_source_column,
             add_missing_values_output,
             add_excessive_values_output,
-            txid=self.tx.active_txid)
+            txid=self._tx.active_txid)
         log.info("Added columns to blob expansion: %s", self.source_column_name)
 
     def drop_columns(
         self,
-        expansion_schema: Optional[pa.Schema] = None,
+        columns_to_remove: Optional[pa.Schema] = None,
         remove_copy_source_column: bool = False,
         remove_missing_values_output: bool = False,
         remove_excessive_values_output: bool = False,
     ) -> None:
-        """Remove columns from this blob expansion.
-
-        Parameters
-        ----------
-        expansion_schema : pa.Schema, optional
-            Schema defining columns to remove from the expansion.
-        remove_copy_source_column : bool, optional
-            If True, removes the column that copies the original source blob value.
-        remove_missing_values_output : bool, optional
-            If True, removes the column that tracks missing expected fields.
-        remove_excessive_values_output : bool, optional
-            If True, removes the column that tracks unexpected extra fields.
-
-        """
-        self.tx._rpc.api.alter_blob_expansion_drop_columns(
-            self.ref.bucket, self.ref.schema, self.ref.table,
+        """Remove columns from this blob expansion."""
+        self._tx._rpc.api.alter_blob_expansion_drop_columns(
+            self._table_metadata.ref,
             self.source_column_name,
-            expansion_schema,
+            columns_to_remove,
             remove_copy_source_column,
             remove_missing_values_output,
             remove_excessive_values_output,
-            txid=self.tx.active_txid)
+            txid=self._tx.active_txid)
         log.info("Dropped columns from blob expansion: %s", self.source_column_name)
 
     def drop(self) -> None:
         """Drop this blob expansion."""
-        self.tx._rpc.api.drop_blob_expansion(
-            self.ref.bucket, self.ref.schema, self.ref.table,
+        self._tx._rpc.api.drop_blob_expansion(
+            self._table_metadata.ref,
             self.source_column_name,
-            txid=self.tx.active_txid)
+            txid=self._tx.active_txid)
         log.info("Dropped blob expansion: %s", self.source_column_name)
-
-
-def _parse_blob_expansion_info(
-    result: tuple,
-    table_metadata: TableMetadata,
-    tx: "Transaction",
-) -> BlobExpansion:
-    """Parse show_blob_expansion result into BlobExpansion object."""
-    source_column_name, target_table_name, expansion_format_str, columns, copy_source_column = result
-    # Convert string format to enum
-    try:
-        expansion_format = ExpansionFormat(expansion_format_str)
-    except ValueError:
-        expansion_format = ExpansionFormat.JSON  # Default fallback
-    return BlobExpansion(
-        source_column_name=source_column_name,
-        target_table_name=target_table_name,
-        expansion_format=expansion_format,
-        columns=columns,
-        copy_source_column=copy_source_column,
-        table_metadata=table_metadata,
-        tx=tx)
 
 
 def _parse_bucket_and_object_names(path: str) -> tuple[str, str]:
