@@ -2388,7 +2388,7 @@ class VastdbApi:
             url=self._url(table_ref.bucket, table_ref.schema, table_ref.table, command="blob-expansion", url_params=url_params),
             headers=headers)
 
-    def show_blob_expansion(
+    def get_blob_expansion(
         self,
         table_ref: "TableRef",
         source_column_name: str = "value",

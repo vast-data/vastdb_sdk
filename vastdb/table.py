@@ -300,7 +300,7 @@ class TableInTransaction(ITable):
         self._tx._rpc.features.check_blob_expansion()
 
         source_column, target_table_name, expansion_format_str, columns, copy_source_column = \
-            self._tx._rpc.api.show_blob_expansion(
+            self._tx._rpc.api.get_blob_expansion(
                 self.ref, source_column_name, txid=self._tx.active_txid)
 
         # Convert string format to enum
