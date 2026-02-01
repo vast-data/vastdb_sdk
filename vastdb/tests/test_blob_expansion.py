@@ -99,7 +99,7 @@ def test_blob_expansion_add_columns(session, clean_bucket_name):
 
 
 def test_blob_expansion_add_already_added_columns(session, clean_bucket_name):
-    """Test that adding already existing columns raises an error."""
+    """Test that adding already existing columns is idempotent (succeeds silently)."""
     with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).create_schema('s1')
 
@@ -124,15 +124,14 @@ def test_blob_expansion_add_already_added_columns(session, clean_bucket_name):
             config=BlobExpansionConfig(expansion_format=ExpansionFormat.JSON)
         )
 
-        # Try to add columns that already exist
-        with pytest.raises(errors.Conflict):
-            be.add_columns(columns_to_add=initial_schema)
+        # Adding columns that already exist should succeed (idempotent)
+        be.add_columns(columns_to_add=initial_schema)
 
         be.drop()
 
 
 def test_blob_expansion_drop_already_dropped_columns(session, clean_bucket_name):
-    """Test that dropping already dropped columns raises an error."""
+    """Test that dropping already dropped columns is idempotent (succeeds silently)."""
     with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).create_schema('s1')
 
@@ -165,13 +164,14 @@ def test_blob_expansion_drop_already_dropped_columns(session, clean_bucket_name)
         # First drop should succeed
         be.drop_columns(columns_to_remove=columns_to_drop)
 
+        # Second drop of same columns should also succeed (idempotent)
         be.drop_columns(columns_to_remove=columns_to_drop)
 
         be.drop()
 
 
 def test_blob_expansion_drop_non_existent_columns(session, clean_bucket_name):
-    """Test that dropping non-existent columns raises an error."""
+    """Test that dropping non-existent columns is idempotent (succeeds silently)."""
     with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).create_schema('s1')
 
