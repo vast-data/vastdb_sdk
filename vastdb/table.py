@@ -871,8 +871,9 @@ class TableInTransaction(ITable):
 
         Both Elysium and Vector Index tables use global row IDs.
         """
-        # _vector_index is set from list_tables or synced from stats.vector_index by _parse_stats_vector_index()
-        has_vector_index = self._metadata._vector_index is not None
+        # check if table has vector index from loaded stats
+        has_vector_index = (self._metadata.stats is not None and
+                           self._metadata.stats.vector_index is not None)
         return self._is_sorted_table or has_vector_index
 
     def vector_search(
