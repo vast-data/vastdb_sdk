@@ -130,7 +130,7 @@ class Schema:
         log.debug("Found table: %s", t[0])
         return t[0]
 
-    def _iter_tables(self, table_name=None, page_size=1000, include_vector_index_metadata=False):
+    def _iter_tables(self, table_name=None, page_size=1000):
         next_key = 0
         name_prefix = table_name if table_name else ""
         exact_match = bool(table_name)
@@ -138,8 +138,7 @@ class Schema:
             _bucket_name, _schema_name, curr_tables, next_key, is_truncated, _ = \
                 self.tx._rpc.api.list_tables(
                     bucket=self.bucket.name, schema=self.name, next_key=next_key, max_keys=page_size, txid=self.tx.active_txid,
-                    exact_match=exact_match, name_prefix=name_prefix, include_list_stats=exact_match,
-                    include_vector_index_metadata=include_vector_index_metadata)
+                    exact_match=exact_match, name_prefix=name_prefix, include_list_stats=exact_match)
             if not curr_tables:
                 break
             yield from curr_tables
