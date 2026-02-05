@@ -1,11 +1,13 @@
 """VAST Database table."""
 
 import concurrent.futures
+import dataclasses
 import itertools
 import logging
 import os
 import queue
 import sys
+import typing
 from dataclasses import dataclass
 from enum import Enum
 from math import ceil
@@ -24,13 +26,14 @@ import ibis
 import pyarrow as pa
 import urllib3
 
-from vastdb._table_interface import IbisPredicate, ITable
+from vastdb._table_interface import IbisPredicate, ITable, ReadOnlyTable
 from vastdb.table_metadata import TableMetadata, TableRef, TableStats, TableType
 
 from . import _internal, errors, util
 from ._ibis_support import validate_ibis_support_schema
 from ._internal import SortingKey, VectorIndex
 from .config import ImportConfig, QueryConfig
+from .partitioning import PartitionSpec as _PartitionSpec
 
 if TYPE_CHECKING:
     from .transaction import Transaction
@@ -181,6 +184,87 @@ class SplitWorker:
     def done(self):
         """Returns true iff the pagination over."""
         return all(row_id == _internal.TABULAR_INVALID_ROW_ID for row_id in self.subsplits_state.values())
+
+
+class _Partitions:
+    def __init__(self, table: "TableInTransaction", include_pre_transform_columns: bool = False) -> None:
+        if table._metadata.partitioning is None:
+            raise ValueError("_Partitions __init__ requires a partitioned table")
+
+        self._partition_spec = typing.cast(_PartitionSpec, table._metadata.partitioning)
+
+        self._pit = TableInTransaction(
+            TableMetadata(dataclasses.replace(table.ref, table=f"{table.ref.table}___VAST_PARTITIONS")),
+            table._tx
+        )
+        self._pit.reload_schema()
+        self._pit.reload_stats()
+        self._include_pre_transform_columns = include_pre_transform_columns
+
+        if include_pre_transform_columns:
+            fields = [f for f in self._pit.arrow_schema]
+
+            for key in self._partition_spec.partition_keys:
+                if key.is_identity:
+                    continue
+
+                field = table.arrow_schema.field(key.pre_transform_name)
+                pit_name = _Partitions._post_transform_name_to_pit_name(key.column, self._partition_spec)
+                fields.append(field.with_name(f"pre_transform_{pit_name}"))
+
+            self._pit._metadata.arrow_schema = pa.schema(fields)
+
+    def _keys_i_to_column_name(self, name: str) -> str:
+        index = int(name.rsplit("_", 1)[-1])
+        column_name = self._partition_spec.partition_keys[index].column
+        return name.replace(f"keys_{index}", column_name)
+
+    def _pit_schema_to_names_schema(self, schema: pa.Schema) -> pa.Schema:
+        return pa.schema([f.with_name(self._keys_i_to_column_name(f.name)) for f in schema])
+
+    @property
+    def arrow_schema(self) -> pa.Schema:
+        return self._pit_schema_to_names_schema(self._pit.arrow_schema)
+
+    @staticmethod
+    def _post_transform_name_to_pit_name(name: str, spec: _PartitionSpec) -> str:
+        partition_column_names = [key.column for key in spec.partition_keys]
+
+        if name not in partition_column_names:
+            raise ValueError(f"{name} is not a partition column")
+
+        return f"keys_{partition_column_names.index(name)}"
+
+    def select(
+        self,
+        columns: Optional[list[str]] = None,
+        predicate: Optional[IbisPredicate] = None,
+        config: Optional[QueryConfig] = None,
+        *,
+        internal_row_id: bool = False,
+        limit_rows: Optional[int] = None,
+    ) -> pa.RecordBatchReader:
+        """Execute a query."""
+        if columns is not None:
+            columns = [_Partitions._post_transform_name_to_pit_name(name, self._partition_spec) for name in columns]
+
+        reader = self._pit.select(columns, predicate, config, internal_row_id=internal_row_id, limit_rows=limit_rows)
+        new_schema = self._pit_schema_to_names_schema(reader.schema)
+        return pa.RecordBatchReader.from_batches(new_schema, [pa.RecordBatch.from_arrays(b.columns, schema=new_schema) for b in reader])
+
+    def __getitem__(self, col_name: str) -> ibis.Column:
+        """Allow constructing ibis-like column expressions from this table.
+
+        It is useful for constructing expressions for predicate pushdown in `ITable.select()` method.
+        """
+        if col_name in {k.column for k in self._partition_spec.partition_keys}:
+            pit_name = _Partitions._post_transform_name_to_pit_name(col_name, self._partition_spec)
+            return self._pit[pit_name]
+
+        if self._include_pre_transform_columns:
+            return self._pit[col_name]
+
+        raise ValueError(f"Unknown partition key: {col_name}")
 
 
 class TableInTransaction(ITable):
@@ -841,6 +925,21 @@ class TableInTransaction(ITable):
                                           record_batch=slice,
                                           txid=self._tx.active_txid,
                                           delete_from_imports_table=self._metadata.is_imports_table)
+
+    def _assert_partitioned(self) -> None:
+        if self._metadata.table_type is None:
+            raise AssertionError("Table type is not loaded, please use table.load_stats()")
+
+        if self._metadata.table_type not in {TableType.Partitioned, TableType.SortedPartitions}:
+            raise AssertionError("partitions can only be used on a partitioned table")
+
+    def partitions(self) -> ReadOnlyTable:
+        """List the partitions of a partitioned table.
+
+        The returned table should be used only to execute a query
+        """
+        self._assert_partitioned()
+        return _Partitions(self)
 
     def imports_table(self) -> Optional[ITable]:
         """Get the imports table of this table."""

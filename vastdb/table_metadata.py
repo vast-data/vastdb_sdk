@@ -143,6 +143,11 @@ class TableMetadata:
             txid=tx.active_txid,
             list_imports_table=self.is_imports_table
         )
+
+        # This is because ibis doesn't support fixed binary
+        if self._ref.table.endswith("___VAST_PARTITIONS"):
+            fields = [f for f in fields if f.name.startswith("keys_") and f.name != "keys_hash"]
+
         self.arrow_schema = pa.schema(fields)
 
     def load_sorted_columns(self, tx: "Transaction") -> None:
