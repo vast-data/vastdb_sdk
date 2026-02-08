@@ -250,3 +250,95 @@ def test_query_partitioned_table(
         for col in ("a", column_name, "s"):
             queried_data = pa.Table.from_batches(list(t.select([col]))).combine_chunks()
             assert _DATA.select([col]).equals(queried_data)
+
+
+@pytest.mark.parametrize("column_name, transform", _TRANSFORMS)
+@pytest.mark.parametrize(
+    "filter_generator",
+    [
+        lambda t: t["a"] == 2,
+        lambda _: None,
+    ],
+)
+def test_delete_partition(
+    session: Session,
+    clean_bucket_name: str,
+    column_name: str,
+    transform: Transform,
+    filter_generator,
+):
+    schema_name = f"s_{column_name}_{hash(filter_generator)}"
+    table_name = f"partitioned_table_{column_name}"
+
+    with session.transaction() as tx:
+        s = tx.bucket(clean_bucket_name).create_schema(schema_name)
+        t = s.create_table(
+            table_name,
+            _ARROW_SCHEMA,
+            partition_spec=_create_partition_spec(column_name, transform),
+        )
+        t.insert(_DATA)
+
+    with session.transaction() as tx:
+        t = tx.bucket(clean_bucket_name).schema(schema_name).table(table_name)
+        pit = t.partitions()
+
+        for b in pit.select(predicate=filter_generator(pit)):
+            t.delete_partitions(b, allow_non_acid=True)
+
+    with session.transaction() as tx:
+        t = tx.bucket(clean_bucket_name).schema(schema_name).table(table_name)
+        pit = t.partitions()
+        assert list(pit.select(predicate=filter_generator(pit))) == []
+
+
+@pytest.mark.parametrize("column_name, transform", _TRANSFORMS)
+def test_delete_partition_invalid_input(
+    session: Session, clean_bucket_name: str, column_name: str, transform: Transform
+):
+    schema_name = f"s_{column_name}"
+    table_name = f"partitioned_table_{column_name}"
+
+    with session.transaction() as tx:
+        s = tx.bucket(clean_bucket_name).create_schema(schema_name)
+        t = s.create_table(
+            table_name,
+            _ARROW_SCHEMA,
+            partition_spec=_create_partition_spec(column_name, transform),
+        )
+        t.insert(_DATA)
+
+    with session.transaction() as tx:
+        t = tx.bucket(clean_bucket_name).schema(schema_name).table(table_name)
+        pit = t.partitions()
+        partitions_batches_count = len(list(pit.select()))
+
+        with pytest.raises(
+            AssertionError,
+            match="Beware, deleting partitions is a non acid operation! In order to proceed please use allow_non_acid=True",
+        ):
+            b = next(pit.select())
+            t.delete_partitions(b)
+
+        with pytest.raises(Exception, match="InvalidArgument"):
+            batch = pa.RecordBatch.from_arrays(
+                [
+                    pa.array([2]),
+                ],
+                schema=_DATA.select(["a"]).schema,
+            )
+            t.delete_partitions(batch, allow_non_acid=True)
+
+        with pytest.raises(Exception, match="InvalidArgument"):
+            batch = pa.RecordBatch.from_arrays(
+                [
+                    pa.array([2]),
+                    pa.array([4]),
+                ],
+                schema=_DATA.select(["a", "b"]).schema,
+            )
+            t.delete_partitions(batch, allow_non_acid=True)
+
+    with session.transaction() as tx:
+        t = tx.bucket(clean_bucket_name).schema(schema_name).table(table_name)
+        assert len(list(t.partitions().select())) == partitions_batches_count

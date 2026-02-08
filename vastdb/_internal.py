@@ -2506,6 +2506,16 @@ class VastdbApi:
         count = int(res_headers['tabular-list-count']) if count_only else len(columns)
         return columns, next_key, is_truncated, count
 
+    def delete_partitions_non_acid(self, bucket: str, schema: str, table: str, serialized_partitions_record_batch: pa.RecordBatch) -> None:
+        headers = self._fill_common_headers()
+        headers['tabular-allow-non-acid'] = "True"
+        headers['Content-Length'] = str(len(serialized_partitions_record_batch))
+        self._request(
+            method="DELETE",
+            url=self._url(bucket=bucket, schema=schema, table=table, command="partitions"),
+            headers=headers,
+            data=serialized_partitions_record_batch)
+
 
 class QueryDataInternalError(Exception):
     pass

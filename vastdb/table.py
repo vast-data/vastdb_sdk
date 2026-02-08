@@ -991,6 +991,29 @@ class TableInTransaction(ITable):
         self._assert_partitioned()
         return _Partitions(self)
 
+    def delete_partitions(self, partitions: pa.RecordBatch, *, allow_non_acid: bool = False) -> None:
+        """Delete partitions of a table.
+
+        This is a non acid operation so it is dangerous. Unless explicitly using the allow_non_acid=True flag
+        of this method, it will raise an AssertionError
+
+        partitions - each row in the batch represents a single partition to be deleted. The schema of partitions
+                     must match this of the result from list_partitions
+        """
+        self._assert_partitioned()
+
+        if not allow_non_acid:
+            raise AssertionError("Beware, deleting partitions is a non acid operation! In order to proceed please use allow_non_acid=True")
+
+        if partitions.num_rows == 0:
+            return
+
+        serialized_slices = util.iter_serialized_slices(
+            partitions, MAX_ROWS_PER_BATCH)
+
+        for slice in serialized_slices:
+            self._tx._rpc.api.delete_partitions_non_acid(self.ref.bucket, self.ref.schema, self.ref.table, slice)
+
     def imports_table(self) -> Optional[ITable]:
         """Get the imports table of this table."""
         imports_table_metadata = self.imports_table_metadata()
