@@ -2858,6 +2858,7 @@ def build_query_data_request(schema: pa.Schema,
 
     column_names_in_predicate = set() if predicate is None else _column_names_in_node_tree(predicate)
     column_names_required_by_predicate = column_names_in_predicate - set(queried_columns)
+    columns_for_projection = queried_columns.copy()
     queried_columns.extend(column_names_required_by_predicate)
     schema = pa.schema((schema.field(name) for name in queried_columns))
 
@@ -2883,9 +2884,9 @@ def build_query_data_request(schema: pa.Schema,
     leaves_map = {node.field.name: [leaf.index for leaf in node._iter_leaves()] for node in parser.nodes}
 
     projection_fields = []
-    for field in schema:
+    for name in columns_for_projection:
         # TODO: only root-level projection pushdown is supported (i.e. no support for SELECT s.x FROM t)
-        positions = leaves_map[field.name]
+        positions = leaves_map[name]
 
         for leaf_position in positions:
             fb_field_index.Start(builder)
@@ -2912,4 +2913,5 @@ def build_query_data_request(schema: pa.Schema,
 
     builder.Finish(relation)
 
-    return QueryDataRequest(serialized=builder.Output(), response_schema=schema, response_parser=QueryDataParser(schema))
+    response_schema = pa.schema(f for f in schema if f.name in columns_for_projection)
+    return QueryDataRequest(serialized=builder.Output(), response_schema=response_schema, response_parser=QueryDataParser(response_schema))
