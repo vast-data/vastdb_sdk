@@ -342,3 +342,59 @@ def test_delete_partition_invalid_input(
     with session.transaction() as tx:
         t = tx.bucket(clean_bucket_name).schema(schema_name).table(table_name)
         assert len(list(t.partitions().select())) == partitions_batches_count
+
+
+def test_non_partitioned_table(session: Session, clean_bucket_name: str):
+    schema_name = "s"
+    table_name = "non_partitioned_table"
+
+    with session.transaction() as tx:
+        (
+            tx.bucket(clean_bucket_name)
+            .create_schema(schema_name)
+            .create_table(table_name, _ARROW_SCHEMA)
+        )
+
+    with session.transaction() as tx:
+        t = tx.bucket(clean_bucket_name).schema(schema_name).table(table_name)
+
+        with pytest.raises(
+            AssertionError, match="partitions can only be used on a partitioned table"
+        ):
+            t.partitions()
+
+        with pytest.raises(
+            AssertionError, match="partitions can only be used on a partitioned table"
+        ):
+            t.delete_partitions(None)
+
+
+def test_data_engine_example(session: Session, clean_bucket_name: str):
+    schema_name = "s"
+    table_name = "t"
+
+    with session.transaction() as tx:
+        s = tx.bucket(clean_bucket_name).create_schema(schema_name)
+        t = s.create_table(
+            "t",
+            _ARROW_SCHEMA,
+            partition_spec=_create_partition_spec("d", DayTransform()),
+        )
+        t.insert(_DATA)
+
+    with session.transaction() as tx:
+        t = tx.bucket(clean_bucket_name).schema(schema_name).table(table_name)
+        partitions = t.partitions()
+
+        for b in partitions.select(predicate=partitions["d_day"] < datetime(2025, 1, 3)):
+            t.delete_partitions(b, allow_non_acid=True)
+
+    with session.transaction() as tx:
+        t = tx.bucket(clean_bucket_name).schema(schema_name).table(table_name)
+        print(t.select().read_all())
+        print(_DATA.filter(pc.field("a") == 3))
+        queried_data = t.select().read_all()
+
+        # This is a patch for server bug that gives meta data as well
+        queried_data = queried_data.select([name for name in _DATA.schema.names])
+        assert queried_data == _DATA.filter(pc.field("a") == 3)
