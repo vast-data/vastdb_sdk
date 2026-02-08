@@ -187,3 +187,66 @@ def test_pit(
         for col in ("a", post_transform_column_name):
             partitions = pa.Table.from_batches(list(pit.select([col])))
             assert expected_partitions.select([col]).equals(partitions)
+
+
+@pytest.mark.parametrize("column_name, transform", _TRANSFORMS)
+def test_query_partitioned_table(
+    session: Session, clean_bucket_name: str, column_name: str, transform: Transform
+):
+    schema_name = f"s_{column_name}"
+    table_name = f"partitioned_table_{column_name}"
+
+    with session.transaction() as tx:
+        s = tx.bucket(clean_bucket_name).create_schema(schema_name)
+        t = s.create_table(
+            table_name,
+            _ARROW_SCHEMA,
+            partition_spec=_create_partition_spec(column_name, transform),
+        )
+        t.insert(_DATA)
+
+    with session.transaction() as tx:
+        t = tx.bucket(clean_bucket_name).schema(schema_name).table(table_name)
+        queried_data = pa.Table.from_batches(list(t.select())).combine_chunks()
+        # This is a patch for server bug that gives meta data as well, and so as the following ones like this
+        queried_data = queried_data.select([name for name in _DATA.schema.names])
+        assert _DATA.equals(queried_data)
+
+        value_to_filter_by = _DATA[column_name][2].as_py()
+
+        queried_data = pa.Table.from_batches(
+            list(
+                t.select(
+                    predicate=((t["a"] == 2) & (t[column_name] == value_to_filter_by))
+                )
+            )
+        ).combine_chunks()
+        queried_data = queried_data.select([name for name in _DATA.schema.names])
+        assert _DATA.filter(
+            (pc.field("a") == 2) & (pc.field(column_name) == value_to_filter_by)
+        ).equals(queried_data)
+
+        str_value_to_filter_by = _DATA["s"][2].as_py()
+        queried_data = pa.Table.from_batches(
+            list(
+                t.select(
+                    predicate=(
+                        (t["a"] == 2)
+                        & (t[column_name] == value_to_filter_by)
+                        & (t["s"] == str_value_to_filter_by)
+                    )
+                )
+            )
+        ).combine_chunks()
+        queried_data = queried_data.select([name for name in _DATA.schema.names])
+        assert _DATA.filter(
+            (pc.field("a") == 2)
+            & (pc.field(column_name) == value_to_filter_by)
+            & (pc.field("s") == str_value_to_filter_by)
+        ).equals(queried_data)
+
+        assert list(t.select(predicate=t["a"] == 0)) == []
+
+        for col in ("a", column_name, "s"):
+            queried_data = pa.Table.from_batches(list(t.select([col]))).combine_chunks()
+            assert _DATA.select([col]).equals(queried_data)

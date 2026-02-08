@@ -2,8 +2,10 @@
 
 import concurrent.futures
 import dataclasses
+import functools
 import itertools
 import logging
+import operator
 import os
 import queue
 import sys
@@ -29,7 +31,7 @@ import urllib3
 from vastdb._table_interface import IbisPredicate, ITable, ReadOnlyTable
 from vastdb.table_metadata import TableMetadata, TableRef, TableStats, TableType
 
-from . import _internal, errors, util
+from . import _ibis_support, _internal, errors, util
 from ._ibis_support import validate_ibis_support_schema
 from ._internal import SortingKey, VectorIndex
 from .config import ImportConfig, QueryConfig
@@ -652,21 +654,12 @@ class TableInTransaction(ITable):
             for split in range(split_config.num_splits)
         ]
 
-    def select(self, columns: Optional[list[str]] = None,
+    def _select_single_table(self, columns: Optional[list[str]] = None,
                predicate: Union[ibis.expr.types.BooleanColumn,
                                 ibis.common.deferred.Deferred] = None,
                config: Optional[QueryConfig] = None,
-               *,
                internal_row_id: bool = False,
-               limit_rows: Optional[int] = None) -> pa.RecordBatchReader:
-        """Execute a query over this table.
-
-        To read a subset of the columns, specify their names via `columns` argument. Otherwise, all columns will be read.
-
-        In order to apply a filter, a predicate can be specified. See https://github.com/vast-data/vastdb_sdk/blob/main/README.md#filters-and-projections for more details.
-
-        Query-execution configuration options can be specified via the optional `config` argument.
-        """
+               limit_rows: Optional[int] = None) -> tuple[pa.Schema, pa.RecordBatchReader]:
         config = config or QueryConfig()
 
         try:
@@ -676,7 +669,7 @@ class TableInTransaction(ITable):
                                                                                internal_row_id=internal_row_id,
                                                                                limit_rows=limit_rows)
         except _EmptyResultException as e:
-            return pa.RecordBatchReader.from_batches(e.response_schema, [])
+            return e.response_schema, []
 
         splits_queue: Queue[int] = Queue()
 
@@ -785,7 +778,64 @@ class TableInTransaction(ITable):
                             tasks_running -= 1
                     propagate_first_exception(futures, block=True)
 
-        return pa.RecordBatchReader.from_batches(query_data_request.response_schema, batches_iterator())
+        return query_data_request.response_schema, batches_iterator()
+
+    def select(self, columns: Optional[list[str]] = None,
+               predicate: Union[ibis.expr.types.BooleanColumn,
+                                ibis.common.deferred.Deferred] = None,
+               config: Optional[QueryConfig] = None,
+               *,
+               internal_row_id: bool = False,
+               limit_rows: Optional[int] = None) -> pa.RecordBatchReader:
+        """Execute a query over this table.
+
+        To read a subset of the columns, specify their names via `columns` argument. Otherwise, all columns will be read.
+
+        In order to apply a filter, a predicate can be specified. See https://github.com/vast-data/vastdb_sdk/blob/main/README.md#filters-and-projections for more details.
+
+        Query-execution configuration options can be specified via the optional `config` argument.
+        """
+        if self._metadata.table_type not in {TableType.Partitioned, TableType.SortedPartitions}:
+            schema, batches = self._select_single_table(columns, predicate, config, internal_row_id, limit_rows)
+            return pa.RecordBatchReader.from_batches(schema, batches)
+
+        pit = _Partitions(self, include_pre_transform_columns=True)
+        partition_spec = typing.cast(_PartitionSpec, self._metadata.partitioning)
+
+        if predicate is None:
+            pit_predicate = None
+        else:
+            pre_transform_partition_names = {k.pre_transform_name for k in partition_spec.partition_keys}
+            pit_predicate = _ibis_support.retain_predicates(predicate.op(), pre_transform_partition_names)
+
+            def partition_key_to_pit_name_with_prefix(is_identity: bool, index: int) -> str:
+                prefix = "" if is_identity else "pre_transform_"
+                return f"{prefix}keys_{index}"
+
+            fields_map = {k.pre_transform_name: pit[partition_key_to_pit_name_with_prefix(k.is_identity, i)] for i, k in enumerate(partition_spec.partition_keys)}
+            pit_predicate = _ibis_support.change_columns(pit_predicate, fields_map).to_expr()
+
+        partition_keys = [k.column for k in partition_spec.partition_keys]
+        partition_batches = pit.select(partition_keys, predicate=pit_predicate, config=config)
+        result_schema = self.arrow_schema if columns is None else pa.schema([self.arrow_schema.field(name) for name in columns])
+        batches_iterators = []
+        config = None if config is None else dataclasses.replace(config, num_splits=1)
+
+        if limit_rows is not None:
+            raise NotImplementedError("Partitioned query with limit rows")
+
+        for batch in partition_batches:
+            for row in range(batch.num_rows):
+                partition_pred = functools.reduce(operator.and_, [
+                    self[name] == batch.column(column_index)[row].as_py()
+                    for column_index, name in enumerate(batch.schema.names)
+                ])
+                full_pred = partition_pred if predicate is None else predicate & partition_pred
+                _, iterator = self._select_single_table(columns, full_pred, config, internal_row_id, limit_rows)
+                batches_iterators.append(iterator)
+
+        all_batches = itertools.chain(*batches_iterators)
+        return pa.RecordBatchReader.from_batches(result_schema, all_batches)
 
     def insert_in_column_batches(self, rows: pa.RecordBatch) -> pa.ChunkedArray:
         """Split the RecordBatch into an insert + updates.
