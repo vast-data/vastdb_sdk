@@ -113,6 +113,40 @@ def test_create_table_from_files(session, clean_bucket_name, s3):
         util.create_table_from_files(s, 't3', same_schema_files, schema_merge_func=util.strict_schema_merge)
 
 
+def test_import_partitioned_files(session, clean_bucket_name, s3):
+    datasets = [
+        {'num': [123],
+         'varch': ['abc']},
+        {'num': [456, 789],
+         'varch': ['def', 'ghi']},
+    ]
+    for i, ds in enumerate(datasets):
+        table = pa.Table.from_pydict(ds)
+        with NamedTemporaryFile() as f:
+            pq.write_table(table, f.name)
+            s3.put_object(Bucket=clean_bucket_name, Key=f'prq{i}', Body=f)
+
+    with session.transaction() as tx:
+        b = tx.bucket(clean_bucket_name)
+        s = b.create_schema('s1')
+        part_schema = pa.schema([('part', pa.string())])
+        t = s.create_table('t1', pa.schema([('num', pa.int64()), ('varch', pa.string()), *part_schema]))
+        files_and_partitions = {
+            f'/{clean_bucket_name}/prq0': pa.RecordBatch.from_arrays([pa.array(["Part1"])], schema=part_schema),
+            f'/{clean_bucket_name}/prq1': pa.RecordBatch.from_arrays([pa.array(["Part2"])], schema=part_schema)
+        }
+        t.import_partitioned_files(files_and_partitions)
+
+    with session.transaction() as tx:
+        t = tx.bucket(clean_bucket_name).schema('s1').table('t1')
+        res = t.select(columns=['num']).read_all()
+        assert res.num_rows == 3, f"Expected 3 rows, got {res.num_rows} rows"
+        res = t.select(columns=['num'], predicate=t['part'] == 'Part1').read_all()
+        assert res.num_rows == 1, f"Expected to get 1 row with part == 'Part1', got {res.num_rows} rows"
+        res = t.select(columns=['num'], predicate=t['part'] == 'Part2').read_all()
+        assert res.num_rows == 2, f"Expected to get 2 rows with part == 'Part2', got {res.num_rows} rows"
+
+
 def test_import_name_mismatch_error(session, clean_bucket_name, s3):
     ds = {'varch': ['a', 'b', 'c'],
           'invalid_column_name': [1, 2, 3]}
