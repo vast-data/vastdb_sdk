@@ -359,12 +359,18 @@ class TableInTransaction(ITable):
                         source_files: dict[tuple[str, str], bytes],
                         config: Optional[ImportConfig]):
         config = config or ImportConfig()
-        # TODO: Do we want to validate concurrency isn't too high?
-        assert config.import_concurrency > 0
+        if config.data_endpoints is None:
+            # TODO: Do we want to validate concurrency isn't too high?
+            assert config.import_concurrency > 0
+            endpoints = [self._tx._rpc.api.url for _ in range(
+                        config.import_concurrency)]
+        else:
+            log.info("Using concurrency based on endpoints: {}".format(config.data_endpoints))
+            if len(config.data_endpoints) == 0:
+                raise errors.ImportFilesError("Empty data_endpoints is not allowed", {})
+            endpoints = config.data_endpoints
         max_batch_size = 10  # Enforced in server side.
-        # TODO: use valid endpoints...
-        endpoints = [self._tx._rpc.api.url for _ in range(
-            config.import_concurrency)]
+
         files_queue: Queue = Queue()
 
         key_names = config.key_names or []
@@ -377,6 +383,7 @@ class TableInTransaction(ITable):
         stop_event = Event()
         num_files_in_batch = min(
             ceil(len(source_files) / len(endpoints)), max_batch_size)
+        log.info("Setting batch size to %s files", num_files_in_batch)
 
         def import_worker(q, endpoint):
             try:
@@ -393,7 +400,7 @@ class TableInTransaction(ITable):
                             pass
                         if files_batch:
                             log.info(
-                                "Starting import batch of %s files", len(files_batch))
+                                "Starting import batch of %s files on endpoint %s", len(files_batch), endpoint)
                             log.debug(f"starting import of {files_batch}")
                             session.import_data(
                                 self.ref.bucket, self.ref.schema, self.ref.table, files_batch, txid=self._tx.active_txid,

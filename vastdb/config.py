@@ -64,5 +64,8 @@ class ImportConfig:
 
     import_concurrency: int = 2
 
+    # each endpoint will be handled by a separate import thread
+    data_endpoints: Optional[List[str]] = None
+
     # import key column names
     key_names: Optional[List[str]] = None
