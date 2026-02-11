@@ -42,11 +42,10 @@ class Bucket:
 
     def snapshot(self, name: str, fail_if_missing=True) -> Optional["Bucket"]:
         """Get snapshot by name (if exists)."""
-        snapshots, _is_truncated, _next_key = \
-            self.tx._rpc.api.list_snapshots(bucket=self.name, name_prefix=name, max_keys=1)
-
+        snapshots, _, _ = self.tx._rpc.api.list_snapshots(bucket=self.name, name_prefix=name, max_keys=1)
         expected_name = f".snapshot/{name}"
         exists = snapshots and snapshots[0] == expected_name + "/"
+
         if not exists:
             if fail_if_missing:
                 raise errors.MissingSnapshot(self.name, expected_name)

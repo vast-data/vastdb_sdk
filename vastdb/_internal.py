@@ -785,41 +785,16 @@ class ValidateInList:
         return self
 
 
-_int_coding = (lambda x: str(int(x)), lambda x: int(x))
-_prop_coding = {
-        "message.timestamp.type": ValidateInList('CreateTime', 'LogAppendTime'),
-        "retention.ms": _int_coding,
-        "message.timestamp.after.max.ms": _int_coding,
-        "message.timestamp.before.max.ms": _int_coding
-        }
-
-
-def _encode_table_props(**kwargs):
-    if all([v is None for v in kwargs.values()]):
-        return None
-    else:
-        pairs = [(k.replace("_", ".").strip(), v) for k, v in kwargs.items() if v is not None]
-        return "$".join([f"{k}={_prop_coding[k][0](v)}" for k, v in pairs])
-
-
-def _decode_table_props(s):
-    if s.strip() == '':
-        return {}
-    triplets = [(x.strip(), x.strip().replace(".", "_"), y.strip()) for x, y in [z.split('=') for z in s.strip().split("$")]]
-    return {y: _prop_coding[x][1](z) for x, y, z in triplets if z != ''}
-
-
 TableInfo = namedtuple('TableInfo', 'name properties handle num_rows size_in_bytes num_partitions sorting_key_enabled sorting_score write_amplification acummulative_row_insertion_count sorting_done')
 
 
-def _parse_table_info(obj, parse_properties):
+def _parse_table_info(obj) -> TableInfo:
     name = obj.Name().decode()
     properties = obj.Properties().decode()
     handle = obj.Handle().decode()
     num_rows = obj.NumRows()
     used_bytes = obj.SizeInBytes()
     num_partitions = obj.NumPartitions()
-    properties = parse_properties(properties)
     sorting_key_enabled = obj.SortingKeyEnabled()
     sorting_score_raw = obj.SortingScore()
     write_amplification = obj.WriteAmplification()
@@ -1203,8 +1178,9 @@ class VastdbApi:
             url=self._url(bucket=bucket, schema=name, command="schema"),
             headers=headers)
 
-    def list_schemas(self, bucket, schema="", txid=0, client_tags=[], max_keys=1000, next_key=0, name_prefix="",
-                     exact_match=False, expected_retvals=[], count_only=False):
+    def list_schemas(self, bucket: str, schema: str = "", txid: int = 0, client_tags=[], max_keys: int = 1000,
+                     next_key: int = 0, name_prefix: str = "", exact_match: bool = False,
+                     count_only: bool = False) -> tuple[str, list[tuple[str, str]], int, bool, int]:
         """
         List all schemas
         GET /bucket/schema_path?schema HTTP/1.1
@@ -1248,11 +1224,12 @@ class VastdbApi:
             schema_obj = lists.Schemas(i)
             name = schema_obj.Name().decode()
             properties = schema_obj.Properties().decode()
-            schemas.append([name, properties])
+            schemas.append((name, properties))
 
         return bucket_name, schemas, next_key, is_truncated, count
 
-    def list_snapshots(self, bucket, max_keys=1000, next_token=None, name_prefix=''):
+    def list_snapshots(self, bucket: str, max_keys: int = 1000, next_token=None,
+                       name_prefix: str = '') -> tuple[list[str], bool, Any]:
         next_token = next_token or ''
         url_params = {'list_type': '2', 'prefix': '.snapshot/' + name_prefix, 'delimiter': '/', 'max_keys': str(max_keys)}
         if next_token:
@@ -1271,7 +1248,6 @@ class VastdbApi:
         if isinstance(common_prefixes, dict):  # in case there is a single snapshot
             common_prefixes = [common_prefixes]
         snapshots = [v['Prefix'] for v in common_prefixes]
-
         return snapshots, is_truncated, marker
 
     def _make_sure_schema_exists(self, bucket, schema, timeout_sec=3):
@@ -1491,18 +1467,9 @@ class VastdbApi:
             url=self._url(bucket=bucket, schema=schema, table=name, command="table", url_params=url_params),
             headers=headers)
 
-    def list_tables(self, bucket, schema, txid=0, client_tags=[], max_keys=1000, next_key=0, name_prefix="",
-                    exact_match=False, expected_retvals=[], include_list_stats=False, count_only=False):
-        def parse_properties(x):
-            return x
-        return self._list_tables_internal(bucket=bucket, schema=schema, txid=txid, client_tags=client_tags,
-                                          parse_properties=parse_properties, max_keys=max_keys, next_key=next_key,
-                                          name_prefix=name_prefix, exact_match=exact_match,
-                                          expected_retvals=expected_retvals,
-                                          include_list_stats=include_list_stats, count_only=count_only)
-
-    def _list_tables_raw(self, bucket, schema, txid=0, client_tags=[], max_keys=1000, next_key=0, name_prefix="",
-                         exact_match=False, expected_retvals=[], include_list_stats=False, count_only=False):
+    def _list_tables_raw(self, bucket: str, schema: str, txid: int = 0, client_tags=[], max_keys: int = 1000,
+                         next_key: int = 0, name_prefix: str = "", exact_match: bool = False,
+                         include_list_stats: bool = False, count_only: bool = False) -> tuple[list_tables, int, bool, int]:
         """
         GET /mybucket/schema_path?table HTTP/1.1
         tabular-txid: TransactionId
@@ -1535,20 +1502,19 @@ class VastdbApi:
         count = int(res_headers['tabular-list-count']) if count_only else tables_length
         return lists, next_key, is_truncated, count
 
-    def _list_tables_internal(self, bucket, schema, parse_properties, txid=0, client_tags=[], max_keys=1000, next_key=0, name_prefix="",
-                              exact_match=False, expected_retvals=[], include_list_stats=False, count_only=False):
+    def list_tables(self, bucket: str, schema: str, txid: int = 0, client_tags=[],
+                              max_keys: int = 1000, next_key: int = 0, name_prefix: str = "", exact_match: bool = False,
+                              include_list_stats: bool = False, count_only: bool = False) -> tuple[str, str, list[TableInfo], int, bool, int]:
         tables = []
         lists, next_key, is_truncated, count = self._list_tables_raw(bucket, schema, txid=txid, client_tags=client_tags, max_keys=max_keys,
-                                 next_key=next_key, name_prefix=name_prefix, exact_match=exact_match, expected_retvals=expected_retvals,
+                                 next_key=next_key, name_prefix=name_prefix, exact_match=exact_match,
                                  include_list_stats=include_list_stats, count_only=count_only)
         bucket_name = lists.BucketName().decode()
         schema_name = lists.SchemaName().decode()
         if not bucket.startswith(bucket_name):  # ignore snapshot name
             raise ValueError(f'bucket: {bucket} did not start from {bucket_name}')
         tables_length = lists.TablesLength()
-        for i in range(tables_length):
-            tables.append(_parse_table_info(lists.Tables(i), parse_properties))
-
+        tables = [_parse_table_info(lists.Tables(i)) for i in range(tables_length)]
         return bucket_name, schema_name, tables, next_key, is_truncated, count
 
     def raw_sorting_score(self, bucket, schema, txid, name):
@@ -2420,8 +2386,9 @@ class VastdbApi:
 
         return result
 
-    def list_projections(self, bucket, schema, table, txid=0, client_tags=[], max_keys=1000, next_key=0, name_prefix="",
-                         exact_match=False, expected_retvals=[], include_list_stats=False, count_only=False):
+    def list_projections(self, bucket: str, schema: str, table: str, txid: int = 0, client_tags=[], max_keys: int = 1000,
+                         next_key: int = 0, name_prefix: str = "", exact_match: bool = False,
+                         include_list_stats: bool = False, count_only: bool = False) -> tuple[str, str, str, list[TableInfo], int, bool, int]:
         """
         GET /mybucket/schema_path/my_table?projection HTTP/1.1
         tabular-txid: TransactionId
@@ -2454,18 +2421,18 @@ class VastdbApi:
         bucket_name = lists.BucketName().decode()
         schema_name = lists.SchemaName().decode()
         table_name = lists.TableName().decode()
+
         if not bucket.startswith(bucket_name):  # ignore snapshot name
             raise ValueError(f'bucket: {bucket} did not start from {bucket_name}')
+
         projections_length = lists.ProjectionsLength()
         count = int(res_headers['tabular-list-count']) if count_only else projections_length
-        for i in range(projections_length):
-            projections.append(_parse_table_info(lists.Projections(i), lambda x: x))
-
+        projections = [_parse_table_info(lists.Projections(i)) for i in range(projections_length)]
         return bucket_name, schema_name, table_name, projections, next_key, is_truncated, count
 
-    def list_projection_columns(self, bucket, schema, table, projection, txid=0, client_tags=[], max_keys=1000,
-                                next_key=0, count_only=False, name_prefix="", exact_match=False,
-                                expected_retvals=None):
+    def list_projection_columns(self, bucket: str, schema: str, table: str, projection, txid: int = 0, client_tags=[],
+                                max_keys: int = 1000, next_key: int = 0, count_only: bool = False, name_prefix: str = "",
+                                exact_match: bool = False) -> tuple[list[pa.Field], int, bool, int]:
         """
         GET /mybucket/myschema/mytable?projection-columns HTTP/1.1
         tabular-txid: TransactionId
@@ -2475,7 +2442,6 @@ class VastdbApi:
         tabular-next-key: NextColumnId
         """
         client_tags = client_tags or []
-        expected_retvals = expected_retvals or []
 
         headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
         headers['tabular-max-keys'] = str(max_keys)
@@ -2498,9 +2464,7 @@ class VastdbApi:
         res_headers = res.headers
         next_key = int(res_headers['tabular-next-key'])
         is_truncated = res_headers['tabular-is-truncated'] == 'true'
-        columns = [] if count_only else [[f.name, f.type, f.metadata] for f in
-                                         pa.ipc.open_stream(res.content).schema]
-
+        columns = [] if count_only else [f for f in pa.ipc.open_stream(res.content).schema]
         count = int(res_headers['tabular-list-count']) if count_only else len(columns)
         return columns, next_key, is_truncated, count
 

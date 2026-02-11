@@ -73,8 +73,10 @@ class Schema:
             batch_size = 1000
         result: List["Schema"] = []
         while True:
-            _bucket_name, curr_schemas, next_key, is_truncated, _ = \
-                self.tx._rpc.api.list_schemas(bucket=self.bucket.name, schema=self.name, next_key=next_key, max_keys=batch_size, txid=self.tx.txid)
+            _, curr_schemas, next_key, is_truncated, _ = self.tx._rpc.api.list_schemas(
+                bucket=self.bucket.name, schema=self.name, next_key=next_key,
+                max_keys=batch_size, txid=self.tx.txid
+            )
             result.extend(schema.Schema(name=self._subschema_full_name(name), bucket=self.bucket) for name, *_ in curr_schemas)
             if not is_truncated:
                 break
@@ -135,11 +137,12 @@ class Schema:
         name_prefix = table_name if table_name else ""
         exact_match = bool(table_name)
         while True:
-            _bucket_name, _schema_name, curr_tables, next_key, is_truncated, _ = \
-                self.tx._rpc.api.list_tables(
-                    bucket=self.bucket.name, schema=self.name, next_key=next_key, max_keys=page_size, txid=self.tx.active_txid,
-                    exact_match=exact_match, name_prefix=name_prefix, include_list_stats=exact_match)
-            if not curr_tables:
+            _, _, curr_tables, next_key, is_truncated, _ = self.tx._rpc.api.list_tables(
+                bucket=self.bucket.name, schema=self.name, next_key=next_key, max_keys=page_size, txid=self.tx.active_txid,
+                exact_match=exact_match, name_prefix=name_prefix, include_list_stats=exact_match
+            )
+
+            if not curr_tables:  # Is this a bug? should be on is_truncated
                 break
             yield from curr_tables
             if not is_truncated:

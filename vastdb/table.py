@@ -1092,8 +1092,7 @@ class Projection:
         columns = []
         next_key = 0
         while True:
-            curr_columns, next_key, is_truncated, _count, _ = \
-                self.tx._rpc.api.list_projection_columns(
+            curr_columns, next_key, is_truncated, _ = self.tx._rpc.api.list_projection_columns(
                     self.table_metadata.ref.bucket,
                     self.table_metadata.ref.schema,
                     self.table_metadata.ref.table,
@@ -1105,7 +1104,7 @@ class Projection:
             columns.extend(curr_columns)
             if not is_truncated:
                 break
-        self.arrow_schema = pa.schema([(col[0], col[1]) for col in columns])
+        self.arrow_schema = pa.schema(columns)
         return self.arrow_schema
 
     def rename(self, new_name: str) -> None:
