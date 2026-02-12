@@ -972,12 +972,15 @@ class VastdbApi:
     # we expect the vast version to be <major>.<minor>.<patch>.<protocol>
     VAST_VERSION_REGEX = re.compile(r'^vast (\d+\.\d+\.\d+\.\d+)$')
 
-    def __init__(self, endpoint, access_key, secret_key,
+    def __init__(self, endpoint: str, access_key: str, secret_key: str,
                  *,
-                 ssl_verify=True,
+                 max_entities_per_page: int,
+                 ssl_verify: bool = True,
                  timeout=None,
                  backoff_config: Optional[BackoffConfig] = None,
-                 version_check=True):
+                 version_check: bool = True):
+        if max_entities_per_page <= 0:
+            raise ValueError("Max entities per page should be positive")
 
         from . import version  # import lazily here (to avoid circular dependencies)
         self.client_sdk_version = f"VAST Database Python SDK {version()} - 2024 (c)"
@@ -987,7 +990,7 @@ class VastdbApi:
         self.secret_key = secret_key
 
         self.timeout = timeout
-        self.default_max_list_columns_page_size = 1000
+        self._max_entities_per_page = max_entities_per_page
         self._session = requests.Session()
         self._session.verify = ssl_verify
         self._session.headers['user-agent'] = self.client_sdk_version
@@ -1050,11 +1053,12 @@ class VastdbApi:
         """Make sure that the connections closed."""
         self._session.close()
 
-    def with_endpoint(self, endpoint) -> 'VastdbApi':
+    def with_endpoint(self, endpoint: str) -> 'VastdbApi':
         """Open a new session for targeting a specific endpoint."""
         return VastdbApi(endpoint=endpoint,
             access_key=self.access_key,
             secret_key=self.secret_key,
+            max_entities_per_page=self._max_entities_per_page,
             ssl_verify=self._session.verify,
             timeout=self.timeout,
             backoff_config=self.backoff_config,
@@ -1178,7 +1182,10 @@ class VastdbApi:
             url=self._url(bucket=bucket, schema=name, command="schema"),
             headers=headers)
 
-    def list_schemas(self, bucket: str, schema: str = "", txid: int = 0, client_tags=[], max_keys: int = 1000,
+    def _max_keys(self, max_keys: Optional[int]) -> int:
+        return max_keys if max_keys is not None else self._max_entities_per_page
+
+    def list_schemas(self, bucket: str, schema: str = "", txid: int = 0, client_tags=[], max_keys: Optional[int] = None,
                      next_key: int = 0, name_prefix: str = "", exact_match: bool = False,
                      count_only: bool = False) -> tuple[str, list[tuple[str, str]], int, bool, int]:
         """
@@ -1195,7 +1202,7 @@ class VastdbApi:
         The List will return the list in flatbuf format
         """
         headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
-        headers['tabular-max-keys'] = str(max_keys)
+        headers['tabular-max-keys'] = str(self._max_keys(max_keys))
         headers['tabular-next-key'] = str(next_key)
         if exact_match:
             headers['tabular-name-exact-match'] = name_prefix
@@ -1228,10 +1235,16 @@ class VastdbApi:
 
         return bucket_name, schemas, next_key, is_truncated, count
 
-    def list_snapshots(self, bucket: str, max_keys: int = 1000, next_token=None,
+    def list_snapshots(self, bucket: str, max_keys: Optional[int] = None, next_token=None,
                        name_prefix: str = '') -> tuple[list[str], bool, Any]:
         next_token = next_token or ''
-        url_params = {'list_type': '2', 'prefix': '.snapshot/' + name_prefix, 'delimiter': '/', 'max_keys': str(max_keys)}
+        url_params = {
+            'list_type': '2',
+            'prefix': '.snapshot/' + name_prefix,
+            'delimiter': '/',
+            'max_keys': str(self._max_keys(max_keys))
+        }
+
         if next_token:
             url_params['continuation-token'] = next_token
 
@@ -1467,7 +1480,7 @@ class VastdbApi:
             url=self._url(bucket=bucket, schema=schema, table=name, command="table", url_params=url_params),
             headers=headers)
 
-    def _list_tables_raw(self, bucket: str, schema: str, txid: int = 0, client_tags=[], max_keys: int = 1000,
+    def _list_tables_raw(self, bucket: str, schema: str, txid: int = 0, client_tags=[], max_keys: Optional[int] = None,
                          next_key: int = 0, name_prefix: str = "", exact_match: bool = False,
                          include_list_stats: bool = False, count_only: bool = False) -> tuple[list_tables, int, bool, int]:
         """
@@ -1479,7 +1492,7 @@ class VastdbApi:
         tabular-next-key: NextKey (Name)
         """
         headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
-        headers['tabular-max-keys'] = str(max_keys)
+        headers['tabular-max-keys'] = str(self._max_keys(max_keys))
         headers['tabular-next-key'] = str(next_key)
         if exact_match:
             headers['tabular-name-exact-match'] = name_prefix
@@ -1503,7 +1516,7 @@ class VastdbApi:
         return lists, next_key, is_truncated, count
 
     def list_tables(self, bucket: str, schema: str, txid: int = 0, client_tags=[],
-                              max_keys: int = 1000, next_key: int = 0, name_prefix: str = "", exact_match: bool = False,
+                              max_keys: Optional[int] = None, next_key: int = 0, name_prefix: str = "", exact_match: bool = False,
                               include_list_stats: bool = False, count_only: bool = False) -> tuple[str, str, list[TableInfo], int, bool, int]:
         tables = []
         lists, next_key, is_truncated, count = self._list_tables_raw(bucket, schema, txid=txid, client_tags=client_tags, max_keys=max_keys,
@@ -1608,7 +1621,7 @@ class VastdbApi:
             data=serialized_schema, headers=headers)
 
     def list_columns(self, command: str, bucket: str, schema: str, table: str, *, txid=0,
-                               client_tags=None, max_keys=None, next_key: int = 0, count_only: bool = False,
+                               client_tags=None, max_keys: Optional[int] = None, next_key: int = 0, count_only: bool = False,
                                name_prefix: str = "", exact_match: bool = False, bc_list_internals: bool = False,
                                list_imports_table: bool = False) -> tuple[list[pa.Field], int, bool, int]:
         """
@@ -1621,11 +1634,10 @@ class VastdbApi:
 
         To list the columns of the internal vastdb-imported-objects table, set list_import_table=True
         """
-        max_keys = max_keys or self.default_max_list_columns_page_size
         client_tags = client_tags or []
 
         headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
-        headers['tabular-max-keys'] = str(max_keys)
+        headers['tabular-max-keys'] = str(self._max_keys(max_keys))
         headers['tabular-next-key'] = str(next_key)
         headers['tabular-list-count-only'] = str(count_only)
         if bc_list_internals:
@@ -1651,7 +1663,7 @@ class VastdbApi:
         return columns, next_key, is_truncated, count
 
     def list_all_columns(self, bucket: str, schema: str, table: str, *, sorted_columns: bool, txid=0, client_tags=None,
-                         name_prefix: str = "", exact_match: bool = False,
+                         max_keys: Optional[int] = None, name_prefix: str = "", exact_match: bool = False,
                          bc_list_internals: bool = False, list_imports_table: bool = False) -> list[pa.Field]:
         fields = []
         command = "sorted-columns" if sorted_columns else "column"
@@ -1660,7 +1672,7 @@ class VastdbApi:
         while True:
             cur_columns, next_key, is_truncated, _ = self.list_columns(
                 command, bucket, schema, table, txid=txid, next_key=next_key,
-                name_prefix=name_prefix, exact_match=exact_match, client_tags=client_tags,
+                name_prefix=name_prefix, exact_match=exact_match, client_tags=client_tags, max_keys=max_keys,
                 bc_list_internals=bc_list_internals, list_imports_table=list_imports_table,
             )
             fields.extend(cur_columns)
@@ -2386,7 +2398,7 @@ class VastdbApi:
 
         return result
 
-    def list_projections(self, bucket: str, schema: str, table: str, txid: int = 0, client_tags=[], max_keys: int = 1000,
+    def list_projections(self, bucket: str, schema: str, table: str, txid: int = 0, client_tags=[], max_keys: Optional[int] = None,
                          next_key: int = 0, name_prefix: str = "", exact_match: bool = False,
                          include_list_stats: bool = False, count_only: bool = False) -> tuple[str, str, str, list[TableInfo], int, bool, int]:
         """
@@ -2398,7 +2410,7 @@ class VastdbApi:
         tabular-next-key: NextKey (Name)
         """
         headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
-        headers['tabular-max-keys'] = str(max_keys)
+        headers['tabular-max-keys'] = str(self._max_keys(max_keys))
         headers['tabular-next-key'] = str(next_key)
         if exact_match:
             headers['tabular-name-exact-match'] = name_prefix
@@ -2431,7 +2443,7 @@ class VastdbApi:
         return bucket_name, schema_name, table_name, projections, next_key, is_truncated, count
 
     def list_projection_columns(self, bucket: str, schema: str, table: str, projection, txid: int = 0, client_tags=[],
-                                max_keys: int = 1000, next_key: int = 0, count_only: bool = False, name_prefix: str = "",
+                                max_keys: Optional[int] = None, next_key: int = 0, count_only: bool = False, name_prefix: str = "",
                                 exact_match: bool = False) -> tuple[list[pa.Field], int, bool, int]:
         """
         GET /mybucket/myschema/mytable?projection-columns HTTP/1.1
@@ -2444,7 +2456,7 @@ class VastdbApi:
         client_tags = client_tags or []
 
         headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
-        headers['tabular-max-keys'] = str(max_keys)
+        headers['tabular-max-keys'] = str(self._max_keys(max_keys))
         headers['tabular-next-key'] = str(next_key)
         headers['tabular-list-count-only'] = str(count_only)
 

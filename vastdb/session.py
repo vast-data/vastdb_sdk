@@ -20,9 +20,10 @@ if TYPE_CHECKING:
 class Session:
     """VAST database session."""
 
-    def __init__(self, access=None, secret=None, endpoint=None,
+    def __init__(self, access: Optional[str] = None, secret: Optional[str] = None, endpoint: Optional[str] = None,
                  *,
-                 ssl_verify=True,
+                 max_entities_per_page: int = 10_000,
+                 ssl_verify: bool = True,
                  timeout=None,
                  backoff_config: Optional["BackoffConfig"] = None,
                  adbc_driver: Optional[AdbcDriver] = None,
@@ -45,6 +46,7 @@ class Session:
             endpoint=self.endpoint,
             access_key=self.access,
             secret_key=self.secret,
+            max_entities_per_page=max_entities_per_page,
             ssl_verify=ssl_verify,
             timeout=timeout,
             backoff_config=backoff_config)

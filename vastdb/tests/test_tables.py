@@ -1422,3 +1422,34 @@ def test_select_splits_sanity(session, clean_bucket_name, check):
         actual = pa.concat_tables(splits_reader_tables).combine_chunks()
 
         check.is_true(to_df(actual).equals(to_df(expected)))
+
+
+def test_list_columns_with_pagination(session: Session, clean_bucket_name: str):
+    schema_name = "s_loading_columns"
+    table_name = "t"
+    original_page_size = session.api._max_entities_per_page
+    # makes it that trying to list all columns in one rpc fails due to rpc size limit
+    columns_count = 64_000
+    column_names = [f"long_f_name{i}" for i in range(columns_count)]
+    schema = pa.schema([(name, pa.uint32()) for name in column_names])
+
+    with session.transaction() as tx:
+        s = tx.bucket(clean_bucket_name).create_schema(schema_name)
+        t = s.create_table(table_name, schema)
+        assert len(t.columns()) == columns_count
+
+    with session.transaction() as tx:
+        # causes a list columns
+        t = tx.bucket(clean_bucket_name).schema(schema_name).table(table_name)
+        assert len(t.arrow_schema) == columns_count
+        assert t.columns().equals(schema)
+
+    try:
+        session.api._max_entities_per_page = columns_count
+
+        with session.transaction() as tx:
+            with pytest.raises(errors.BadRequest, match="list column result size=.*is too long"):
+                # causes a list columns
+                t = tx.bucket(clean_bucket_name).schema(schema_name).table(table_name)
+    finally:
+        session.api._max_entities_per_page = original_page_size
