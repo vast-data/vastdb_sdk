@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2.0.12] (2026-02-12)
+[2.0.12]: https://github.com/vast-data/vastdb_sdk/compare/v2.0.11...v2.0.12
+
+### Added
+- Support for loading column names only in `Table.columns()` and `Table.reload_schema()`
+- Support for configuration the page size for entities (schemas, tables, columns, etc...) pagination in `Session()`
+- Support specifying data_endpoints config for import files
+
 ## [2.0.11] (2026-02-05)
 [2.0.11]: https://github.com/vast-data/vastdb_sdk/compare/v2.0.10...v2.0.11
 - revert 2.0.7 and 2.0.8

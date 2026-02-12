@@ -1623,7 +1623,7 @@ class VastdbApi:
     def list_columns(self, command: str, bucket: str, schema: str, table: str, *, txid=0,
                                client_tags=None, max_keys: Optional[int] = None, next_key: int = 0, count_only: bool = False,
                                name_prefix: str = "", exact_match: bool = False, bc_list_internals: bool = False,
-                               list_imports_table: bool = False) -> tuple[list[pa.Field], int, bool, int]:
+                               list_imports_table: bool = False, names_only: bool = False) -> tuple[list[pa.Field], int, bool, int]:
         """
         GET /mybucket/myschema/mytable?columns HTTP/1.1
         tabular-txid: TransactionId
@@ -1640,6 +1640,10 @@ class VastdbApi:
         headers['tabular-max-keys'] = str(self._max_keys(max_keys))
         headers['tabular-next-key'] = str(next_key)
         headers['tabular-list-count-only'] = str(count_only)
+
+        if names_only:
+            headers['tabular-only-column-names'] = "true"
+
         if bc_list_internals:
             headers['tabular-bc-list-internal-col'] = "true"
 
@@ -1664,7 +1668,7 @@ class VastdbApi:
 
     def list_all_columns(self, bucket: str, schema: str, table: str, *, sorted_columns: bool, txid=0, client_tags=None,
                          max_keys: Optional[int] = None, name_prefix: str = "", exact_match: bool = False,
-                         bc_list_internals: bool = False, list_imports_table: bool = False) -> list[pa.Field]:
+                         bc_list_internals: bool = False, list_imports_table: bool = False, names_only: bool = False) -> list[pa.Field]:
         fields = []
         command = "sorted-columns" if sorted_columns else "column"
         next_key = 0
@@ -1673,7 +1677,7 @@ class VastdbApi:
             cur_columns, next_key, is_truncated, _ = self.list_columns(
                 command, bucket, schema, table, txid=txid, next_key=next_key,
                 name_prefix=name_prefix, exact_match=exact_match, client_tags=client_tags, max_keys=max_keys,
-                bc_list_internals=bc_list_internals, list_imports_table=list_imports_table,
+                bc_list_internals=bc_list_internals, list_imports_table=list_imports_table, names_only=names_only
             )
             fields.extend(cur_columns)
 

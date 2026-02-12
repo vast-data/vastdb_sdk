@@ -21,6 +21,7 @@ from vastdb import errors
 from vastdb._internal import SortingKey
 from vastdb.session import Session
 from vastdb.table import INTERNAL_ROW_ID, MAX_COLUMN_IN_BATCH, QueryConfig
+from vastdb.table_metadata import TableMetadata, TableRef
 
 from .util import assert_row_ids_ascending_on_first_insertion_to_table, prepare_data
 
@@ -1443,6 +1444,7 @@ def test_list_columns_with_pagination(session: Session, clean_bucket_name: str):
         t = tx.bucket(clean_bucket_name).schema(schema_name).table(table_name)
         assert len(t.arrow_schema) == columns_count
         assert t.columns().equals(schema)
+        assert t.retrieve_column_names() == column_names
 
     try:
         session.api._max_entities_per_page = columns_count
@@ -1451,5 +1453,10 @@ def test_list_columns_with_pagination(session: Session, clean_bucket_name: str):
             with pytest.raises(errors.BadRequest, match="list column result size=.*is too long"):
                 # causes a list columns
                 t = tx.bucket(clean_bucket_name).schema(schema_name).table(table_name)
+
+            t = tx.table_from_metadata(TableMetadata(TableRef(clean_bucket_name, schema_name, table_name)))
+            # names only requires less wire capacity so should succeed in one rpc
+            assert len(t.retrieve_column_names()) == columns_count
+            assert t.arrow_schema is None
     finally:
         session.api._max_entities_per_page = original_page_size

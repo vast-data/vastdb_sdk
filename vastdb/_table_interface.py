@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Iterable, Optional, TypeAlias, Union
+from typing import TYPE_CHECKING, Iterable, Optional, Sequence, TypeAlias, Union
 
 import ibis
 import pyarrow as pa
@@ -117,6 +117,11 @@ class ITable(ABC):
     @abstractmethod
     def reload_schema(self) -> None:
         """Reload Arrow Schema."""
+        pass
+
+    @abstractmethod
+    def retrieve_column_names(self) -> Sequence[str]:
+        """Fetch column names."""
         pass
 
     @abstractmethod

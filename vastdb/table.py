@@ -16,6 +16,7 @@ from typing import (
     Callable,
     Iterable,
     Optional,
+    Sequence,
     Union,
 )
 
@@ -225,6 +226,19 @@ class TableInTransaction(ITable):
     def reload_schema(self) -> None:
         """Reload Arrow Schema."""
         self._metadata.load_schema(self._tx)
+
+    def retrieve_column_names(self) -> Sequence[str]:
+        """Fetch column names."""
+        columns = self._tx._rpc.api.list_all_columns(
+            self.ref.bucket,
+            self.ref.schema,
+            self.ref.table,
+            sorted_columns=False,
+            txid=self._tx.active_txid,
+            list_imports_table=self._metadata.is_imports_table,
+            names_only=True
+        )
+        return [f.name for f in columns]
 
     def reload_stats(self) -> None:
         """Reload Table Stats."""
