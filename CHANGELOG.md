@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2.0.13] (2026-02-15)
+[2.0.13]: https://github.com/vast-data/vastdb_sdk/compare/v2.0.12...v2.0.13
+
+### Fixed
+- vast_protobuf import error
+
 ## [2.0.12] (2026-02-12)
 [2.0.12]: https://github.com/vast-data/vastdb_sdk/compare/v2.0.11...v2.0.12
 
