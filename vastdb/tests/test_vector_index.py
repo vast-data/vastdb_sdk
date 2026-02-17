@@ -26,6 +26,11 @@ def test_create_table_with_vector_index_metadata(session: Session,
                                                  clean_bucket_name: str,
                                                  table_name: str,
                                                  vector_index: Optional[VectorIndexSpec]):
+    if vector_index is not None:
+        try:
+            session.features.check_vector()
+        except errors.NotSupportedVersion:
+            pytest.skip("Vector index is not supported on this vast server version")
     """Test that table creation and stats retrieval work correctly with vector index metadata."""
     schema_name = "schema1"
 
@@ -91,6 +96,11 @@ def test_create_table_with_invalid_vector_index(session: Session,
                                                 vector_index: VectorIndexSpec,
                                                 expected_error: str):
     """Test that table creation fails with appropriate error messages for invalid vector index parameters."""
+    if vector_index is not None:
+        try:
+            session.features.check_vector()
+        except errors.NotSupportedVersion:
+            pytest.skip("Vector index is not supported on this vast server version")
     schema_name = "schema1"
 
     with session.transaction() as tx:
@@ -127,6 +137,11 @@ def test_create_table_with_invalid_vector_index(session: Session,
 @pytest.mark.skip("Vector index is changing - so this is broken for now")
 def test_vector_index_metadata_from_stats(session: Session, clean_bucket_name: str):
     """Test that vector index metadata is correctly retrieved from table stats."""
+    try:
+        session.features.check_vector()
+    except errors.NotSupportedVersion:
+        pytest.skip("Vector index is not supported on this vast server version")
+
     schema_name = "schema1"
     table_name = "vector_table"
 

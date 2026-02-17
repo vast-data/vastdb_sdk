@@ -47,6 +47,10 @@ class Features:
             "Blob expansion requires 5.5+ VAST release",
             vast_version >= (5, 5))
 
+        self.check_vector = self._check(
+            "Vector tables require 5.5+ VAST release",
+            vast_version >= (5, 5))
+
     def _check(self, msg, supported):
         log.debug("%s (current version is %s): supported=%s", msg, self.vast_version, supported)
         if not supported:

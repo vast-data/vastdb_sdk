@@ -14,6 +14,11 @@ log = logging.getLogger(__name__)
 
 def test_basic_blob_expansion(session: Session, clean_bucket_name: str):
     """Test creating, retrieving, and dropping blob expansions."""
+    try:
+        session.features.check_blob_expansion()
+    except errors.NotSupportedVersion:
+        return
+
     with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).create_schema('s1')
 
@@ -59,6 +64,11 @@ def test_basic_blob_expansion(session: Session, clean_bucket_name: str):
 
 def test_blob_expansion_add_columns(session: Session, clean_bucket_name: str):
     """Test adding columns to an existing blob expansion."""
+    try:
+        session.features.check_blob_expansion()
+    except errors.NotSupportedVersion:
+        return
+
     with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).create_schema('s1')
 
@@ -101,6 +111,11 @@ def test_blob_expansion_add_columns(session: Session, clean_bucket_name: str):
 
 def test_blob_expansion_add_already_added_columns(session: Session, clean_bucket_name: str):
     """Test that adding already existing columns is idempotent (succeeds silently)."""
+    try:
+        session.features.check_blob_expansion()
+    except errors.NotSupportedVersion:
+        return
+
     with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).create_schema('s1')
 
@@ -133,6 +148,11 @@ def test_blob_expansion_add_already_added_columns(session: Session, clean_bucket
 
 def test_blob_expansion_drop_already_dropped_columns(session: Session, clean_bucket_name: str):
     """Test that dropping already dropped columns is idempotent (succeeds silently)."""
+    try:
+        session.features.check_blob_expansion()
+    except errors.NotSupportedVersion:
+        return
+
     with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).create_schema('s1')
 
@@ -173,6 +193,11 @@ def test_blob_expansion_drop_already_dropped_columns(session: Session, clean_buc
 
 def test_blob_expansion_drop_non_existent_columns(session: Session, clean_bucket_name: str):
     """Test that dropping non-existent columns is idempotent (succeeds silently)."""
+    try:
+        session.features.check_blob_expansion()
+    except errors.NotSupportedVersion:
+        return
+
     with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).create_schema('s1')
 
@@ -209,6 +234,11 @@ def test_blob_expansion_drop_non_existent_columns(session: Session, clean_bucket
 
 def test_blob_expansion_drop_columns(session: Session, clean_bucket_name: str):
     """Test dropping columns from an existing blob expansion."""
+    try:
+        session.features.check_blob_expansion()
+    except errors.NotSupportedVersion:
+        return
+
     with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).create_schema('s1')
 
@@ -253,6 +283,11 @@ def test_blob_expansion_drop_columns(session: Session, clean_bucket_name: str):
 
 def test_blob_expansion_with_copy_source_column(session: Session, clean_bucket_name: str):
     """Test blob expansion with copy_source_column option."""
+    try:
+        session.features.check_blob_expansion()
+    except errors.NotSupportedVersion:
+        return
+
     with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).create_schema('s1')
 
@@ -284,6 +319,11 @@ def test_blob_expansion_with_copy_source_column(session: Session, clean_bucket_n
 
 def test_blob_expansion_missing_error(session: Session, clean_bucket_name: str):
     """Test that accessing non-existent blob expansion raises appropriate error."""
+    try:
+        session.features.check_blob_expansion()
+    except errors.NotSupportedVersion:
+        return
+
     with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).create_schema('s1')
 
@@ -305,6 +345,11 @@ def test_blob_expansion_missing_error(session: Session, clean_bucket_name: str):
 
 def test_blob_expansion_nested_schema(session: Session, clean_bucket_name: str):
     """Test blob expansion with nested/complex schema types."""
+    try:
+        session.features.check_blob_expansion()
+    except errors.NotSupportedVersion:
+        return
+
     with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).create_schema('s1')
 
@@ -341,6 +386,11 @@ def test_blob_expansion_nested_schema(session: Session, clean_bucket_name: str):
 
 def test_blob_expansions_not_implemented(session: Session, clean_bucket_name: str):
     """Test that blob_expansions() list method is not implemented."""
+    try:
+        session.features.check_blob_expansion()
+    except errors.NotSupportedVersion:
+        return
+
     with session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).create_schema('s1')
 
