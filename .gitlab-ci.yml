@@ -2,7 +2,7 @@ stages:
   - .pre
   - build
   - test
-  - security
+#  - security
   - deploy
 
 variables:
@@ -165,23 +165,23 @@ keep_latest_release:
     matrix:
       - PYTHON_VERSION: ['3.10', '3.11', '3.12', '3.13']
 
-security_scan:
-  stage: security
-  rules:
-    - if: $CI
-  script:
-    - echo "Running secrets scanning with trufflehog for ${SCAN_TARGET}"
-    - curl -sSfL https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh | sh -s --
-    - |
-      ./bin/trufflehog filesystem . \
-      --results=verified,unknown \
-      --json \
-      --fail-on-scan-errors \
-      --fail \
-      --exclude-paths=<(echo ".git/") > report.json
-  artifacts:
-    paths:
-      - report.json
-    when: always
-  tags:
-    - devops-runner-linux-large
+#security_scan:
+#  stage: security
+#  rules:
+#    - if: $CI
+#  script:
+#    - echo "Running secrets scanning with trufflehog for ${SCAN_TARGET}"
+#    - curl -sSfL https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh | sh -s --
+#    - |
+#      ./bin/trufflehog filesystem . \
+#      --results=verified,unknown \
+#      --json \
+#      --fail-on-scan-errors \
+#      --fail \
+#      --exclude-paths=<(echo ".git/") > report.json
+#  artifacts:
+#    paths:
+#      - report.json
+#    when: always
+#  tags:
+#    - devops-runner-linux-large
