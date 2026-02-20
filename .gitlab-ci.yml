@@ -44,7 +44,7 @@ build:
 
   parallel:
     matrix:
-      - PYTHON_VERSION: ['3.10', '3.11', '3.12', '3.13']
+      - PYTHON_VERSION: ['3.10', '3.11', '3.12', '3.13', '3.14']
 
 
 test_orion [branch]:
@@ -67,7 +67,7 @@ upload_to_artifactory:
     - vast-dev-builder
 
   variables:
-    PYSDK_IMAGE: ${PYSDK_IMAGE_PREFIX}-3.13 # use latest Python image for deployment
+    PYSDK_IMAGE: ${PYSDK_IMAGE_PREFIX}-3.14 # use latest Python image for deployment
 
   script:
   - echo "Publishing artifacts from $PYSDK_IMAGE..."
@@ -88,7 +88,7 @@ upload_to_pypi:
     - vast-dev-builder
 
   variables:
-    PYSDK_IMAGE: ${PYSDK_IMAGE_PREFIX}-3.13 # use latest Python image for deployment
+    PYSDK_IMAGE: ${PYSDK_IMAGE_PREFIX}-3.14 # use latest Python image for deployment
 
   when: manual
   rules:
@@ -128,7 +128,7 @@ keep_latest_dev:
 
   parallel:
     matrix:
-      - PYTHON_VERSION: ['3.10', '3.11', '3.12', '3.13']
+      - PYTHON_VERSION: ['3.10', '3.11', '3.12', '3.13', '3.14']
 
 
 # Keep images of released SDK versions available (so we can run them from Orion's CI on demand)
@@ -155,4 +155,4 @@ keep_latest_release:
 
   parallel:
     matrix:
-      - PYTHON_VERSION: ['3.10', '3.11', '3.12', '3.13']
+      - PYTHON_VERSION: ['3.10', '3.11', '3.12', '3.13', '3.14']
