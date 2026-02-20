@@ -1,6 +1,6 @@
 aws-requests-auth
 ibis-framework~=10.1
-pyarrow~=18.0
+pyarrow>=18.0
 pyarrow-hotfix==0.7
 flatbuffers
 packaging
