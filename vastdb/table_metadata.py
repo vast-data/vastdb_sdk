@@ -151,7 +151,6 @@ class TableMetadata:
 
     def load_sorted_columns(self, tx: "Transaction") -> None:
         """Return sorted columns' metadata."""
-        schema = pa.schema([])
         try:
             schema = tx._rpc.api.list_all_columns(
                 self.ref.bucket,
@@ -161,8 +160,7 @@ class TableMetadata:
                 txid=tx.active_txid,
                 list_imports_table=self.is_imports_table
             )
-        except errors.BadRequest:
-            raise
+            self._sorted_columns = [f for f in schema]
         except errors.InternalServerError as ise:
             log.warning(
                 "Failed to get the sorted columns Elysium might not be supported: %s",
@@ -172,8 +170,6 @@ class TableMetadata:
         except errors.NotSupportedVersion:
             log.warning("Failed to get the sorted columns, Elysium not supported")
             raise
-        finally:
-            self._sorted_columns = [f for f in schema]
 
         partition_keys: list[PartitionKey] = []
 

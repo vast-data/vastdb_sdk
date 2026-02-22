@@ -350,7 +350,7 @@ class TableInTransaction(ITable):
 
     def sorted_columns(self) -> list[pa.Field]:
         """Return sorted columns' metadata."""
-        return self._metadata.sorted_columns
+        return self._metadata.sorted_columns.copy()
 
     def _assert_not_imports_table(self):
         if self._metadata.is_imports_table:
@@ -1115,13 +1115,9 @@ class Table(TableInTransaction):
         self.reload_schema()
         return self._metadata.arrow_schema
 
-    def sorted_columns(self) -> list:
+    def sorted_columns(self) -> list[pa.Field]:
         """Return sorted columns' metadata."""
-        try:
-            self.reload_sorted_columns()
-        except Exception:
-            pass
-
+        self.reload_sorted_columns()
         return self._metadata.sorted_columns
 
     def get_stats(self) -> TableStats:
