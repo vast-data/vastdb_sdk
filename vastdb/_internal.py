@@ -1458,9 +1458,9 @@ class VastdbApi:
         Table properties
         """
         if len(sorting_key) > 0 and isinstance(sorting_key[0], str):
-            arrow_schema = pa.schema(self.list_all_columns(
+            arrow_schema = self.list_all_columns(
                 bucket, schema, name, sorted_columns=False, txid=txid
-            ))
+            )
             sorting_key = VastdbApi._convert_column_names_to_indices(arrow_schema, cast(list[str], sorting_key))
 
         builder = flatbuffers.Builder(1024)
@@ -1683,14 +1683,13 @@ class VastdbApi:
         res_headers = res.headers
         next_key = int(res_headers['tabular-next-key'])
         is_truncated = res_headers['tabular-is-truncated'] == 'true'
-        columns = [] if count_only else pa.ipc.open_stream(res.content).schema
+        columns = pa.schema([]) if count_only else pa.ipc.open_stream(res.content).schema
         count = int(res_headers['tabular-list-count']) if count_only else len(columns)
-
         return columns, next_key, is_truncated, count
 
     def list_all_columns(self, bucket: str, schema: str, table: str, *, sorted_columns: bool, txid=0, client_tags=None,
                          max_keys: Optional[int] = None, name_prefix: str = "", exact_match: bool = False,
-                         bc_list_internals: bool = False, list_imports_table: bool = False, names_only: bool = False) -> list[pa.Field]:
+                         bc_list_internals: bool = False, list_imports_table: bool = False, names_only: bool = False) -> pa.Schema:
         fields = []
         command = "sorted-columns" if sorted_columns else "column"
         next_key = 0
@@ -1706,7 +1705,7 @@ class VastdbApi:
             if not is_truncated:
                 break
 
-        return fields
+        return pa.schema(fields)
 
     def head_bucket(self, bucket_name):
         """

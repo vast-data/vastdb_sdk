@@ -135,7 +135,7 @@ class TableMetadata:
 
     def load_schema(self, tx: "Transaction") -> None:
         """Load/Reload table schema."""
-        fields = tx._rpc.api.list_all_columns(
+        self.arrow_schema = tx._rpc.api.list_all_columns(
             self.ref.bucket,
             self.ref.schema,
             self.ref.table,
@@ -146,15 +146,14 @@ class TableMetadata:
 
         # This is because ibis doesn't support fixed binary
         if self._ref.table.endswith("___VAST_PARTITIONS"):
-            fields = [f for f in fields if f.name.startswith("keys_") and f.name != "keys_hash"]
-
-        self.arrow_schema = pa.schema(fields)
+            fields = [f for f in self.arrow_schema if f.name.startswith("keys_") and f.name != "keys_hash"]
+            self.arrow_schema = pa.schema(fields, metadata=self.arrow_schema.metadata)
 
     def load_sorted_columns(self, tx: "Transaction") -> None:
         """Return sorted columns' metadata."""
-        fields = []
+        schema = pa.schema([])
         try:
-            fields = tx._rpc.api.list_all_columns(
+            schema = tx._rpc.api.list_all_columns(
                 self.ref.bucket,
                 self.ref.schema,
                 self.ref.table,
@@ -174,7 +173,7 @@ class TableMetadata:
             log.warning("Failed to get the sorted columns, Elysium not supported")
             raise
         finally:
-            self._sorted_columns = fields
+            self._sorted_columns = [f for f in schema]
 
         partition_keys: list[PartitionKey] = []
 

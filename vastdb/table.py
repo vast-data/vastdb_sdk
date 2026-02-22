@@ -315,7 +315,7 @@ class TableInTransaction(ITable):
 
     def retrieve_column_names(self) -> Sequence[str]:
         """Fetch column names."""
-        columns = self._tx._rpc.api.list_all_columns(
+        schema = self._tx._rpc.api.list_all_columns(
             self.ref.bucket,
             self.ref.schema,
             self.ref.table,
@@ -324,7 +324,7 @@ class TableInTransaction(ITable):
             list_imports_table=self._metadata.is_imports_table,
             names_only=True
         )
-        return [f.name for f in columns]
+        return [f.name for f in schema]
 
     def reload_stats(self) -> None:
         """Reload Table Stats."""
