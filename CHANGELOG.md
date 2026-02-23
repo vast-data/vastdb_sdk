@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 [2.0.14]: https://github.com/vast-data/vastdb_sdk/compare/v2.0.13...v2.0.14
 
 ### Added
-- Support for creating partitioned using a `PartitionSpec`
+- Support for creating a partitioned table using a `PartitionSpec`
 - Support for querying the partitions using the `partitions()` method of `ITable`
 - Support for deleting partitions usinng the `delete_partitions()` method of `ITable`
 - `ITable::select()` support for querying a partitioned table - NO API CHANGE
