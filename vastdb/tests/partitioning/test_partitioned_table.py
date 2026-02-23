@@ -98,13 +98,12 @@ def _create_partition_spec(
 
 
 def _transform_table(table: pa.Table, column: str, transform) -> pa.Table:
-    post_transform_column_name = _post_transform_name(column, transform)
-    transform_fn = transform.pyarrow_transform(_DATA.schema.field(column).type)
-    transformed_column = transform_fn(table[post_transform_column_name])
-    table.schema.get_field_index(post_transform_column_name)
+    transform_fn = transform.pyarrow_transform(table.schema.field(column).type)
+    transformed_column = transform_fn(table[column])
+    table.schema.get_field_index(column)
     return table.set_column(
-        table.schema.get_field_index(post_transform_column_name),
-        post_transform_column_name,
+        table.schema.get_field_index(column),
+        column,
         transformed_column,
     )
 
@@ -139,7 +138,7 @@ def test_pit(
         .take((0, 2, 4))
         .rename_columns(["a", post_transform_column_name])
     )
-    expected_partitions = _transform_table(expected_partitions, column_name, transform)
+    expected_partitions = _transform_table(expected_partitions, post_transform_column_name, transform)
     schema_name = f"s_{column_name}"
     table_name = f"partitioned_table_{column_name}"
 
