@@ -38,7 +38,7 @@ class _ColumnMetadata(pydantic.BaseModel):
     partition_key_index: Optional[int] = pydantic.Field(alias="VAST:partition:key_index", default=None)
     partition_transform: Optional[str] = pydantic.Field(alias="VAST:partition:transform", default=None)
     partition_transform_arg: Optional[int] = pydantic.Field(
-        alias="VAST:partition:transform-arg", default=None
+        alias="VAST:partition:transform_arg", default=None
     )
 
     class Config:
@@ -184,8 +184,8 @@ class TableMetadata:
                         transform=parse_transform(column_metadata.transform_name),
                     )
                 )
-
-        self._partitioning = PartitionSpec(partition_keys=partition_keys)
+        if len(partition_keys) > 0:
+            self._partitioning = PartitionSpec(partition_keys=partition_keys)
 
     def load_stats(self, tx: "Transaction") -> None:
         """Load/Reload table stats."""
