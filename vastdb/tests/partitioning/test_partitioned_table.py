@@ -68,7 +68,7 @@ _TRANSFORMS: tuple[tuple[str, Transform], ...] = (
     ("b", IdentityTransform()),
     ("b", BucketTransform(4)),
     ("s", TruncateTransform(2)),
-    # ("d", DayTransform()),
+    ("d", DayTransform()),
     ("m", MonthTransform()),
     ("y", YearTransform()),
     ("h", HourTransform()),
@@ -137,6 +137,9 @@ def test_create_partitioned_table(
 def test_pit(
     session: Session, clean_bucket_name: str, column_name: str, transform: Transform
 ):
+    if isinstance(transform, DayTransform):
+        pytest.skip("Server currently returns a date type on the transformed column and not an int like iceberg")
+
     post_transform_column_name = _post_transform_name(column_name, transform)
     expected_partitions = (
         _DATA.select(["a", column_name])
