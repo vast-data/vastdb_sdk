@@ -4,14 +4,15 @@ import pyarrow as pa
 import pytest
 from pyarrow import compute as pc
 from pyiceberg.transforms import (
+    BucketTransform,
     DayTransform,
     HourTransform,
     IdentityTransform,
     MonthTransform,
     Transform,
+    TruncateTransform,
     YearTransform,
 )
-from pyiceberg.types import TimestampType
 
 from vastdb.partitioning import PartitionKey, PartitionSpec
 from vastdb.session import Session
@@ -31,7 +32,7 @@ _DATA = pa.Table.from_pydict(
     {
         "a": [1, 1, 2, 2, 3],
         "b": [4, 4, 6, 6, 7],
-        "s": ["a", "b", "c", "d", "e"],
+        "s": ["aaz", "aaz", "bbz", "bbz", "ccz"],
         "y": [
             datetime(2024, 1, 1),
             datetime(2024, 1, 1),
@@ -65,6 +66,8 @@ _DATA = pa.Table.from_pydict(
 )
 _TRANSFORMS: tuple[tuple[str, Transform], ...] = (
     ("b", IdentityTransform()),
+    ("b", BucketTransform(4)),
+    ("s", TruncateTransform(2)),
     # ("d", DayTransform()),
     ("m", MonthTransform()),
     ("y", YearTransform()),
@@ -75,6 +78,8 @@ _TRANSFORMS: tuple[tuple[str, Transform], ...] = (
 def _post_transform_name(column_name: str, transform: Transform) -> str:
     transform_suffix = {
         IdentityTransform: "",
+        BucketTransform: "_bucket",
+        TruncateTransform: "_trunc",
         HourTransform: "_hour",
         DayTransform: "_day",
         MonthTransform: "_month",
@@ -164,9 +169,11 @@ def test_pit(
         partitions = pa.Table.from_batches(list(pit.select()))
         assert expected_partitions.equals(partitions)
 
-        value_to_filter_by = transform.transform(TimestampType())(
-            _DATA[column_name][2].as_py()
-        )
+        column_type = _DATA.schema.field(column_name).type
+        transform_fn = transform.pyarrow_transform(column_type)
+        value_to_filter_by = transform_fn(
+            pa.array([_DATA[column_name][2]], type=column_type)
+        )[0].as_py()
 
         partitions = pa.Table.from_batches(
             list(

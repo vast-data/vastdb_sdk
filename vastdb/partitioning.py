@@ -5,7 +5,14 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Union
 
 import pyarrow as pa
-from pyiceberg.transforms import BucketTransform, IdentityTransform, Transform
+from pyiceberg.transforms import (
+    BucketTransform,
+    IdentityTransform,
+    Transform,
+    TruncateTransform,
+)
+
+from . import _internal
 
 
 @dataclass
@@ -27,15 +34,21 @@ class PartitionKey:
 
     def serialize(self, schema: pa.Schema) -> str:
         """Serialize INTERNAL protocol serialization."""
-        dict_repr: Dict[str, Union[int, str]] = {
-            "column-index": self._get_column_index_by_name(schema, self.column)
-        }
+        arg = None
 
-        if isinstance(self.transform, BucketTransform):
-            dict_repr["transform"] = "bucket"
-            dict_repr["transform-arg"] = self.transform.num_buckets
-        else:
-            dict_repr["transform"] = str(self.transform)
+        match self.transform:
+            case BucketTransform():
+                name, arg = _internal.VAST_BUCKET_PARTITION_TRANSFORM_NAME, self.transform.num_buckets
+            case TruncateTransform():
+                name, arg = _internal.VAST_TRUNCATE_PARTITION_TRANSFORM_NAME, self.transform.width
+            case _:
+                name = str(self.transform)
+
+        dict_repr: Dict[str, Union[int, str, None]] = {
+            "column-index": self._get_column_index_by_name(schema, self.column),
+            "transform": name,
+            "transform-arg": arg
+        }
 
         return json.dumps(dict_repr)
 

@@ -16,6 +16,8 @@ from vastdb._ibis_support import validate_ibis_support_schema
 from vastdb._internal import TableStats, VectorIndex
 from vastdb.partitioning import PartitionKey, PartitionSpec
 
+from . import _internal
+
 if TYPE_CHECKING:
     from .transaction import Transaction
 
@@ -178,10 +180,18 @@ class TableMetadata:
             column_metadata = _ColumnMetadata.model_validate(decoded_metadata)
 
             if column_metadata.transform_name is not None:
+                if column_metadata.transform_name in {
+                    _internal.VAST_BUCKET_PARTITION_TRANSFORM_NAME,
+                    _internal.VAST_TRUNCATE_PARTITION_TRANSFORM_NAME
+                }:
+                    transform_name_in_iceberg_format = f"{column_metadata.transform_name}[{column_metadata.partition_transform_arg}]"
+                else:
+                    transform_name_in_iceberg_format = column_metadata.transform_name
+
                 partition_keys.append(
                     PartitionKey(
                         column=sorted_column.name,
-                        transform=parse_transform(column_metadata.transform_name),
+                        transform=parse_transform(transform_name_in_iceberg_format),
                     )
                 )
         if len(partition_keys) > 0:
