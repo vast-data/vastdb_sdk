@@ -386,15 +386,13 @@ def test_data_engine_example(session: Session, clean_bucket_name: str):
         t = tx.bucket(clean_bucket_name).schema(schema_name).table(table_name)
         partitions = t.partitions()
 
-        for b in partitions.select(predicate=partitions["d_day"] < datetime(2025, 1, 3)):
+        for b in partitions.select(predicate=partitions["d_day"] < _DATA["d"][4].as_py()):
             t.delete_partitions(b, allow_non_acid=True)
 
     with session.transaction() as tx:
         t = tx.bucket(clean_bucket_name).schema(schema_name).table(table_name)
-        print(t.select().read_all())
-        print(_DATA.filter(pc.field("a") == 3))
         queried_data = t.select().read_all()
 
         # This is a patch for server bug that gives meta data as well
         queried_data = queried_data.select([name for name in _DATA.schema.names])
-        assert queried_data == _DATA.filter(pc.field("a") == 3)
+        assert queried_data == _DATA.filter(pc.field("d") == _DATA["d"][4])
