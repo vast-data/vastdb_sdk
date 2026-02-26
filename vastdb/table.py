@@ -802,6 +802,10 @@ class TableInTransaction(ITable):
         pit = _Partitions(self, include_pre_transform_columns=True)
         partition_spec = typing.cast(_PartitionSpec, self._metadata.partitioning)
 
+        if isinstance(predicate, ibis.common.deferred.Deferred):
+            # may raise if the predicate is invalid (e.g. wrong types / missing column)
+            predicate = predicate.resolve(self._metadata.ibis_table)
+
         if predicate is None:
             pit_predicate = None
         else:
