@@ -816,8 +816,9 @@ class TableInTransaction(ITable):
                 prefix = "" if is_identity else "pre_transform_"
                 return f"{prefix}keys_{index}"
 
-            fields_map = {k.pre_transform_name: pit[partition_key_to_pit_name_with_prefix(k.is_identity, i)] for i, k in enumerate(partition_spec.partition_keys)}
-            pit_predicate = _ibis_support.change_columns(pit_predicate, fields_map).to_expr()
+            if pit_predicate is not None:
+                fields_map = {k.pre_transform_name: pit[partition_key_to_pit_name_with_prefix(k.is_identity, i)] for i, k in enumerate(partition_spec.partition_keys)}
+                pit_predicate = _ibis_support.change_columns(pit_predicate, fields_map).to_expr()
 
         partition_keys = [k.column for k in partition_spec.partition_keys]
         partition_batches = pit.select(partition_keys, predicate=pit_predicate, config=config)

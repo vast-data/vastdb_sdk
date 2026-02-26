@@ -63,7 +63,7 @@ def retain_predicates(node, requried_names: set[str]) -> Optional[Node]:
     if _is_field(node):
         return node if _name_of(node) in requried_names else None
 
-    if _is_literal(node):
+    if not isinstance(node, Node):
         return node
 
     new_args = [retain_predicates(arg, requried_names) for arg in node.args]
