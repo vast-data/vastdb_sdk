@@ -1,5 +1,6 @@
 from datetime import datetime
 
+import ibis
 import pyarrow as pa
 import pytest
 from pyarrow import compute as pc
@@ -405,3 +406,35 @@ def test_data_engine_example(session: Session, clean_bucket_name: str):
         # This is a patch for server bug that gives meta data as well
         queried_data = queried_data.select([name for name in _DATA.schema.names])
         assert queried_data == _DATA.filter(pc.field("d") == _DATA["d"][4])
+
+
+def test_data_engine_example2(session: Session, clean_bucket_name: str):
+    schema_name = "s"
+    table_name = "t"
+
+    with session.transaction() as tx:
+        s = tx.bucket(clean_bucket_name).create_schema(schema_name)
+        t = s.create_table(
+            "t",
+            _ARROW_SCHEMA,
+            partition_spec=_create_partition_spec("d", DayTransform()),
+        )
+        t.insert(_DATA)
+
+    with session.transaction() as tx:
+        t = tx.bucket(clean_bucket_name).schema(schema_name).table(table_name)
+        predicate = (
+            (ibis._["h"] >= datetime(2025, 1, 1, 1, 5)) &
+            (ibis._["h"] <= datetime(2025, 1, 1, 2, 5)) &
+            (ibis._["s"].isin({"aaz", "bbz"}))
+        )
+
+        queried_data = t.select(predicate=predicate, internal_row_id=True).read_all()
+        assert queried_data.schema.field("$row_id") is not None
+        # This is a patch for server bug that gives meta data as well
+        queried_data = queried_data.select([name for name in _DATA.schema.names])
+        assert queried_data == _DATA.filter((
+            (pc.field("h") >= datetime(2025, 1, 1, 1, 5)) &
+            (pc.field("h") <= datetime(2025, 1, 1, 2, 5)) &
+            ((pc.field("s") == "aaz") | (pc.field("s") == "bbz"))
+        ))
