@@ -823,6 +823,10 @@ class TableInTransaction(ITable):
         partition_keys = [k.column for k in partition_spec.partition_keys]
         partition_batches = pit.select(partition_keys, predicate=pit_predicate, config=config)
         result_schema = self.arrow_schema if columns is None else pa.schema([self.arrow_schema.field(name) for name in columns])
+
+        if internal_row_id:
+            result_schema = pa.schema(list(result_schema) + [self._internal_rowid_field])
+
         batches_iterators = []
         config = None if config is None else dataclasses.replace(config, num_splits=1)
 
@@ -836,7 +840,7 @@ class TableInTransaction(ITable):
                     for column_index, name in enumerate(batch.schema.names)
                 ])
                 full_pred = partition_pred if predicate is None else predicate & partition_pred
-                _, iterator = self._select_single_table(columns, full_pred, config, internal_row_id, limit_rows)
+                _, iterator = self._select_single_table(None if columns is None else columns.copy(), full_pred, config, internal_row_id, limit_rows)
                 batches_iterators.append(iterator)
 
         all_batches = itertools.chain(*batches_iterators)
