@@ -1,15 +1,11 @@
 """VAST Database table."""
 
 import concurrent.futures
-import dataclasses
-import functools
 import itertools
 import logging
-import operator
 import os
 import queue
 import sys
-import typing
 from dataclasses import dataclass
 from enum import Enum
 from math import ceil
@@ -28,14 +24,13 @@ import ibis
 import pyarrow as pa
 import urllib3
 
-from vastdb._table_interface import IbisPredicate, ITable, ReadOnlyTable
+from vastdb._table_interface import IbisPredicate, ITable
 from vastdb.table_metadata import TableMetadata, TableRef, TableStats, TableType
 
-from . import _ibis_support, _internal, errors, util
+from . import _internal, errors, util
 from ._ibis_support import validate_ibis_support_schema
 from ._internal import SortingKey, VectorIndex
 from .config import ImportConfig, QueryConfig
-from .partitioning import PartitionSpec as _PartitionSpec
 
 if TYPE_CHECKING:
     from .transaction import Transaction
@@ -188,87 +183,6 @@ class SplitWorker:
         return all(row_id == _internal.TABULAR_INVALID_ROW_ID for row_id in self.subsplits_state.values())
 
 
-class _Partitions:
-    def __init__(self, table: "TableInTransaction", include_pre_transform_columns: bool = False) -> None:
-        if table._metadata.partitioning is None:
-            raise ValueError("_Partitions __init__ requires a partitioned table")
-
-        self._partition_spec = typing.cast(_PartitionSpec, table._metadata.partitioning)
-
-        self._pit = TableInTransaction(
-            TableMetadata(dataclasses.replace(table.ref, table=f"{table.ref.table}___VAST_PARTITIONS")),
-            table._tx
-        )
-        self._pit.reload_schema()
-        self._pit.reload_stats()
-        self._include_pre_transform_columns = include_pre_transform_columns
-
-        if include_pre_transform_columns:
-            fields = [f for f in self._pit.arrow_schema]
-
-            for key in self._partition_spec.partition_keys:
-                if key.is_identity:
-                    continue
-
-                field = table.arrow_schema.field(key.pre_transform_name)
-                pit_name = _Partitions._post_transform_name_to_pit_name(key.column, self._partition_spec)
-                fields.append(field.with_name(f"pre_transform_{pit_name}"))
-
-            self._pit._metadata.arrow_schema = pa.schema(fields)
-
-    def _keys_i_to_column_name(self, name: str) -> str:
-        index = int(name.rsplit("_", 1)[-1])
-        column_name = self._partition_spec.partition_keys[index].column
-        return name.replace(f"keys_{index}", column_name)
-
-    def _pit_schema_to_names_schema(self, schema: pa.Schema) -> pa.Schema:
-        return pa.schema([f.with_name(self._keys_i_to_column_name(f.name)) for f in schema])
-
-    @property
-    def arrow_schema(self) -> pa.Schema:
-        return self._pit_schema_to_names_schema(self._pit.arrow_schema)
-
-    @staticmethod
-    def _post_transform_name_to_pit_name(name: str, spec: _PartitionSpec) -> str:
-        partition_column_names = [key.column for key in spec.partition_keys]
-
-        if name not in partition_column_names:
-            raise ValueError(f"{name} is not a partition column")
-
-        return f"keys_{partition_column_names.index(name)}"
-
-    def select(
-        self,
-        columns: Optional[list[str]] = None,
-        predicate: Optional[IbisPredicate] = None,
-        config: Optional[QueryConfig] = None,
-        *,
-        internal_row_id: bool = False,
-        limit_rows: Optional[int] = None,
-    ) -> pa.RecordBatchReader:
-        """Execute a query."""
-        if columns is not None:
-            columns = [_Partitions._post_transform_name_to_pit_name(name, self._partition_spec) for name in columns]
-
-        reader = self._pit.select(columns, predicate, config, internal_row_id=internal_row_id, limit_rows=limit_rows)
-        new_schema = self._pit_schema_to_names_schema(reader.schema)
-        return pa.RecordBatchReader.from_batches(new_schema, [pa.RecordBatch.from_arrays(b.columns, schema=new_schema) for b in reader])
-
-    def __getitem__(self, col_name: str) -> ibis.Column:
-        """Allow constructing ibis-like column expressions from this table.
-
-        It is useful for constructing expressions for predicate pushdown in `ITable.select()` method.
-        """
-        if col_name in {k.column for k in self._partition_spec.partition_keys}:
-            pit_name = _Partitions._post_transform_name_to_pit_name(col_name, self._partition_spec)
-            return self._pit[pit_name]
-
-        if self._include_pre_transform_columns:
-            return self._pit[col_name]
-
-        raise ValueError(f"Unknown partition key: {col_name}")
-
-
 class TableInTransaction(ITable):
     """VAST Table."""
 
@@ -346,7 +260,7 @@ class TableInTransaction(ITable):
 
     @property
     def _internal_rowid_field(self) -> pa.Field:
-        return INTERNAL_ROW_ID_SORTED_FIELD if self._metadata.table_type in {TableType.Elysium, TableType.Partitioned, TableType.SortedPartitions} else INTERNAL_ROW_ID_FIELD
+        return INTERNAL_ROW_ID_SORTED_FIELD if self._is_sorted_table else INTERNAL_ROW_ID_FIELD
 
     def sorted_columns(self) -> list[pa.Field]:
         """Return sorted columns' metadata."""
@@ -654,12 +568,21 @@ class TableInTransaction(ITable):
             for split in range(split_config.num_splits)
         ]
 
-    def _select_single_table(self, columns: Optional[list[str]] = None,
+    def select(self, columns: Optional[list[str]] = None,
                predicate: Union[ibis.expr.types.BooleanColumn,
                                 ibis.common.deferred.Deferred] = None,
                config: Optional[QueryConfig] = None,
+               *,
                internal_row_id: bool = False,
-               limit_rows: Optional[int] = None) -> tuple[pa.Schema, pa.RecordBatchReader]:
+               limit_rows: Optional[int] = None) -> pa.RecordBatchReader:
+        """Execute a query over this table.
+
+        To read a subset of the columns, specify their names via `columns` argument. Otherwise, all columns will be read.
+
+        In order to apply a filter, a predicate can be specified. See https://github.com/vast-data/vastdb_sdk/blob/main/README.md#filters-and-projections for more details.
+
+        Query-execution configuration options can be specified via the optional `config` argument.
+        """
         config = config or QueryConfig()
 
         try:
@@ -669,7 +592,7 @@ class TableInTransaction(ITable):
                                                                                internal_row_id=internal_row_id,
                                                                                limit_rows=limit_rows)
         except _EmptyResultException as e:
-            return e.response_schema, []
+            return pa.RecordBatchReader.from_batches(e.response_schema, [])
 
         splits_queue: Queue[int] = Queue()
 
@@ -778,73 +701,7 @@ class TableInTransaction(ITable):
                             tasks_running -= 1
                     propagate_first_exception(futures, block=True)
 
-        return query_data_request.response_schema, batches_iterator()
-
-    def select(self, columns: Optional[list[str]] = None,
-               predicate: Union[ibis.expr.types.BooleanColumn,
-                                ibis.common.deferred.Deferred] = None,
-               config: Optional[QueryConfig] = None,
-               *,
-               internal_row_id: bool = False,
-               limit_rows: Optional[int] = None) -> pa.RecordBatchReader:
-        """Execute a query over this table.
-
-        To read a subset of the columns, specify their names via `columns` argument. Otherwise, all columns will be read.
-
-        In order to apply a filter, a predicate can be specified. See https://github.com/vast-data/vastdb_sdk/blob/main/README.md#filters-and-projections for more details.
-
-        Query-execution configuration options can be specified via the optional `config` argument.
-        """
-        if self._metadata.table_type not in {TableType.Partitioned, TableType.SortedPartitions}:
-            schema, batches = self._select_single_table(columns, predicate, config, internal_row_id, limit_rows)
-            return pa.RecordBatchReader.from_batches(schema, batches)
-
-        pit = _Partitions(self, include_pre_transform_columns=True)
-        partition_spec = typing.cast(_PartitionSpec, self._metadata.partitioning)
-
-        if isinstance(predicate, ibis.common.deferred.Deferred):
-            # may raise if the predicate is invalid (e.g. wrong types / missing column)
-            predicate = predicate.resolve(self._metadata.ibis_table)
-
-        if predicate is None:
-            pit_predicate = None
-        else:
-            pre_transform_partition_names = {k.pre_transform_name for k in partition_spec.partition_keys}
-            pit_predicate = _ibis_support.retain_predicates(predicate.op(), pre_transform_partition_names)
-
-            def partition_key_to_pit_name_with_prefix(is_identity: bool, index: int) -> str:
-                prefix = "" if is_identity else "pre_transform_"
-                return f"{prefix}keys_{index}"
-
-            if pit_predicate is not None:
-                fields_map = {k.pre_transform_name: pit[partition_key_to_pit_name_with_prefix(k.is_identity, i)] for i, k in enumerate(partition_spec.partition_keys)}
-                pit_predicate = _ibis_support.change_columns(pit_predicate, fields_map).to_expr()
-
-        partition_keys = [k.column for k in partition_spec.partition_keys]
-        partition_batches = pit.select(partition_keys, predicate=pit_predicate, config=config)
-        result_schema = self.arrow_schema if columns is None else pa.schema([self.arrow_schema.field(name) for name in columns])
-
-        if internal_row_id:
-            result_schema = pa.schema(list(result_schema) + [self._internal_rowid_field])
-
-        batches_iterators = []
-        config = None if config is None else dataclasses.replace(config, num_splits=1)
-
-        if limit_rows is not None:
-            raise NotImplementedError("Partitioned query with limit rows")
-
-        for batch in partition_batches:
-            for row in range(batch.num_rows):
-                partition_pred = functools.reduce(operator.and_, [
-                    self[name] == batch.column(column_index)[row].as_py()
-                    for column_index, name in enumerate(batch.schema.names)
-                ])
-                full_pred = partition_pred if predicate is None else predicate & partition_pred
-                _, iterator = self._select_single_table(None if columns is None else columns.copy(), full_pred, config, internal_row_id, limit_rows)
-                batches_iterators.append(iterator)
-
-        all_batches = itertools.chain(*batches_iterators)
-        return pa.RecordBatchReader.from_batches(result_schema, all_batches)
+        return pa.RecordBatchReader.from_batches(query_data_request.response_schema, batches_iterator())
 
     def insert_in_column_batches(self, rows: pa.RecordBatch) -> pa.ChunkedArray:
         """Split the RecordBatch into an insert + updates.
@@ -985,44 +842,6 @@ class TableInTransaction(ITable):
                                           txid=self._tx.active_txid,
                                           delete_from_imports_table=self._metadata.is_imports_table)
 
-    def _assert_partitioned(self) -> None:
-        if self._metadata.table_type is None:
-            raise AssertionError("Table type is not loaded, please use table.load_stats()")
-
-        if self._metadata.table_type not in {TableType.Partitioned, TableType.SortedPartitions}:
-            raise AssertionError("partitions can only be used on a partitioned table")
-
-    def partitions(self) -> ReadOnlyTable:
-        """List the partitions of a partitioned table.
-
-        The returned table should be used only to execute a query
-        """
-        self._assert_partitioned()
-        return _Partitions(self)
-
-    def delete_partitions(self, partitions: pa.RecordBatch, *, allow_non_acid: bool = False) -> None:
-        """Delete partitions of a table.
-
-        This is a non acid operation so it is dangerous. Unless explicitly using the allow_non_acid=True flag
-        of this method, it will raise an AssertionError
-
-        partitions - each row in the batch represents a single partition to be deleted. The schema of partitions
-                     must match this of the result from list_partitions
-        """
-        self._assert_partitioned()
-
-        if not allow_non_acid:
-            raise AssertionError("Beware, deleting partitions is a non acid operation! In order to proceed please use allow_non_acid=True")
-
-        if partitions.num_rows == 0:
-            return
-
-        serialized_slices = util.iter_serialized_slices(
-            partitions, MAX_ROWS_PER_BATCH)
-
-        for slice in serialized_slices:
-            self._tx._rpc.api.delete_partitions_non_acid(self.ref.bucket, self.ref.schema, self.ref.table, slice)
-
     def imports_table(self) -> Optional[ITable]:
         """Get the imports table of this table."""
         imports_table_metadata = self.imports_table_metadata()
@@ -1098,7 +917,7 @@ class Table(TableInTransaction):
                  tx: "Transaction"):
         """Vast Interactive Table."""
         super().__init__(metadata, tx)
-        self._metadata.load(tx)
+        self._metadata.load_schema(tx)
 
         self._handle = handle
 

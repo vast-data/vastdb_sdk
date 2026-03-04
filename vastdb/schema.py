@@ -14,8 +14,7 @@ from vastdb.table_metadata import TableMetadata, TableRef, TableType
 
 from . import bucket, errors, schema, table
 from ._ibis_support import validate_ibis_support_schema
-from ._internal import SortingKey, TableInfo, VectorIndexSpec
-from .partitioning import PartitionSpec
+from ._internal import SortingKey, VectorIndexSpec
 
 if TYPE_CHECKING:
     from .table import Table
@@ -85,8 +84,7 @@ class Schema:
 
     def create_table(self, table_name: str, columns: pa.Schema, fail_if_exists: bool = True,
                      use_external_row_ids_allocation: bool = False, sorting_key: SortingKey = [],
-                     vector_index: Optional[VectorIndexSpec] = None,
-                     partition_spec: Optional[PartitionSpec] = None) -> "Table":
+                     vector_index: Optional[VectorIndexSpec] = None) -> "Table":
         """Create a new table under this schema.
 
         A virtual `vastdb_rowid` column (of `int64` type) can be created to access and filter by internal VAST row IDs.
@@ -100,7 +98,6 @@ class Schema:
             use_external_row_ids_allocation: Whether to use external row ID allocation
             sorting_key: List of column names to use as sorting key (for Elysium tables)
             vector_index: Optional vector index.
-            partition_spec: Optional partition specification
 
         Returns:
         -------
@@ -119,8 +116,7 @@ class Schema:
         self.tx._rpc.api.create_table(self.bucket.name, self.name, table_name, columns, txid=self.tx.txid,
                                       use_external_row_ids_allocation=use_external_row_ids_allocation,
                                       sorting_key=sorting_key,
-                                      vector_index=vector_index,
-                                      partition_spec=partition_spec)
+                                      vector_index=vector_index)
         log.info("Created table: %s", table_name)
         return self.table(table_name)  # type: ignore[return-value]
 
@@ -136,7 +132,7 @@ class Schema:
         log.debug("Found table: %s", t[0])
         return t[0]
 
-    def _iter_tables(self, table_name=None, page_size=1000) -> Iterable[TableInfo]:
+    def _iter_tables(self, table_name=None, page_size=1000):
         next_key = 0
         name_prefix = table_name if table_name else ""
         exact_match = bool(table_name)
@@ -178,20 +174,12 @@ class Schema:
         self.name = new_name
 
 
-def _parse_table_info(table_info: TableInfo, schema: "schema.Schema"):
+def _parse_table_info(table_info, schema: "schema.Schema"):
     ref = TableRef(bucket=schema.bucket.name,
                    schema=schema.name,
                    table=table_info.name)
 
-    if table_info.sorting_key_enabled and table_info.partition_key_enabled:
-        table_type = TableType.SortedPartitions
-    elif table_info.sorting_key_enabled:
-        table_type = TableType.Elysium
-    elif table_info.partition_key_enabled:
-        table_type = TableType.Partitioned
-    else:
-        table_type = TableType.Regular
-
+    table_type = TableType.Elysium if table_info.sorting_key_enabled else TableType.Regular
     table_metadata = TableMetadata(ref, table_type=table_type)
 
     return table.Table(handle=int(table_info.handle),

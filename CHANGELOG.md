@@ -4,23 +4,6 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [2.0.15] (2026-02-26)
-[2.0.15]: https://github.com/vast-data/vastdb_sdk/compare/v2.0.14...v2.0.15
-
-### Fixed
-- Querying `internal_row_id` on partitioned tables
-- Querying partitioned tables using `Ibis DeferredPredicate`
-- Issue where using some predicates on partitioned tables cause an unexpected exception
-
-## [2.0.14] (2026-02-18)
-[2.0.14]: https://github.com/vast-data/vastdb_sdk/compare/v2.0.13...v2.0.14
-
-### Added
-- Support for creating a partitioned table using a `PartitionSpec`
-- Support for querying the partitions using the `partitions()` method of `ITable`
-- Support for deleting partitions usinng the `delete_partitions()` method of `ITable`
-- `ITable::select()` support for querying a partitioned table - NO API CHANGE
-
 ## [2.0.13] (2026-02-15)
 [2.0.13]: https://github.com/vast-data/vastdb_sdk/compare/v2.0.12...v2.0.13
 

@@ -12,5 +12,3 @@ xmltodict
 backoff==2.2.1
 adbc_driver_manager
 protobuf
-pyiceberg
-pydantic

@@ -139,7 +139,6 @@ from vastdb.vast_protobuf.tabular.blob_expansion_pb2 import (
 
 from . import errors, util
 from .config import BackoffConfig
-from .partitioning import PartitionSpec
 
 if TYPE_CHECKING:
     from .table import BlobExpansionConfig
@@ -153,9 +152,6 @@ TABULAR_QUERY_DATA_FAILED_STREAM_ID = 0xFFFFFFFF - 2
 TABULAR_INVALID_ROW_ID = 0xFFFFFFFFFFFF  # (1<<48)-1
 ESTORE_INVALID_EHANDLE = UINT64_MAX
 IMPORTED_OBJECTS_TABLE_NAME = "vastdb-imported-objects"
-
-VAST_BUCKET_PARTITION_TRANSFORM_NAME = "bucket"
-VAST_TRUNCATE_PARTITION_TRANSFORM_NAME = "truncate"
 
 SortingKey = Union[list[int], list[str]]
 
@@ -789,7 +785,7 @@ class ValidateInList:
         return self
 
 
-TableInfo = namedtuple('TableInfo', 'name properties handle num_rows size_in_bytes num_partitions sorting_key_enabled sorting_score write_amplification acummulative_row_insertion_count sorting_done, partition_key_enabled')
+TableInfo = namedtuple('TableInfo', 'name properties handle num_rows size_in_bytes num_partitions sorting_key_enabled sorting_score write_amplification acummulative_row_insertion_count sorting_done')
 
 
 def _parse_table_info(obj) -> TableInfo:
@@ -799,7 +795,6 @@ def _parse_table_info(obj) -> TableInfo:
     num_rows = obj.NumRows()
     used_bytes = obj.SizeInBytes()
     num_partitions = obj.NumPartitions()
-    partition_key_enabled = obj.PartitioningKeyEnabled()
     sorting_key_enabled = obj.SortingKeyEnabled()
     sorting_score_raw = obj.SortingScore()
     write_amplification = obj.WriteAmplification()
@@ -808,8 +803,7 @@ def _parse_table_info(obj) -> TableInfo:
     sorting_score = sorting_score_raw & ((1 << 63) - 1)
     sorting_done = bool(sorting_score_raw >> 63)
     return TableInfo(name, properties, handle, num_rows, used_bytes, num_partitions, sorting_key_enabled,
-                     sorting_score, write_amplification, acummulative_row_insertion_count, sorting_done,
-                     partition_key_enabled)
+                     sorting_score, write_amplification, acummulative_row_insertion_count, sorting_done)
 
 
 @dataclass
@@ -833,11 +827,6 @@ class VectorIndex:
 
 
 @dataclass
-class PartitioningInfo:
-    num_partitions: int
-
-
-@dataclass
 class TableStats:
     """Table-related information."""
 
@@ -851,7 +840,6 @@ class TableStats:
     sorting_done: bool = False
     endpoints: Tuple[str, ...] = ()
     vector_index: Optional[VectorIndex] = None
-    partitioning_info: Optional[PartitioningInfo] = None
 
 
 _RETRIABLE_EXCEPTIONS = (
@@ -1287,8 +1275,7 @@ class VastdbApi:
     def create_table(self, bucket: str, schema: str, name: str, arrow_schema: pa.Schema = None,
                      txid=0, client_tags=[],
                      create_imports_table: bool = False, use_external_row_ids_allocation: bool = False, table_props=None,
-                     sorting_key: SortingKey = [], vector_index: Optional[VectorIndexSpec] = None,
-                     partition_spec: Optional[PartitionSpec] = None) -> None:
+                     sorting_key: SortingKey = [], vector_index: Optional[VectorIndexSpec] = None) -> None:
         """
         Create a table in the specified bucket and schema.
 
@@ -1305,22 +1292,19 @@ class VastdbApi:
             table_props: Table properties
             sorting_key: List of column indices to sort by (for Elysium tables)
             vector_index: Optional vector index
-            partition_spec: Optional partition spec
         """
         self._create_table_internal(bucket=bucket, schema=schema, name=name, arrow_schema=arrow_schema,
                                     txid=txid, client_tags=client_tags,
                                     create_imports_table=create_imports_table,
                                     use_external_row_ids_allocation=use_external_row_ids_allocation,
                                     table_props=table_props, sorting_key=sorting_key,
-                                    vector_index=vector_index,
-                                    partition_spec=partition_spec)
+                                    vector_index=vector_index)
 
     def _create_table_internal(self, bucket: str, schema: str, name: str, arrow_schema: pa.Schema = None,
                                txid=0, client_tags=[], topic_partitions=0,
                                create_imports_table: bool = False, use_external_row_ids_allocation: bool = False,
                                table_props=None, sorting_key: SortingKey = [],
-                               vector_index: Optional[VectorIndexSpec] = None,
-                               partition_spec: Optional[PartitionSpec] = None) -> None:
+                               vector_index: Optional[VectorIndexSpec] = None) -> None:
         """
         Create a table, use the following request
         POST /bucket/schema/table?table HTTP/1.1
@@ -1347,15 +1331,8 @@ class VastdbApi:
         if arrow_schema is None:
             arrow_schema = pa.schema([])
 
-        metadata_dict: dict[str, str] = arrow_schema.metadata.copy() if arrow_schema.metadata else {}
-
-        if partition_spec is not None:
-            metadata_dict.update(partition_spec.serialize(arrow_schema))
-
-        arrow_schema = arrow_schema.with_metadata(metadata_dict)
         serialized_schema = arrow_schema.serialize()
         headers['Content-Length'] = str(len(serialized_schema))
-
         if use_external_row_ids_allocation:
             headers['use-external-row-ids-alloc'] = str(use_external_row_ids_allocation)
 
@@ -1412,7 +1389,6 @@ class VastdbApi:
         sorting_score = sorting_score_raw & ((1 << 63) - 1)
         sorting_done = bool(sorting_score_raw >> 63)
 
-        partitioning_info = PartitioningInfo(num_partitions=stats.NumPartitions()) if stats.PartitioningKeyEnabled() else None
         vector_index_metadata: Optional[VectorIndexMetadata] = stats.VectorIndexMetadata()
 
         if vector_index_metadata is not None:
@@ -1446,8 +1422,7 @@ class VastdbApi:
           sorting_key_enabled=sorting_key_enabled,
           sorting_done=sorting_done,
           endpoints=tuple(endpoints),
-          vector_index=vector_index,
-          partitioning_info=partitioning_info)
+          vector_index=vector_index)
 
     def alter_table(self, bucket: str, schema: str, name: str, txid=0, client_tags=[], table_properties="",
                     new_name: str = "", sorting_key: SortingKey = []) -> None:
@@ -1648,7 +1623,7 @@ class VastdbApi:
     def list_columns(self, command: str, bucket: str, schema: str, table: str, *, txid=0,
                                client_tags=None, max_keys: Optional[int] = None, next_key: int = 0, count_only: bool = False,
                                name_prefix: str = "", exact_match: bool = False, bc_list_internals: bool = False,
-                               list_imports_table: bool = False, names_only: bool = False) -> tuple[pa.Schema, int, bool, int]:
+                               list_imports_table: bool = False, names_only: bool = False) -> tuple[list[pa.Field], int, bool, int]:
         """
         GET /mybucket/myschema/mytable?columns HTTP/1.1
         tabular-txid: TransactionId
@@ -2507,16 +2482,6 @@ class VastdbApi:
         columns = [] if count_only else [f for f in pa.ipc.open_stream(res.content).schema]
         count = int(res_headers['tabular-list-count']) if count_only else len(columns)
         return columns, next_key, is_truncated, count
-
-    def delete_partitions_non_acid(self, bucket: str, schema: str, table: str, serialized_partitions_record_batch: pa.RecordBatch) -> None:
-        headers = self._fill_common_headers()
-        headers['tabular-allow-non-acid'] = "True"
-        headers['Content-Length'] = str(len(serialized_partitions_record_batch))
-        self._request(
-            method="DELETE",
-            url=self._url(bucket=bucket, schema=schema, table=table, command="partitions"),
-            headers=headers,
-            data=serialized_partitions_record_batch)
 
 
 class QueryDataInternalError(Exception):
