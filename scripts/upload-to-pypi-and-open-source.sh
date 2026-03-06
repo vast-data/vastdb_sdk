@@ -53,6 +53,13 @@ fi
 GITLAB_PUSH_URL="https://oauth2:${GITLAB_PUSH_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
 git push $GITLAB_PUSH_URL v${VERSION}
 
+# Add GitHub remote
+git remote -v | grep -q vastdb_sdk_github && git remote remove vastdb_sdk_github
+git remote add vastdb_sdk_github https://x-access-token:${GITHUB_TOKEN}@github.com/vast-data/vastdb_sdk.git
+
+# Push current commit to main so we have the relevant commits on GitHub
+git push vastdb_sdk_github HEAD:main
+
 echo "--- Pushing tag v${VERSION} to GitHub ---"
 GITHUB_PUSH_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/vast-data/vastdb_sdk.git"
 git push ${GITHUB_PUSH_URL} "v${VERSION}"
