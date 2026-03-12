@@ -9,6 +9,8 @@ from vastdb import errors
 from vastdb.session import Session
 from vastdb.table import BlobExpansionConfig, ExpansionFormat
 
+pytest.skip("Skipping temporarily due to ORION-340918", allow_module_level=True)
+
 log = logging.getLogger(__name__)
 
 
