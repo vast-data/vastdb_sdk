@@ -116,7 +116,21 @@ class GetTableStatsResponse(object):
             return obj
         return None
 
-def Start(builder): builder.StartObject(10)
+    # GetTableStatsResponse
+    def PartitioningKeyEnabled(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(24))
+        if o != 0:
+            return bool(self._tab.Get(flatbuffers.number_types.BoolFlags, o + self._tab.Pos))
+        return False
+
+    # GetTableStatsResponse
+    def NumPartitions(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(26))
+        if o != 0:
+            return self._tab.Get(flatbuffers.number_types.Uint64Flags, o + self._tab.Pos)
+        return 0
+
+def Start(builder): builder.StartObject(12)
 def GetTableStatsResponseStart(builder):
     """This method is deprecated. Please switch to Start."""
     return Start(builder)
@@ -164,6 +178,14 @@ def AddVectorIndexMetadata(builder, vectorIndexMetadata): builder.PrependUOffset
 def GetTableStatsResponseAddVectorIndexMetadata(builder, vectorIndexMetadata):
     """This method is deprecated. Please switch to AddVectorIndexMetadata."""
     return AddVectorIndexMetadata(builder, vectorIndexMetadata)
+def AddPartitioningKeyEnabled(builder, partitioningKeyEnabled): builder.PrependBoolSlot(10, partitioningKeyEnabled, 0)
+def GetTableStatsResponseAddPartitioningKeyEnabled(builder, partitioningKeyEnabled):
+    """This method is deprecated. Please switch to AddPartitioningKeyEnabled."""
+    return AddPartitioningKeyEnabled(builder, partitioningKeyEnabled)
+def AddNumPartitions(builder, numPartitions): builder.PrependUint64Slot(11, numPartitions, 0)
+def GetTableStatsResponseAddNumPartitions(builder, numPartitions):
+    """This method is deprecated. Please switch to AddNumPartitions."""
+    return AddNumPartitions(builder, numPartitions)
 def End(builder): return builder.EndObject()
 def GetTableStatsResponseEnd(builder):
     """This method is deprecated. Please switch to End."""

@@ -1,5 +1,13 @@
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Iterable, Optional, Sequence, TypeAlias, Union
+from typing import (
+    TYPE_CHECKING,
+    Iterable,
+    Optional,
+    Protocol,
+    Sequence,
+    TypeAlias,
+    Union,
+)
 
 import ibis
 import pyarrow as pa
@@ -12,6 +20,33 @@ if TYPE_CHECKING:
     from .table import Projection
 
 IbisPredicate: TypeAlias = Union[ibis.expr.types.BooleanColumn, ibis.common.deferred.Deferred]
+
+
+class ReadOnlyTable(Protocol):
+    @property
+    @abstractmethod
+    def arrow_schema(self) -> pa.Schema:
+        """Table arrow schema."""
+        pass
+
+    @abstractmethod
+    def __getitem__(self, col_name: str) -> ibis.Column:
+        """Allow constructing ibis-like column expressions from this table.
+
+        It is useful for constructing expressions for predicate pushdown in `ITable.select()` method.
+        """
+        pass
+
+    @abstractmethod
+    def select(self,
+               columns: Optional[list[str]] = None,
+               predicate: Optional[IbisPredicate] = None,
+               config: Optional[QueryConfig] = None,
+               *,
+               internal_row_id: bool = False,
+               limit_rows: Optional[int] = None) -> pa.RecordBatchReader:
+        """Execute a query."""
+        pass
 
 
 class ITable(ABC):
