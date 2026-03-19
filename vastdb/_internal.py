@@ -2554,7 +2554,7 @@ def read_first_batch(fileobj):
 
         if stream_id not in readers:
             # we implicitly read 1st message (Arrow schema) when constructing RecordBatchStreamReader
-            reader = pa.ipc.RecordBatchStreamReader(fileobj)
+            reader = pa.ipc.open_stream(fileobj)
             _logger.debug("stream_id=%d schema=%s", stream_id, reader.schema)
             readers[stream_id] = reader
             continue
@@ -2599,7 +2599,7 @@ def _iter_query_data_response_columns(fileobj, stream_ids=None):
 
         if stream_id not in readers:
             # we implicitly read 1st message (Arrow schema) when constructing RecordBatchStreamReader
-            reader = pa.ipc.RecordBatchStreamReader(fileobj)
+            reader = pa.ipc.open_stream(fileobj)
             _logger.debug("stream_id=%d schema=%s", stream_id, reader.schema)
             readers[stream_id] = (reader, [])
             continue
