@@ -33,7 +33,13 @@ from vastdb.table_metadata import TableMetadata, TableRef, TableStats, TableType
 
 from . import _ibis_support, _internal, errors, util
 from ._ibis_support import validate_ibis_support_schema
-from ._internal import SortingKey, VectorIndex
+from ._internal import (
+    INTERNAL_ROW_ID,
+    INTERNAL_ROW_ID_FIELD,
+    INTERNAL_ROW_ID_SORTED_FIELD,
+    SortingKey,
+    VectorIndex,
+)
 from .config import ImportConfig, QueryConfig
 from .partitioning import PartitionSpec as _PartitionSpec
 
@@ -42,11 +48,6 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-
-INTERNAL_ROW_ID = "$row_id"
-INTERNAL_ROW_ID_FIELD = pa.field(INTERNAL_ROW_ID, pa.uint64())
-INTERNAL_ROW_ID_SORTED_FIELD = pa.field(
-    INTERNAL_ROW_ID, pa.decimal128(38, 0))  # Sorted tables have longer row ids
 
 MAX_ROWS_PER_BATCH = 512 * 1024
 # for insert we need a smaller limit due to response amplification
@@ -346,7 +347,9 @@ class TableInTransaction(ITable):
 
     @property
     def _internal_rowid_field(self) -> pa.Field:
-        return INTERNAL_ROW_ID_SORTED_FIELD if self._metadata.table_type in {TableType.Elysium, TableType.Partitioned, TableType.SortedPartitions} else INTERNAL_ROW_ID_FIELD
+        return (INTERNAL_ROW_ID_SORTED_FIELD
+                if self._metadata.table_type in {TableType.Elysium, TableType.Partitioned, TableType.SortedPartitions}
+                else INTERNAL_ROW_ID_FIELD)
 
     def sorted_columns(self) -> list[pa.Field]:
         """Return sorted columns' metadata."""
