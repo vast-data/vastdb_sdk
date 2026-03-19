@@ -155,10 +155,7 @@ def test_insert_empty(session, clean_bucket_name):
     with session.transaction() as tx:
         t = tx.bucket(clean_bucket_name).create_schema('s').create_table('t', columns)
         t.insert(all_nulls)
-
-        with pytest.raises(errors.NotImplemented):
-            t.insert(no_columns)
-
+        assert t.insert(no_columns).to_pylist() == []
         row_ids = t.insert(no_rows).to_pylist()
         assert row_ids == []
 

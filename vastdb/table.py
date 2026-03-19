@@ -10,6 +10,7 @@ import os
 import queue
 import sys
 import typing
+import warnings
 from dataclasses import dataclass
 from enum import Enum
 from math import ceil
@@ -31,7 +32,7 @@ import urllib3
 from vastdb._table_interface import IbisPredicate, ITable, ReadOnlyTable
 from vastdb.table_metadata import TableMetadata, TableRef, TableStats, TableType
 
-from . import _ibis_support, _internal, errors, util
+from . import _by_column_inserter, _ibis_support, _internal, errors, util
 from ._ibis_support import validate_ibis_support_schema
 from ._internal import (
     INTERNAL_ROW_ID,
@@ -855,72 +856,63 @@ class TableInTransaction(ITable):
         This is both to support rows that won't fit into an RPC and for performance for wide rows.
         Insert first MAX_COLUMN_IN_BATCH columns and get the row_ids. Then loop on the rest of the columns and
         update in groups of MAX_COLUMN_IN_BATCH.
+
+        Only kept for backward compatability and is not deprecated
         """
-        columns_names = [field.name for field in rows.schema]
-        # Sorted columns must be in the first insert as those can't be updated later.
-        if self._is_sorted_table:
-            sorted_columns_names = [field.name for field in self.sorted_columns()]
-            columns_names = sorted_columns_names + [column_name for column_name in columns_names if column_name not in sorted_columns_names]
-        columns = [rows.schema.field(column_name) for column_name in columns_names]
+        warnings.warn(
+            "insert_in_column_batches(rows) is deprecated and will be removed in vastdb 3.0.0, use insert(rows) instead",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        return self.insert(rows)
 
-        arrays = [_combine_chunks(rows.column(column_name)) for column_name in columns_names]
-        for start in range(0, len(rows.schema), MAX_COLUMN_IN_BATCH):
-            end = start + MAX_COLUMN_IN_BATCH if start + \
-                MAX_COLUMN_IN_BATCH < len(rows.schema) else len(rows.schema)
-            columns_name_chunk = columns_names[start:end]
-            columns_chunks = columns[start:end]
-            arrays_chunks = arrays[start:end]
-            if start == 0:
-                column_record_batch = pa.RecordBatch.from_arrays(
-                    arrays_chunks, schema=pa.schema(columns_chunks))
-                row_ids = self.insert(rows=column_record_batch, by_columns=False)  # type: ignore
-            else:
-                columns_chunks.append(self._internal_rowid_field)
-                arrays_chunks.append(row_ids.to_pylist())
-                column_record_batch = pa.RecordBatch.from_arrays(
-                    arrays_chunks, schema=pa.schema(columns_chunks))
-                self.update(rows=column_record_batch, columns=columns_name_chunk)
-        return row_ids
+    def insert(self, rows: Union[pa.RecordBatch, pa.Table], by_columns: bool = True) -> pa.ChunkedArray:
+        """Insert a RecordBatch into this table.
 
-    def insert(self,
-               rows: Union[pa.RecordBatch, pa.Table],
-               by_columns: bool = True) -> pa.ChunkedArray:
-        """Insert a RecordBatch into this table."""
+        by_columns is kept only for backward compatability - DO NOT REMOVE IT
+        """
         self._assert_not_imports_table()
+        sorted_column_names = (set() if self._metadata._sorted_columns is None
+                               else set(f.name for f in self._metadata._sorted_columns))
+        partition_column_names = (set() if self._metadata.partitioning is None
+                             else set(col.column for col in self._metadata.partitioning.partition_keys))
 
-        if 0 == rows.num_rows:
-            log.debug("Ignoring empty insert into %s", self.ref)
-            return pa.chunked_array([], type=self._internal_rowid_field.type)
+        def insert_rows_rpc(batch: pa.RecordBatch) -> pa.Array:
+            res = self._tx._rpc.api.insert_rows(
+                self.ref.bucket,
+                self.ref.schema,
+                self.ref.table,
+                util.serialize_record_batch(batch),
+                self._tx.active_txid
+            )
+            (ids_batch,) = pa.ipc.open_stream(res.content)
+            return ids_batch[_internal.INTERNAL_ROW_ID]
 
-        # inserting by columns is faster, so default to doing that
-        # if the cluster supports it and there are actually columns in the rows
-        if by_columns and len(rows.schema):
-            try:
-                self._tx._rpc.features.check_return_row_ids()
-                return self.insert_in_column_batches(rows)
-            except errors.NotSupportedVersion:
-                pass
+        def update_rows_rpc(batch: pa.RecordBatch) -> None:
+            self._tx._rpc.api.update_rows(
+                self.ref.bucket,
+                self.ref.schema,
+                self.ref.table,
+                util.serialize_record_batch(batch),
+                self._tx.active_txid
+            )
 
-        try:
-            row_ids = []
-            serialized_slices = util.iter_serialized_slices(
-                rows, MAX_INSERT_ROWS_PER_PATCH)
-            for slice in serialized_slices:
-                res = self._tx._rpc.api.insert_rows(self.ref.bucket,
-                                                    self.ref.schema,
-                                                    self.ref.table,
-                                                    record_batch=slice,
-                                                    txid=self._tx.active_txid)
-                (batch,) = pa.RecordBatchStreamReader(res.content)
-                row_ids.append(batch[INTERNAL_ROW_ID])
-            try:
-                self._tx._rpc.features.check_return_row_ids()
-            except errors.NotSupportedVersion:
-                return  # type: ignore
-            return pa.chunked_array(row_ids, type=self._internal_rowid_field.type)
-        except errors.TooWideRow:
-            self._tx._rpc.features.check_return_row_ids()
-            return self.insert_in_column_batches(rows)
+        inserter = _by_column_inserter.Inserter(
+            insert_rows_rpc,
+            update_rows_rpc,
+            _internal.MAX_REQUEST_BODY_SIZE,
+            self.arrow_schema,
+            sorted_column_names | partition_column_names,
+        )
+
+        if isinstance(rows, pa.Table):
+            if rows.num_rows > 0:
+                rows = rows.combine_chunks().to_batches()[0]
+            else:
+                arrays = [pa.array([], type=field.type) for field in rows.schema]
+                rows = pa.RecordBatch.from_arrays(arrays, rows.schema)
+
+        return inserter.insert(rows)
 
     def update(self,
                rows: Union[pa.RecordBatch, pa.Table],
