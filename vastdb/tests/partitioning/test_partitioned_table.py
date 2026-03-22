@@ -199,12 +199,10 @@ def test_pit(
         )[0].as_py()
 
         partitions = pa.Table.from_batches(
-            list(
-                pit.select(
-                    predicate=(
-                        (pit["a"] == 2)
-                        & (pit[post_transform_column_name] == value_to_filter_by)
-                    )
+            pit.select(
+                predicate=(
+                    (pit["a"] == 2)
+                    & (pit[post_transform_column_name] == value_to_filter_by)
                 )
             )
         )
@@ -214,7 +212,7 @@ def test_pit(
         ).equals(partitions.select(["a", post_transform_column_name]))
 
         for col in ("a", post_transform_column_name):
-            partitions = pa.Table.from_batches(list(pit.select([col])))
+            partitions = pa.Table.from_batches(pit.select([col]))
             assert expected_partitions.select([col]).equals(partitions)
 
 
@@ -236,16 +234,14 @@ def test_query_partitioned_table(
 
     with hydra_session.transaction() as tx:
         t = tx.bucket(clean_bucket_name).schema(schema_name).table(table_name)
-        queried_data = pa.Table.from_batches(list(t.select())).combine_chunks()
+        queried_data = pa.Table.from_batches(t.select()).combine_chunks()
         assert _DATA.equals(queried_data)
 
         value_to_filter_by = _DATA[column_name][2].as_py()
 
         queried_data = pa.Table.from_batches(
-            list(
-                t.select(
-                    predicate=((t["a"] == 2) & (t[column_name] == value_to_filter_by))
-                )
+            t.select(
+                predicate=((t["a"] == 2) & (t[column_name] == value_to_filter_by))
             )
         ).combine_chunks()
         assert _DATA.filter(
@@ -254,13 +250,11 @@ def test_query_partitioned_table(
 
         str_value_to_filter_by = _DATA["s"][2].as_py()
         queried_data = pa.Table.from_batches(
-            list(
-                t.select(
-                    predicate=(
-                        (t["a"] == 2)
-                        & (t[column_name] == value_to_filter_by)
-                        & (t["s"] == str_value_to_filter_by)
-                    )
+            t.select(
+                predicate=(
+                    (t["a"] == 2)
+                    & (t[column_name] == value_to_filter_by)
+                    & (t["s"] == str_value_to_filter_by)
                 )
             )
         ).combine_chunks()
@@ -273,7 +267,7 @@ def test_query_partitioned_table(
         assert list(t.select(predicate=t["a"] == 0)) == []
 
         for col in ("a", column_name, "s"):
-            queried_data = pa.Table.from_batches(list(t.select([col]))).combine_chunks()
+            queried_data = pa.Table.from_batches(t.select([col])).combine_chunks()
             assert _DATA.select([col]).equals(queried_data)
 
 
