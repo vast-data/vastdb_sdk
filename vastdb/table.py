@@ -1133,7 +1133,6 @@ class Table(TableInTransaction):
     def imports_table(self) -> Optional["Table"]:
         """Get the imports table of this table."""
         imports_table_metadata = self.imports_table_metadata()
-        imports_table_metadata.load(self.tx)
         return Table(handle=self.handle,
                      metadata=imports_table_metadata,
                      tx=self.tx)
