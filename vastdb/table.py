@@ -604,6 +604,9 @@ class TableInTransaction(ITable):
                       internal_row_id: bool = False,
                       limit_rows: Optional[int] = None) -> list[pa.RecordBatchReader]:
         """Return pa.RecordBatchReader for each split."""
+        if self._metadata.table_type in {TableType.Partitioned, TableType.SortedPartitions}:
+            raise NotImplementedError("Method select_splits is not implemented for partitioned tables")
+
         config = config or QueryConfig()
 
         try:
