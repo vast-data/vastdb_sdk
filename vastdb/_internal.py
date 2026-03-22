@@ -48,6 +48,7 @@ from ibis.expr.operations.logical import (
 )
 from ibis.expr.operations.strings import StartsWith, StringContains
 from ibis.expr.operations.structs import StructField
+from pyiceberg.transforms import BucketTransform, TruncateTransform
 
 import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.BinaryLiteral as fb_binary_lit
 import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.BooleanLiteral as fb_bool_lit
@@ -139,7 +140,7 @@ from vastdb.vast_protobuf.tabular.blob_expansion_pb2 import (
 
 from . import errors, util
 from .config import BackoffConfig
-from .partitioning import PartitionSpec
+from .partitioning import PartitionKey, PartitionSpec
 
 if TYPE_CHECKING:
     from .table import BlobExpansionConfig
@@ -1354,6 +1355,9 @@ class VastdbApi:
         The request will look like:
         POST /bucket/schema/table?table&sub-table=vastdb-imported-objects HTTP/1.1
         """
+        if len(arrow_schema) != len(set(arrow_schema)):
+            raise ValueError(f"Arrow schema contains duplicate field names: {arrow_schema.names}")
+
         if len(sorting_key) > 0 and isinstance(sorting_key[0], str):
             if arrow_schema is None:
                 raise ValueError("Using a sorting key with no schema is not allowed")
@@ -1367,7 +1371,33 @@ class VastdbApi:
         metadata_dict: dict[str, str] = arrow_schema.metadata.copy() if arrow_schema.metadata else {}
 
         if partition_spec is not None:
-            metadata_dict.update(partition_spec.serialize(arrow_schema))
+            def serialize_partition_key(key: PartitionKey) -> str:
+                arg = None
+
+                match key.transform:
+                    case BucketTransform():
+                        name, arg = VAST_BUCKET_PARTITION_TRANSFORM_NAME, key.transform.num_buckets
+                    case TruncateTransform():
+                        name, arg = VAST_TRUNCATE_PARTITION_TRANSFORM_NAME, key.transform.width
+                    case _:
+                        name = str(key.transform)
+
+                if (field_index := arrow_schema.get_field_index(key.column)) == -1:
+                    raise ValueError(f"Partition key column '{key.column}' does not exist in the provided Arrow schema")
+
+                dict_repr: Dict[str, Union[int, str, None]] = {
+                    "column-index": field_index,
+                    "transform": name,
+                    "transform-arg": arg
+                }
+
+                return json.dumps(dict_repr)
+
+            partition_metadata = {
+                f"VAST:table:partition-key-{i}": serialize_partition_key(key_part)
+                for i, key_part in enumerate(partition_spec.partition_keys)
+            }
+            metadata_dict.update(partition_metadata)
 
         arrow_schema = arrow_schema.with_metadata(metadata_dict)
         serialized_schema = arrow_schema.serialize()

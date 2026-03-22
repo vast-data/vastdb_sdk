@@ -4,14 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [2.0.15] (2026-02-18)
-[2.0.15]: https://github.com/vast-data/vastdb_sdk/compare/v2.0.14...v2.0.15
+## [2.1.0] (2026-03-31)
+[2.1.0]: https://github.com/vast-data/vastdb_sdk/compare/v2.0.14...v2.1.0
 
 ### Added
 - Support for creating a partitioned table using a `PartitionSpec`
 - Support for querying the partitions using the `partitions()` method of `ITable`
 - Support for deleting partitions usinng the `delete_partitions()` method of `ITable`
 - `ITable::select()` support for querying a partitioned table - NO API CHANGE
+
+### Deprecated
+- `TableInterface.reload_sorted_columns` - will be removed on vastdb 3.0.0
+  - sorted columns are loaded as part of loading the schema of a table
+- `TableInTransaction.insert_in_column_batches` - will be removed on vastdb 3.0.0
+  - regular insert should be used instead
 
 ## [2.0.14] (2026-02-24)
 [2.0.14]: https://github.com/vast-data/vastdb_sdk/compare/v2.0.13...v2.0.14
