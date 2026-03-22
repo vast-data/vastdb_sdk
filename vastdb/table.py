@@ -201,43 +201,27 @@ class _Partitions:
             TableMetadata(dataclasses.replace(table.ref, table=f"{table.ref.table}___VAST_PARTITIONS")),
             table._tx
         )
-        self._pit.reload_schema()
         self._pit.reload_stats()
-        self._include_pre_transform_columns = include_pre_transform_columns
+        self._pit.reload_schema()
+        self._pit._metadata.arrow_schema = pa.schema(
+            f for f in self._pit.arrow_schema if f.name != _internal.PIT_SORTING_SCORE_FIELD.name
+        )
 
         if include_pre_transform_columns:
-            fields = [f for f in self._pit.arrow_schema]
-
-            for key in self._partition_spec.partition_keys:
-                if key.is_identity:
-                    continue
-
-                field = table.arrow_schema.field(key.pre_transform_name)
-                pit_name = _Partitions._post_transform_name_to_pit_name(key.column, self._partition_spec)
-                fields.append(field.with_name(f"pre_transform_{pit_name}"))
-
-            self._pit._metadata.arrow_schema = pa.schema(fields)
-
-    def _keys_i_to_column_name(self, name: str) -> str:
-        index = int(name.rsplit("_", 1)[-1])
-        column_name = self._partition_spec.partition_keys[index].column
-        return name.replace(f"keys_{index}", column_name)
-
-    def _pit_schema_to_names_schema(self, schema: pa.Schema) -> pa.Schema:
-        return pa.schema([f.with_name(self._keys_i_to_column_name(f.name)) for f in schema])
+            pre_transform_fields_without_identity = (
+                table.arrow_schema.field(key.pre_transform_name)
+                for key in self._partition_spec.partition_keys if not key.is_identity
+            )
+            self._pit._metadata.arrow_schema = pa.schema(
+                itertools.chain(
+                    self._pit.arrow_schema,
+                    pre_transform_fields_without_identity
+                )
+            )
 
     @property
     def arrow_schema(self) -> pa.Schema:
-        return self._pit_schema_to_names_schema(self._pit.arrow_schema)
-
-    @staticmethod
-    def _post_transform_name_to_pit_name(name: str, spec: _PartitionSpec) -> str:
-        partition_column_names = [key.column for key in spec.partition_keys]
-
-        if name not in partition_column_names:
-            raise ValueError(f"{name} is not a partition column")
-
-        return f"keys_{partition_column_names.index(name)}"
+        return self._pit.arrow_schema
 
     def select(
         self,
@@ -249,26 +233,14 @@ class _Partitions:
         limit_rows: Optional[int] = None,
     ) -> pa.RecordBatchReader:
         """Execute a query."""
-        if columns is not None:
-            columns = [_Partitions._post_transform_name_to_pit_name(name, self._partition_spec) for name in columns]
-
-        reader = self._pit.select(columns, predicate, config, internal_row_id=internal_row_id, limit_rows=limit_rows)
-        new_schema = self._pit_schema_to_names_schema(reader.schema)
-        return pa.RecordBatchReader.from_batches(new_schema, [pa.RecordBatch.from_arrays(b.columns, schema=new_schema) for b in reader])
+        return self._pit.select(columns, predicate, config, internal_row_id=internal_row_id, limit_rows=limit_rows)
 
     def __getitem__(self, col_name: str) -> ibis.Column:
         """Allow constructing ibis-like column expressions from this table.
 
         It is useful for constructing expressions for predicate pushdown in `ITable.select()` method.
         """
-        if col_name in {k.column for k in self._partition_spec.partition_keys}:
-            pit_name = _Partitions._post_transform_name_to_pit_name(col_name, self._partition_spec)
-            return self._pit[pit_name]
-
-        if self._include_pre_transform_columns:
-            return self._pit[col_name]
-
-        raise ValueError(f"Unknown partition key: {col_name}")
+        return self._pit[col_name]
 
 
 class TableInTransaction(ITable):
@@ -549,6 +521,7 @@ class TableInTransaction(ITable):
         return batch.num_rows * 2**16 if batch is not None else 0
 
     def _select_prepare(self,
+                        query_schema: pa.Schema,
                         config: QueryConfig,
                         columns: Optional[list[str]] = None,
                         predicate: Union[ibis.expr.types.BooleanColumn,
@@ -564,12 +537,11 @@ class TableInTransaction(ITable):
         log.debug("endpoints: %s", endpoints)
 
         if columns is None:
-            columns = [f.name for f in self.arrow_schema]
+            columns = query_schema.names
 
-        query_schema = self.arrow_schema
         if internal_row_id:
             queried_fields = [self._internal_rowid_field]
-            queried_fields.extend(column for column in self.arrow_schema)
+            queried_fields.extend(query_schema)
             query_schema = pa.schema(queried_fields)
             columns.append(INTERNAL_ROW_ID)
 
@@ -636,7 +608,7 @@ class TableInTransaction(ITable):
 
         try:
             split_config, query_data_request, endpoints = self._select_prepare(
-                config, columns, predicate, internal_row_id=internal_row_id, limit_rows=limit_rows)
+                self.arrow_schema, config, columns, predicate, internal_row_id=internal_row_id, limit_rows=limit_rows)
         except _EmptyResultException:
             return []
 
@@ -659,16 +631,17 @@ class TableInTransaction(ITable):
             for split in range(split_config.num_splits)
         ]
 
-    def _select_single_table(self, columns: Optional[list[str]] = None,
+    def _select_single_table(self, schema: pa.Schema, columns: Optional[list[str]] = None,
                predicate: Union[ibis.expr.types.BooleanColumn,
                                 ibis.common.deferred.Deferred] = None,
-               config: Optional[QueryConfig] = None,
-               internal_row_id: bool = False,
-               limit_rows: Optional[int] = None) -> tuple[pa.Schema, pa.RecordBatchReader]:
+                config: Optional[QueryConfig] = None,
+                internal_row_id: bool = False,
+                limit_rows: Optional[int] = None) -> tuple[pa.Schema, pa.RecordBatchReader]:
         config = config or QueryConfig()
 
         try:
-            split_config, query_data_request, endpoints = self._select_prepare(config,
+            split_config, query_data_request, endpoints = self._select_prepare(schema,
+                                                                               config,
                                                                                columns,
                                                                                predicate,
                                                                                internal_row_id=internal_row_id,
@@ -801,11 +774,12 @@ class TableInTransaction(ITable):
         Query-execution configuration options can be specified via the optional `config` argument.
         """
         if self._metadata.table_type not in {TableType.Partitioned, TableType.SortedPartitions}:
-            schema, batches = self._select_single_table(columns, predicate, config, internal_row_id, limit_rows)
+            schema, batches = self._select_single_table(self.arrow_schema, columns, predicate, config, internal_row_id, limit_rows)
             return pa.RecordBatchReader.from_batches(schema, batches)
 
         pit = _Partitions(self, include_pre_transform_columns=True)
         partition_spec = typing.cast(_PartitionSpec, self._metadata.partitioning)
+        pre_transform_partition_names = {k.pre_transform_name for k in partition_spec.partition_keys}
 
         if isinstance(predicate, ibis.common.deferred.Deferred):
             # may raise if the predicate is invalid (e.g. wrong types / missing column)
@@ -814,38 +788,42 @@ class TableInTransaction(ITable):
         if predicate is None:
             pit_predicate = None
         else:
-            pre_transform_partition_names = {k.pre_transform_name for k in partition_spec.partition_keys}
             pit_predicate = _ibis_support.retain_predicates(predicate.op(), pre_transform_partition_names)
 
-            def partition_key_to_pit_name_with_prefix(is_identity: bool, index: int) -> str:
-                prefix = "" if is_identity else "pre_transform_"
-                return f"{prefix}keys_{index}"
-
             if pit_predicate is not None:
-                fields_map = {k.pre_transform_name: pit[partition_key_to_pit_name_with_prefix(k.is_identity, i)] for i, k in enumerate(partition_spec.partition_keys)}
+                fields_map = {name: pit[name] for name in pre_transform_partition_names}
                 pit_predicate = _ibis_support.change_columns(pit_predicate, fields_map).to_expr()
 
         partition_keys = [k.column for k in partition_spec.partition_keys]
         partition_batches = pit.select(partition_keys, predicate=pit_predicate, config=config)
-        result_schema = self.arrow_schema if columns is None else pa.schema([self.arrow_schema.field(name) for name in columns])
 
-        if internal_row_id:
-            result_schema = pa.schema(list(result_schema) + [self._internal_rowid_field])
+        if columns is None:
+            columns = self.arrow_schema.names
+            result_schema = self.arrow_schema
+        else:
+            result_schema = pa.schema([self.arrow_schema.field(name) for name in columns])
 
         batches_iterators = []
         config = None if config is None else dataclasses.replace(config, num_splits=1)
+        full_schema = pa.schema(itertools.chain(
+            self.arrow_schema,
+            (f for f in pit.arrow_schema if f.name not in pre_transform_partition_names | set(_internal.PIT_METADATA_COLUMNS_TO_INCLUDE.names))
+        ))
 
         if limit_rows is not None:
             raise NotImplementedError("Partitioned query with limit rows")
 
+        if internal_row_id:
+            result_schema = pa.schema(itertools.chain(result_schema, [self._internal_rowid_field]))
+
         for batch in partition_batches:
             for row in range(batch.num_rows):
                 partition_pred = functools.reduce(operator.and_, [
-                    self[name] == batch.column(column_index)[row].as_py()
-                    for column_index, name in enumerate(batch.schema.names)
+                    pit[key.column] == batch.column(column_index)[row].as_py()
+                    for column_index, key in enumerate(partition_spec.partition_keys)
                 ])
                 full_pred = partition_pred if predicate is None else predicate & partition_pred
-                _, iterator = self._select_single_table(None if columns is None else columns.copy(), full_pred, config, internal_row_id, limit_rows)
+                _, iterator = self._select_single_table(full_schema, columns.copy(), full_pred, config, internal_row_id, limit_rows)
                 batches_iterators.append(iterator)
 
         all_batches = itertools.chain(*batches_iterators)
@@ -1014,6 +992,7 @@ class TableInTransaction(ITable):
         if partitions.num_rows == 0:
             return
 
+        partitions = partitions.select(i for i, f in enumerate(partitions.schema) if f not in _internal.PIT_METADATA_COLUMNS_TO_INCLUDE)
         serialized_slices = util.iter_serialized_slices(
             partitions, MAX_ROWS_PER_BATCH)
 

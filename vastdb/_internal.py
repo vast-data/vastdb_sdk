@@ -163,6 +163,17 @@ MAX_REQUEST_BODY_SIZE = 5 * (2 ** 20)
 VAST_BUCKET_PARTITION_TRANSFORM_NAME = "bucket"
 VAST_TRUNCATE_PARTITION_TRANSFORM_NAME = "truncate"
 
+TABLE_METADATA_PARTITION_SPEC_PROPERTY = b"VAST:partition_spec"
+COLUMN_METADATA_SORT_TYPE_PROPERTY = b"VAST:sort_type"
+COLUMN_METADATA_SORTED = b"Sorted"
+COLUMN_METADATA_SORT_INDEX_PROPERTY = b"VAST:sort_index"
+
+PIT_SORTING_SCORE_FIELD = pa.field("sorting_score", pa.int64())
+PIT_METADATA_COLUMNS_TO_INCLUDE = pa.schema([
+    pa.field("est_row_count", pa.int64()),
+    pa.field("est_byte_size", pa.int64()),
+])
+
 SortingKey = Union[list[int], list[str]]
 
 """
@@ -1700,6 +1711,7 @@ class VastdbApi:
                          max_keys: Optional[int] = None, name_prefix: str = "", exact_match: bool = False,
                          bc_list_internals: bool = False, list_imports_table: bool = False, names_only: bool = False) -> pa.Schema:
         fields = []
+        metadata: dict[str, str] = {}
         command = "sorted-columns" if sorted_columns else "column"
         next_key = 0
 
@@ -1710,11 +1722,12 @@ class VastdbApi:
                 bc_list_internals=bc_list_internals, list_imports_table=list_imports_table, names_only=names_only
             )
             fields.extend(cur_columns)
+            metadata.update(cur_columns.metadata or {})
 
             if not is_truncated:
                 break
 
-        return pa.schema(fields)
+        return pa.schema(fields, metadata=metadata)
 
     def head_bucket(self, bucket_name):
         """

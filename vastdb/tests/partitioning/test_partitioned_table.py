@@ -1,8 +1,10 @@
+import itertools
 from datetime import datetime
 
 import ibis
 import pyarrow as pa
 import pytest
+from ibis.common.exceptions import IbisTypeError
 from pyarrow import compute as pc
 from pyiceberg.transforms import (
     BucketTransform,
@@ -15,7 +17,7 @@ from pyiceberg.transforms import (
     YearTransform,
 )
 
-from vastdb import errors
+from vastdb import _internal, errors
 from vastdb.partitioning import PartitionKey, PartitionSpec
 from vastdb.session import Session
 
@@ -173,15 +175,22 @@ def test_pit(
     with hydra_session.transaction() as tx:
         t = tx.bucket(clean_bucket_name).schema(schema_name).table(table_name)
         pit = t.partitions()
-        assert pit.arrow_schema == expected_partitions.schema
-        assert pit["a"].equals(pit._pit["keys_0"])
-        assert pit[post_transform_column_name].equals(pit._pit["keys_1"])
+        expected_pit_schema = pa.schema(
+            itertools.chain(_internal.PIT_METADATA_COLUMNS_TO_INCLUDE, expected_partitions.schema)
+        )
+        assert pit.arrow_schema == expected_pit_schema
+        assert pit["a"] is not None
+        assert pit[post_transform_column_name] is not None
 
-        with pytest.raises(ValueError):
-            pit["keys_0"]
+        with pytest.raises(IbisTypeError, match="Column 'sorting_score' is not found in table"):
+            pit["sorting_score"]
 
-        partitions = pa.Table.from_batches(list(pit.select()))
-        assert expected_partitions.equals(partitions)
+        if not isinstance(transform, IdentityTransform):
+            with pytest.raises(IbisTypeError, match=f"Column '{column_name}' is not found in table"):
+                pit[column_name]
+
+        partitions = pa.Table.from_batches(pit.select())
+        assert expected_partitions.equals(partitions.select(["a", post_transform_column_name]))
 
         column_type = _DATA.schema.field(column_name).type
         transform_fn = transform.pyarrow_transform(column_type)
@@ -202,7 +211,7 @@ def test_pit(
         assert expected_partitions.filter(
             (pc.field("a") == 2)
             & (pc.field(post_transform_column_name) == value_to_filter_by)
-        ).equals(partitions)
+        ).equals(partitions.select(["a", post_transform_column_name]))
 
         for col in ("a", post_transform_column_name):
             partitions = pa.Table.from_batches(list(pit.select([col])))
@@ -228,8 +237,6 @@ def test_query_partitioned_table(
     with hydra_session.transaction() as tx:
         t = tx.bucket(clean_bucket_name).schema(schema_name).table(table_name)
         queried_data = pa.Table.from_batches(list(t.select())).combine_chunks()
-        # This is a patch for server bug that gives meta data as well, and so as the following ones like this
-        queried_data = queried_data.select([name for name in _DATA.schema.names])
         assert _DATA.equals(queried_data)
 
         value_to_filter_by = _DATA[column_name][2].as_py()
@@ -241,7 +248,6 @@ def test_query_partitioned_table(
                 )
             )
         ).combine_chunks()
-        queried_data = queried_data.select([name for name in _DATA.schema.names])
         assert _DATA.filter(
             (pc.field("a") == 2) & (pc.field(column_name) == value_to_filter_by)
         ).equals(queried_data)
@@ -258,7 +264,6 @@ def test_query_partitioned_table(
                 )
             )
         ).combine_chunks()
-        queried_data = queried_data.select([name for name in _DATA.schema.names])
         assert _DATA.filter(
             (pc.field("a") == 2)
             & (pc.field(column_name) == value_to_filter_by)
@@ -316,6 +321,9 @@ def test_delete_partition(
 def test_delete_partition_invalid_input(
     hydra_session: Session, clean_bucket_name: str, column_name: str, transform: Transform
 ):
+    if isinstance(transform, DayTransform):
+        pytest.skip("Server currently returns a date type on the transformed column and not an int like iceberg")
+
     schema_name = f"s_{column_name}"
     table_name = f"partitioned_table_{column_name}"
 
@@ -333,6 +341,7 @@ def test_delete_partition_invalid_input(
         pit = t.partitions()
         partitions_batches_count = len(list(pit.select()))
 
+        # non acid flag is required
         with pytest.raises(
             AssertionError,
             match="Beware, deleting partitions is a non acid operation! In order to proceed please use allow_non_acid=True",
@@ -340,7 +349,8 @@ def test_delete_partition_invalid_input(
             b = next(pit.select())
             t.delete_partitions(b)
 
-        with pytest.raises(Exception, match="InvalidArgument"):
+        # partial partition spec is not allowed
+        with pytest.raises(errors.BadRequest, match="InvalidArgument"):
             batch = pa.RecordBatch.from_arrays(
                 [
                     pa.array([2]),
@@ -349,13 +359,16 @@ def test_delete_partition_invalid_input(
             )
             t.delete_partitions(batch, allow_non_acid=True)
 
-        with pytest.raises(Exception, match="InvalidArgument"):
+        # a partition with these values doesnt exist
+        with pytest.raises(errors.BadRequest, match="InvalidArgument"):
             batch = pa.RecordBatch.from_arrays(
                 [
                     pa.array([2]),
                     pa.array([4]),
                 ],
-                schema=_DATA.select(["a", "b"]).schema,
+                schema=pa.schema(
+                    [pit.arrow_schema.field("a"), pit.arrow_schema.field(_post_transform_name(column_name, transform))]
+                ),
             )
             t.delete_partitions(batch, allow_non_acid=True)
 
@@ -412,9 +425,6 @@ def test_data_engine_example(hydra_session: Session, clean_bucket_name: str):
     with hydra_session.transaction() as tx:
         t = tx.bucket(clean_bucket_name).schema(schema_name).table(table_name)
         queried_data = t.select().read_all()
-
-        # This is a patch for server bug that gives meta data as well
-        queried_data = queried_data.select([name for name in _DATA.schema.names])
         assert queried_data == _DATA.filter(pc.field("d") == _DATA["d"][4])
 
 
@@ -440,9 +450,8 @@ def test_data_engine_example2(hydra_session: Session, clean_bucket_name: str):
         )
 
         queried_data = t.select(predicate=predicate, internal_row_id=True).read_all()
-        assert queried_data.schema.field("$row_id") is not None
-        # This is a patch for server bug that gives meta data as well
-        queried_data = queried_data.select([name for name in _DATA.schema.names])
+        assert queried_data.schema.field(_internal.INTERNAL_ROW_ID) is not None
+        queried_data = queried_data.select(_DATA.schema.names)
         assert queried_data == _DATA.filter((
             (pc.field("h") >= datetime(2025, 1, 1, 1, 5)) &
             (pc.field("h") <= datetime(2025, 1, 1, 2, 5)) &

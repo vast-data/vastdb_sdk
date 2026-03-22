@@ -1,5 +1,6 @@
 """VAST Database table metadata."""
 
+import json
 import logging
 from copy import deepcopy
 from dataclasses import dataclass
@@ -9,7 +10,7 @@ from typing import TYPE_CHECKING, Optional
 import ibis
 import pyarrow as pa
 import pydantic
-from pyiceberg.transforms import parse_transform
+from pyiceberg.transforms import Transform, parse_transform
 
 from vastdb import errors
 from vastdb._ibis_support import validate_ibis_support_schema
@@ -35,31 +36,22 @@ class TableType(Enum):
     SortedPartitions = 5  # Lissandra
 
 
-class _ColumnMetadata(pydantic.BaseModel):
-    column_id: Optional[int] = pydantic.Field(alias="VAST:column_id", default=None)
-    partition_key_index: Optional[int] = pydantic.Field(alias="VAST:partition:key_index", default=None)
-    partition_transform: Optional[str] = pydantic.Field(alias="VAST:partition:transform", default=None)
-    partition_transform_arg: Optional[int] = pydantic.Field(
-        alias="VAST:partition:transform_arg", default=None
-    )
+class _PartitionColumnMetadata(pydantic.BaseModel):
+    column_name: str
+    column_type: str
+    source_column_name: str
+    transform: str
+    arg: Optional[int] = pydantic.Field(default=None)
 
-    class Config:
-        populate_by_name = True
+    def as_iceberg_transform(self) -> Transform:
+        name = self.transform.lower()
 
-    @pydantic.field_validator("partition_transform")
-    @classmethod
-    def transform_to_lower(cls, v: str) -> str:
-        return v.lower()
+        if name in {_internal.VAST_BUCKET_PARTITION_TRANSFORM_NAME, _internal.VAST_TRUNCATE_PARTITION_TRANSFORM_NAME}:
+            transform_name_in_iceberg_format = f"{name}[{self.arg}]"
+        else:
+            transform_name_in_iceberg_format = name
 
-    @property
-    def transform_name(self) -> Optional[str]:
-        if self.partition_transform is None:
-            return None
-
-        if self.partition_transform_arg is not None:
-            return f'{self.partition_transform}[{self.partition_transform_arg}]'
-
-        return self.partition_transform
+        return parse_transform(transform_name_in_iceberg_format)
 
 
 @dataclass
@@ -132,9 +124,6 @@ class TableMetadata:
         self.load_stats(tx)
         self.load_schema(tx)
 
-        if self._table_type in {TableType.Elysium, TableType.Partitioned, TableType.SortedPartitions}:
-            self.load_sorted_columns(tx)
-
     def load_schema(self, tx: "Transaction") -> None:
         """Load/Reload table schema."""
         self.arrow_schema = tx._rpc.api.list_all_columns(
@@ -145,11 +134,40 @@ class TableMetadata:
             txid=tx.active_txid,
             list_imports_table=self.is_imports_table
         )
+        sorted_columns = [f for f in self.arrow_schema if _internal.COLUMN_METADATA_SORTED == f.metadata.get(_internal.COLUMN_METADATA_SORT_TYPE_PROPERTY)]
 
-        # This is because ibis doesn't support fixed binary
-        if self._ref.table.endswith("___VAST_PARTITIONS"):
-            fields = [f for f in self.arrow_schema if f.name.startswith("keys_") and f.name != "keys_hash"]
-            self.arrow_schema = pa.schema(fields, metadata=self.arrow_schema.metadata)
+        if len(sorted_columns) > 0:
+            sorted_columns.sort(key=lambda f: f.metadata[_internal.COLUMN_METADATA_SORT_INDEX_PROPERTY])
+            self._sorted_columns = sorted_columns
+
+        if (partition_spec_json := self.arrow_schema.metadata.get(_internal.TABLE_METADATA_PARTITION_SPEC_PROPERTY)) is not None:
+            partition_keys: list[PartitionKey] = []
+            partitioning: list[dict[str, str]] = json.loads(partition_spec_json)
+
+            for partition_column in partitioning:
+                column_metadata = _PartitionColumnMetadata.model_validate(partition_column)
+                partition_keys.append(
+                    PartitionKey(
+                        column_metadata.column_name,
+                        column_metadata.as_iceberg_transform(),
+                    )
+                )
+
+            if len(partition_keys) == 0:
+                raise AssertionError("Server gave an empty partition spec")
+
+            self._partitioning = PartitionSpec(partition_keys=partition_keys)
+
+        match (self._sorted_columns, self._partitioning):
+            case (None, None):
+                if self._table_type is not TableType.TableImports:
+                    self._table_type = TableType.Regular
+            case (None, _):
+                self._table_type = TableType.Partitioned
+            case (_, None):
+                self._table_type = TableType.Elysium
+            case (_, _):
+                self._table_type = TableType.SortedPartitions
 
     def load_sorted_columns(self, tx: "Transaction") -> None:
         """Return sorted columns' metadata."""
@@ -172,30 +190,6 @@ class TableMetadata:
         except errors.NotSupportedVersion:
             log.warning("Failed to get the sorted columns, Elysium not supported")
             raise
-
-        partition_keys: list[PartitionKey] = []
-
-        for sorted_column in self._sorted_columns:
-            decoded_metadata = {k.decode(): v.decode() for k, v in sorted_column.metadata.items()}
-            column_metadata = _ColumnMetadata.model_validate(decoded_metadata)
-
-            if column_metadata.transform_name is not None:
-                if column_metadata.transform_name in {
-                    _internal.VAST_BUCKET_PARTITION_TRANSFORM_NAME,
-                    _internal.VAST_TRUNCATE_PARTITION_TRANSFORM_NAME
-                }:
-                    transform_name_in_iceberg_format = f"{column_metadata.transform_name}[{column_metadata.partition_transform_arg}]"
-                else:
-                    transform_name_in_iceberg_format = column_metadata.transform_name
-
-                partition_keys.append(
-                    PartitionKey(
-                        column=sorted_column.name,
-                        transform=parse_transform(transform_name_in_iceberg_format),
-                    )
-                )
-        if len(partition_keys) > 0:
-            self._partitioning = PartitionSpec(partition_keys=partition_keys)
 
     def load_stats(self, tx: "Transaction") -> None:
         """Load/Reload table stats."""
