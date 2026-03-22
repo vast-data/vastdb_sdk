@@ -1242,11 +1242,16 @@ def test_tables_elysium_no_such_column(elysium_session, clean_bucket_name):
         str_sorting_keys = ["f", "b", "e"]
         non_existent_columns = [name for name in str_sorting_keys if columns.get_field_index(name) == -1]
         int_sorting_keys = [4, 1, 3]
+        error_type, error_message = (
+            (errors.BadRequest, "InvalidArgument")
+            if elysium_session.features.vast_version >= (5, 5)
+            else (errors.InternalServerError, "We encountered an internal error")
+        )
 
         with pytest.raises(ValueError, match=re.escape(f"The following fields {non_existent_columns} don't exist in the given arrow schema")):
             s.create_table("t1", columns, sorting_key=str_sorting_keys)
 
-        with pytest.raises(errors.InternalServerError, match="We encountered an internal error"):
+        with pytest.raises(error_type, match=error_message):
             s.create_table("t1", columns, sorting_key=int_sorting_keys)
 
         t = s.create_table("t2", columns)
@@ -1254,7 +1259,7 @@ def test_tables_elysium_no_such_column(elysium_session, clean_bucket_name):
         with pytest.raises(ValueError, match=re.escape(f"The following fields {non_existent_columns} don't exist in the given arrow schema")):
             t.add_sorting_key(str_sorting_keys)
 
-        with pytest.raises(errors.InternalServerError, match="We encountered an internal error"):
+        with pytest.raises(error_type, match=error_message):
             t.add_sorting_key(int_sorting_keys)
 
 
