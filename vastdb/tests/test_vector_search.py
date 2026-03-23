@@ -4,6 +4,7 @@ import numpy as np
 import pyarrow as pa
 import pytest
 
+from vastdb import errors
 from vastdb._adbc import _ibis_to_qe_predicates
 from vastdb._internal import VectorIndex, VectorIndexSpec
 from vastdb._table_interface import IbisPredicate
@@ -163,12 +164,16 @@ def test_ibis_to_query_engine_predicates(ibis_predicate: IbisPredicate, expected
     assert _ibis_to_qe_predicates(ibis_predicate) == expected
 
 
-@pytest.mark.skip(reason="see https://vastdata.atlassian.net/browse/ORION-307908")
 def test_with_predicates_get_vector_index_properties_from_server(
     session_factory: SessionFactory,
     clean_bucket_name: str
     ):
     session = session_factory(with_adbc=True)
+
+    try:
+        session.features.check_vector()
+    except errors.NotSupportedVersion:
+        pytest.skip("Vector index is not supported on this vast server version")
 
     vector_column_name = 'vector_column'
     vector_index_distance_metric = 'l2sq'

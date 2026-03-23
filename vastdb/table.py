@@ -350,6 +350,7 @@ class TableInTransaction(ITable):
     def _internal_rowid_field(self) -> pa.Field:
         return (INTERNAL_ROW_ID_SORTED_FIELD
                 if self._metadata.table_type in {TableType.Elysium, TableType.Partitioned, TableType.SortedPartitions}
+                or self.vector_index is not None
                 else INTERNAL_ROW_ID_FIELD)
 
     def sorted_columns(self) -> list[pa.Field]:

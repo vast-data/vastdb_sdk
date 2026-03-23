@@ -206,6 +206,12 @@ class TableMetadata:
             txid=tx.active_txid,
             imports_table_stats=self.is_imports_table,
         )
+        self._parse_stats_vector_index()
+
+        if self._vector_index is not None:
+            tx._rpc.features.check_vector()
+            self._table_type = TableType.Regular
+            return
 
         is_sorted = self._stats.sorting_key_enabled
         is_partitioned = self._stats.partitioning_info is not None
@@ -229,8 +235,6 @@ class TableMetadata:
                 raise ValueError(
                     "Actual table is partitioned (TableType.Partitioned / TableType.SortedPartitions), was not inited as such"
                 )
-
-        self._parse_stats_vector_index()
 
     def _parse_stats_vector_index(self):
         vector_index_is_set = self._vector_index is not None
