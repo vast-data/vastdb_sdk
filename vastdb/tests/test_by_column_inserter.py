@@ -75,7 +75,7 @@ def test_scenarios() -> list[tuple[pa.RecordBatch, set[str], float]]:
         (400, 200),
         (401, 201),
     )
-    non_updatable_names_cases: tuple[set[str], ...] = (set(), {"col0"}, {"col0", "col1"})
+    non_updatable_names_cases: tuple[set[str], ...] = (set(), {"col0"}, {"col0", "col1"}, {"col1"}, {"col1", "col4"})
     buffer_size_factor_cases = (1.5, 1.0, 0.75, 0.5, 0.25, 0.1)
     all_cases = itertools.product(batch_width_and_height_cases, non_updatable_names_cases, buffer_size_factor_cases)
     valid_cases = []
