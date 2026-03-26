@@ -11,6 +11,8 @@ from vastdb._table_interface import IbisPredicate
 from vastdb.conftest import SessionFactory
 from vastdb.table_metadata import TableMetadata, TableRef, TableType
 
+DEFAULT_VECTOR_COLUMN_NAME = "vector_col"
+
 DIM = 8
 TEST_DISTANCE_FUNC = 'array_distance'
 TEST_DISTANCE_METRIC = 'l2sq'
@@ -26,47 +28,46 @@ fourth_closest_vector = (query_vector * 1.4).tolist()
 fifth_closest_vector = (query_vector * 1.5).tolist()
 furthest_vector = (np.ones(DIM) * 5).tolist()
 
-vector_column_name = 'vector_col'
 
-data = [
-    {
-        "id": 0,
-        "n1": 1,
-        "n2": 100,
-        vector_column_name: first_closest_vector,
-    },
-    {
-        "id": 1,
-        "n1": 2,
-        "n2": 100,
-        vector_column_name: second_closest_vector,
-    },
-    {
-        "id": 2,
-        "n1": 3,
-        "n2": 200,
-        vector_column_name: third_closest_vector,
-    },
-    {
-        "id": 3,
-        "n1": 4,
-        "n2": 200,
-        vector_column_name: fourth_closest_vector,
-    },
-    {
-        "id": 4,
-        "n1": 5,
-        "n2": 200,
-        vector_column_name: fifth_closest_vector,
-    },
-    {
-        "id": 5,
-        "n1": 6,
-        "n2": 200,
-        vector_column_name: furthest_vector,
-    },
-
-]
+def get_example_data(vector_column_name: str):
+    return [
+        {
+            "id": 0,
+            "n1": 1,
+            "n2": 100,
+            vector_column_name: first_closest_vector,
+        },
+        {
+            "id": 1,
+            "n1": 2,
+            "n2": 100,
+            vector_column_name: second_closest_vector,
+        },
+        {
+            "id": 2,
+            "n1": 3,
+            "n2": 200,
+            vector_column_name: third_closest_vector,
+        },
+        {
+            "id": 3,
+            "n1": 4,
+            "n2": 200,
+            vector_column_name: fourth_closest_vector,
+        },
+        {
+            "id": 4,
+            "n1": 5,
+            "n2": 200,
+            vector_column_name: fifth_closest_vector,
+        },
+        {
+            "id": 5,
+            "n1": 6,
+            "n2": 200,
+            vector_column_name: furthest_vector,
+        }
+    ]
 
 
 def into_arrow_arrays(data: list[dict]) -> list[list]:
@@ -78,8 +79,16 @@ def into_arrow_arrays(data: list[dict]) -> list[list]:
     return [v for v in agg.values()]
 
 
-def test_sanity(session_factory: SessionFactory, clean_bucket_name: str):
+@pytest.mark.parametrize("vector_column_name", [
+    DEFAULT_VECTOR_COLUMN_NAME,
+    # reserved names should work
+    'vector',
+    'int'
+    ])
+def test_sanity(session_factory: SessionFactory, clean_bucket_name: str, vector_column_name: str):
     session = session_factory(with_adbc=True)
+
+    data = get_example_data(vector_column_name=vector_column_name)
 
     arrow_schema = pa.schema([('id', pa.int32()), ('n1', pa.int32(
     )), ('n2', pa.int32()), (vector_column_name, VectorColumnArrowType),])
@@ -126,6 +135,8 @@ def test_with_predicates(session_factory: SessionFactory, clean_bucket_name: str
                              vector_index=VectorIndex(vector_column_name,
                                                       TEST_DISTANCE_METRIC,
                                                       TEST_DISTANCE_FUNC))
+
+    data = get_example_data(vector_column_name)
     data_table = pa.table(schema=arrow_schema, data=into_arrow_arrays(data))
 
     with session.transaction() as tx:
@@ -148,7 +159,7 @@ def test_with_predicates(session_factory: SessionFactory, clean_bucket_name: str
 
 
 arrow_schema = pa.schema([('id', pa.int32()), ('n1', pa.int32(
-)), ('n2', pa.int32()), (vector_column_name, VectorColumnArrowType),])
+)), ('n2', pa.int32()), (DEFAULT_VECTOR_COLUMN_NAME, VectorColumnArrowType),])
 
 ref = TableRef('b', 's', 't')
 table_md = TableMetadata(ref, arrow_schema, TableType.Regular)
@@ -166,8 +177,7 @@ def test_ibis_to_query_engine_predicates(ibis_predicate: IbisPredicate, expected
 
 def test_with_predicates_get_vector_index_properties_from_server(
     session_factory: SessionFactory,
-    clean_bucket_name: str
-    ):
+    clean_bucket_name: str):
     session = session_factory(with_adbc=True)
 
     try:
@@ -185,6 +195,7 @@ def test_with_predicates_get_vector_index_properties_from_server(
 
     ref = TableRef(clean_bucket_name, 's', 't')
     table_md = TableMetadata(ref, arrow_schema, TableType.Regular)
+    data = get_example_data(vector_column_name)
     data_table = pa.table(schema=arrow_schema, data=into_arrow_arrays(data))
 
     with session.transaction() as tx:

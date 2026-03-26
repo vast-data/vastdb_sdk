@@ -140,11 +140,12 @@ def _vector_search_sql(
 ) -> str:
     query_vector_dim = len(query_vector)
 
-    query_vector_literal = f"{query_vector}::FLOAT[{query_vector_dim}]"
-    dist_func = f"{vector_index.sql_distance_function}({vector_index.column}::FLOAT[{query_vector_dim}], {query_vector_literal})"
+    query_vector_literal = f'{query_vector}::FLOAT[{query_vector_dim}]'
+    dist_func = f'{vector_index.sql_distance_function}("{vector_index.column}"::FLOAT[{query_vector_dim}], {query_vector_literal})'
     dist_alias = f"{dist_func} as {VAST_DIST_ALIAS}"
 
-    projection_str = ",".join(columns + [dist_alias])
+    quoted_columns = [f'"{col}"' for col in columns]
+    projection_str = ",".join(quoted_columns + [dist_alias])
 
     if predicate is not None:
         where = f"WHERE {_ibis_to_qe_predicates(predicate)}"
