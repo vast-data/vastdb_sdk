@@ -877,7 +877,7 @@ class TableInTransaction(ITable):
                                else set(f.name for f in self._metadata._sorted_columns))
         partition_column_names = (set() if self._metadata.partitioning is None
                              else set(col.column for col in self._metadata.partitioning.partition_keys))
-        vector_column_names = set() if self.vector_index is None else set(self.vector_index.column)
+        vector_column_names = set() if self.vector_index is None else {self.vector_index.column}
 
         def insert_rows_rpc(batch: pa.RecordBatch) -> pa.Array:
             res = self._tx._rpc.api.insert_rows(
