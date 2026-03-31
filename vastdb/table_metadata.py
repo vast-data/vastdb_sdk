@@ -2,6 +2,7 @@
 
 import json
 import logging
+import warnings
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
@@ -171,6 +172,12 @@ class TableMetadata:
 
     def load_sorted_columns(self, tx: "Transaction") -> None:
         """Return sorted columns' metadata."""
+        warnings.warn(
+            "load_sorted_columns is deprecated and will be removed in vastdb 3.0.0, use load_schema instead",
+            DeprecationWarning,
+            stacklevel=4
+        )
+
         try:
             schema = tx._rpc.api.list_all_columns(
                 self.ref.bucket,

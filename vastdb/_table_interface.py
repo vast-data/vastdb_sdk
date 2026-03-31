@@ -166,7 +166,10 @@ class ITable(ABC):
 
     @abstractmethod
     def reload_sorted_columns(self) -> None:
-        """Reload Sorted Columns."""
+        """Reload Sorted Columns.
+
+        This method is now deprecated and will be removed in vastdb 3.0.0.
+        """
         pass
 
     @abstractmethod

@@ -306,6 +306,11 @@ class TableInTransaction(ITable):
 
     def reload_sorted_columns(self) -> None:
         """Reload Sorted Columns."""
+        warnings.warn(
+            "sorted_columns is deprecated and will be removed in vastdb 3.0.0, sorted columns are now loaded as part of loading the schema",
+            DeprecationWarning,
+            stacklevel=3
+        )
         self._metadata.load_sorted_columns(self._tx)
 
     @property
