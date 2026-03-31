@@ -8,7 +8,6 @@ from vastdb import errors
 from vastdb._adbc import _ibis_to_qe_predicates
 from vastdb._internal import VectorIndex, VectorIndexSpec
 from vastdb._table_interface import IbisPredicate
-from vastdb.conftest import SessionFactory
 from vastdb.table_metadata import TableMetadata, TableRef, TableType
 
 DEFAULT_VECTOR_COLUMN_NAME = "vector_col"
@@ -85,9 +84,7 @@ def into_arrow_arrays(data: list[dict]) -> list[list]:
     'vector',
     'int'
     ])
-def test_sanity(session_factory: SessionFactory, clean_bucket_name: str, vector_column_name: str):
-    session = session_factory(with_adbc=True)
-
+def test_sanity(session, clean_bucket_name: str, vector_column_name: str):
     data = get_example_data(vector_column_name=vector_column_name)
 
     arrow_schema = pa.schema([('id', pa.int32()), ('n1', pa.int32(
@@ -122,9 +119,7 @@ def test_sanity(session_factory: SessionFactory, clean_bucket_name: str, vector_
         assert set([v.as_py() for v in result_table['n1']]) == {1, 2, 3}
 
 
-def test_with_predicates(session_factory: SessionFactory, clean_bucket_name: str):
-    session = session_factory(with_adbc=True)
-
+def test_with_predicates(session, clean_bucket_name: str):
     vector_column_name = 'vector_column'
     arrow_schema = pa.schema([('id', pa.int32()), ('n1', pa.int32(
     )), ('n2', pa.int32()), (vector_column_name, VectorColumnArrowType),])
@@ -175,11 +170,8 @@ def test_ibis_to_query_engine_predicates(ibis_predicate: IbisPredicate, expected
     assert _ibis_to_qe_predicates(ibis_predicate) == expected
 
 
-def test_with_predicates_get_vector_index_properties_from_server(
-    session_factory: SessionFactory,
-    clean_bucket_name: str):
-    session = session_factory(with_adbc=True)
-
+def test_with_predicates_get_vector_index_properties_from_server(session,
+                                                                 clean_bucket_name: str):
     try:
         session.features.check_vector()
     except errors.NotSupportedVersion:

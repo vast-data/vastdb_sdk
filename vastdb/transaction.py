@@ -11,7 +11,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Iterable, Optional
 
-from vastdb._adbc import AdbcConnection, AdbcDriver
+from vastdb._adbc import AdbcConnection, AdbcDriverVastdbNotInstalledException
 from vastdb._table_interface import ITable
 from vastdb.table import TableInTransaction
 from vastdb.table_metadata import TableMetadata
@@ -52,7 +52,7 @@ class Transaction:
 
     _rpc: "session.Session"
     txid: Optional[int] = None
-    _adbc_driver: Optional[AdbcDriver] = None
+    _adbc_driver_path: Optional[str] = None
     _adbc_conn: Optional[AdbcConnection] = None
     _end_user: Optional[str] = None
 
@@ -61,15 +61,17 @@ class Transaction:
         response = self._rpc.api.begin_transaction()
         self.txid = int(response.headers['tabular-txid'])
 
-        if self._adbc_driver is not None:
+        try:
             self._adbc_conn = AdbcConnection(
-                self._adbc_driver,
                 self._rpc.endpoint,
                 self._rpc.access,
                 self._rpc.secret,
                 self.txid,
-                self._end_user
+                self._end_user,
+                adbc_driver_path=self._adbc_driver_path
             )
+        except AdbcDriverVastdbNotInstalledException:
+            self._adbc_conn = None
 
         log.debug("opened txid=%016x", self.txid)
         return self

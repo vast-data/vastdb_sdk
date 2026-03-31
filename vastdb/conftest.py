@@ -1,14 +1,13 @@
 import os
 import sqlite3
 from pathlib import Path
-from typing import Iterable, Protocol
+from typing import Iterable
 
 import boto3
 import pytest
 
 import vastdb
 import vastdb.errors
-from vastdb._adbc import AdbcDriver
 from vastdb.schema import Schema
 from vastdb.session import Session
 
@@ -46,10 +45,6 @@ def pytest_addoption(parser):
     parser.addoption("--num-workers", help="Number of concurrent workers", default=1)
 
 
-def _get_adbc_driver_url(pipeline: str) -> str:
-    return f"https://artifactory.vastdata.com/artifactory/files/vastdb-native-client/{pipeline}/libadbc_driver_vastdb.so"
-
-
 @pytest.fixture(scope="session")
 def session_kwargs(request: pytest.FixtureRequest, tabular_endpoint_urls):
     return dict(
@@ -62,23 +57,6 @@ def session_kwargs(request: pytest.FixtureRequest, tabular_endpoint_urls):
 @pytest.fixture(scope="session")
 def session(session_kwargs):
     return vastdb.connect(**session_kwargs)
-
-
-class SessionFactory(Protocol):
-    def __call__(self, *, with_adbc: bool) -> Session: ...
-
-
-@pytest.fixture(scope="session")
-def session_factory(session_kwargs) -> SessionFactory:
-    def create_session(with_adbc: bool = False) -> Session:
-
-        if with_adbc:
-            # TODO use other not hard coded driver
-            session_kwargs['adbc_driver'] = AdbcDriver.from_url(url=_get_adbc_driver_url("2103686"))
-
-        return vastdb.connect(**session_kwargs)
-
-    return create_session
 
 
 @pytest.fixture(scope="session")

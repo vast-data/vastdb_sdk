@@ -1,18 +1,16 @@
 from typing import Optional
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pyarrow as pa
 import pytest
 
-from vastdb._adbc import END_USER_PROPERTY, AdbcDriver
+from vastdb._adbc import END_USER_PROPERTY
 from vastdb.session import Session
 from vastdb.table_metadata import TableRef
 from vastdb.transaction import NoAdbcConnectionError
 
 
-def test_sanity(session_factory, clean_bucket_name: str):
-    session = session_factory(with_adbc=True)
-
+def test_sanity(session, clean_bucket_name: str):
     arrow_schema = pa.schema([("n", pa.int32())])
 
     ref = TableRef(clean_bucket_name, "s", "t")
@@ -33,9 +31,7 @@ def test_sanity(session_factory, clean_bucket_name: str):
         assert res == [(1,), (2,), (3,), (4,), (5,)]
 
 
-def test_adbc_shares_tx(session_factory, clean_bucket_name: str):
-    session = session_factory(with_adbc=True)
-
+def test_adbc_shares_tx(session, clean_bucket_name: str):
     arrow_schema = pa.schema([("n", pa.int32())])
 
     data_table = pa.table(schema=arrow_schema, data=[[1, 2, 3, 4, 5]])
@@ -53,9 +49,7 @@ def test_adbc_shares_tx(session_factory, clean_bucket_name: str):
         assert tx.adbc_conn.cursor.fetchall() == [(1,), (2,), (3,), (4,), (5,)]
 
 
-def test_adbc_conn_unreachable_tx_close(session_factory):
-    session = session_factory(with_adbc=True)
-
+def test_adbc_conn_unreachable_tx_close(session):
     with session.transaction() as tx:
         assert tx.adbc_conn is not None
 
@@ -64,9 +58,7 @@ def test_adbc_conn_unreachable_tx_close(session_factory):
         tx.adbc_conn
 
 
-def test_two_simulatnious_txs_with_adbc(session_factory, clean_bucket_name: str):
-    session = session_factory(with_adbc=True)
-
+def test_two_simulatnious_txs_with_adbc(session, clean_bucket_name: str):
     arrow_schema = pa.schema([("n", pa.int32())])
 
     data_table = pa.table(schema=arrow_schema, data=[[1, 2, 3, 4, 5]])
@@ -96,9 +88,6 @@ def test_two_simulatnious_txs_with_adbc(session_factory, clean_bucket_name: str)
 
 @pytest.mark.parametrize("end_user", [("mock-end-user",), (None,)])
 def test_end_user_passed_to_adbc_connect(end_user: Optional[str]):
-    mock_driver = MagicMock(spec=AdbcDriver)
-    mock_driver.local_path = "/mock/driver/path"
-
     with (
         patch("vastdb._adbc.connect") as mock_connect,
         patch("vastdb._internal.VastdbApi") as MockVastdbApi,
@@ -114,8 +103,8 @@ def test_end_user_passed_to_adbc_connect(end_user: Optional[str]):
             access="test_access",
             secret="test_secret",
             endpoint="http://localhost:9090",
-            adbc_driver=mock_driver,
             end_user=end_user,
+            adbc_driver_path="/mock/driver/path"
         )
 
         with session.transaction():

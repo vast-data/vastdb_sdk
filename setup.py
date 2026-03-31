@@ -38,6 +38,9 @@ setup(
     install_requires=Path('requirements.txt').read_text().strip().split(),
     long_description=long_description,
     long_description_content_type='text/markdown',
+    extras_require={
+        'adbc': ['adbc-driver-vastdb~=0.0.24']
+    },
     classifiers=[
         'Development Status :: 5 - Production/Stable',
         'License :: OSI Approved :: Apache Software License',

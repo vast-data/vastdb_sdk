@@ -10,7 +10,6 @@ For more details see:
 import os
 from typing import TYPE_CHECKING, Optional
 
-from vastdb._adbc import AdbcDriver
 from vastdb.transaction import Transaction
 
 if TYPE_CHECKING:
@@ -26,7 +25,7 @@ class Session:
                  ssl_verify: bool = True,
                  timeout=None,
                  backoff_config: Optional["BackoffConfig"] = None,
-                 adbc_driver: Optional[AdbcDriver] = None,
+                 adbc_driver_path: Optional[str] = None,
                  end_user: Optional[str] = None):
         """Connect to a VAST Database endpoint, using specified credentials."""
         from . import _internal, features
@@ -51,7 +50,7 @@ class Session:
             timeout=timeout,
             backoff_config=backoff_config)
         self.features = features.Features(self.api.vast_version)
-        self.adbc_driver: Optional[AdbcDriver] = adbc_driver
+        self.adbc_driver_path: Optional[str] = adbc_driver_path
         self._end_user = end_user
 
     def __repr__(self):
@@ -67,4 +66,4 @@ class Session:
                 tx.bucket("bucket").create_schema("schema")
         """
         from . import transaction
-        return transaction.Transaction(self, _adbc_driver=self.adbc_driver, _end_user=self._end_user)
+        return transaction.Transaction(self, _adbc_driver_path=self.adbc_driver_path, _end_user=self._end_user)
