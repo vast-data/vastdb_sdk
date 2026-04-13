@@ -39,7 +39,7 @@ setup(
     long_description=long_description,
     long_description_content_type='text/markdown',
     extras_require={
-        'adbc': ['adbc-driver-vastdb~=0.0.24']
+        'adbc': ['adbc-driver-vastdb~=0.0.26']
     },
     classifiers=[
         'Development Status :: 5 - Production/Stable',
