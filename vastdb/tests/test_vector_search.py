@@ -202,7 +202,7 @@ def test_with_predicates_get_vector_index_properties_from_server(session,
     with session.transaction() as tx:
         table = tx.table_from_metadata(table_md)
 
-        table.reload_stats()
+        table.reload_schema()
         assert table.vector_index == VectorIndex(
             column=vector_column_name,
             distance_metric=vector_index_distance_metric,

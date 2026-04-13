@@ -122,7 +122,6 @@ class TableMetadata:
 
     def load(self, tx: "Transaction") -> None:
         """Load/Reload table metadata."""
-        self.load_stats(tx)
         self.load_schema(tx)
 
     def load_schema(self, tx: "Transaction") -> None:
@@ -135,40 +134,98 @@ class TableMetadata:
             txid=tx.active_txid,
             list_imports_table=self.is_imports_table
         )
-        sorted_columns = [f for f in self.arrow_schema if _internal.COLUMN_METADATA_SORTED == f.metadata.get(_internal.COLUMN_METADATA_SORT_TYPE_PROPERTY)]
 
-        if len(sorted_columns) > 0:
-            sorted_columns.sort(key=lambda f: f.metadata[_internal.COLUMN_METADATA_SORT_INDEX_PROPERTY])
-            self._sorted_columns = sorted_columns
+        if self.is_imports_table:
+            return
 
-        if (partition_spec_json := self.arrow_schema.metadata.get(_internal.TABLE_METADATA_PARTITION_SPEC_PROPERTY)) is not None:
-            partition_keys: list[PartitionKey] = []
-            partitioning: list[dict[str, str]] = json.loads(partition_spec_json)
+        self._vector_index = self._load_vector_index(tx)
 
-            for partition_column in partitioning:
-                column_metadata = _PartitionColumnMetadata.model_validate(partition_column)
-                partition_keys.append(
-                    PartitionKey(
-                        column_metadata.column_name,
-                        column_metadata.as_iceberg_transform(),
-                    )
-                )
+        if self._vector_index is not None:
+            tx._rpc.features.check_vector()
+            self._table_type = TableType.Regular
+            return
 
-            if len(partition_keys) == 0:
-                raise AssertionError("Server gave an empty partition spec")
-
-            self._partitioning = PartitionSpec(partition_keys=partition_keys)
+        self._sorted_columns = self._load_sorted_columns(self.arrow_schema, tx)
+        self._partitioning = TableMetadata._parse_partition_spec(self.arrow_schema)
 
         match (self._sorted_columns, self._partitioning):
             case (None, None):
-                if self._table_type is not TableType.TableImports:
-                    self._table_type = TableType.Regular
+                self._table_type = TableType.Regular
             case (None, _):
                 self._table_type = TableType.Partitioned
             case (_, None):
                 self._table_type = TableType.Elysium
             case (_, _):
                 self._table_type = TableType.SortedPartitions
+
+    def _load_vector_index(self, tx: "Transaction") -> Optional[VectorIndex]:
+        self._stats = tx._rpc.api.get_table_stats(
+            bucket=self.ref.bucket,
+            schema=self.ref.schema,
+            name=self.ref.table,
+            txid=tx.active_txid,
+            imports_table_stats=self.is_imports_table,
+        )
+        vector_index_is_set = self._vector_index is not None
+
+        if vector_index_is_set and self._stats.vector_index != self._vector_index:
+            raise ValueError(
+                f"Table has index {self._stats.vector_index}, but was initialized as {self._vector_index}"
+                )
+
+        return self._stats.vector_index
+
+    def _load_sorted_columns(self, schema: pa.Schema, tx: "Transaction") -> Optional[list[pa.Field]]:
+        if tx._rpc.features.vast_version >= (5, 5):
+            sorted_columns = [f for f in schema if _internal.COLUMN_METADATA_SORTED == f.metadata.get(_internal.COLUMN_METADATA_SORT_TYPE_PROPERTY)]
+            sorted_columns.sort(key=lambda f: f.metadata[_internal.COLUMN_METADATA_SORT_INDEX_PROPERTY])
+            return sorted_columns if len(sorted_columns) > 0 else None
+
+        try:
+            schema = tx._rpc.api.list_all_columns(
+                self.ref.bucket,
+                self.ref.schema,
+                self.ref.table,
+                sorted_columns=True,
+                txid=tx.active_txid,
+                list_imports_table=self.is_imports_table
+            )
+            sorted_columns = [f for f in schema]
+            return sorted_columns if len(sorted_columns) > 0 else None
+        except errors.InternalServerError as e:
+            log.debug("Returning no sorted columns after silencing: %s", e)
+            return None
+        except errors.InvalidArgument as e:
+            log.debug("Returning no sorted columns after silencing: %s", e)
+            return None
+        except errors.BadRequest as e:
+            log.debug("Returning no sorted columns after silencing: %s", e)
+            return None
+        except errors.NotSupportedVersion as e:
+            log.debug("Returning no sorted columns after silencing: %s", e)
+            return None
+
+    @staticmethod
+    def _parse_partition_spec(schema: pa.Schema) -> Optional[PartitionSpec]:
+        if (partition_spec_json := schema.metadata.get(_internal.TABLE_METADATA_PARTITION_SPEC_PROPERTY)) is None:
+            return None
+
+        partition_keys: list[PartitionKey] = []
+        partitioning: list[dict[str, str]] = json.loads(partition_spec_json)
+
+        for partition_column in partitioning:
+            column_metadata = _PartitionColumnMetadata.model_validate(partition_column)
+            partition_keys.append(
+                PartitionKey(
+                    column_metadata.column_name,
+                    column_metadata.as_iceberg_transform(),
+                )
+            )
+
+        if len(partition_keys) == 0:
+            raise AssertionError("Server returned an empty partition spec")
+
+        return PartitionSpec(partition_keys=partition_keys)
 
     def load_sorted_columns(self, tx: "Transaction") -> None:
         """Return sorted columns' metadata."""
@@ -188,6 +245,9 @@ class TableMetadata:
                 list_imports_table=self.is_imports_table
             )
             self._sorted_columns = [f for f in schema]
+
+            if self._table_type in {None, TableType.Regular}:
+                self._table_type = TableType.Elysium
         except errors.InternalServerError as ise:
             log.warning(
                 "Failed to get the sorted columns Elysium might not be supported: %s",
@@ -207,61 +267,6 @@ class TableMetadata:
             txid=tx.active_txid,
             imports_table_stats=self.is_imports_table,
         )
-        self._parse_stats_vector_index()
-
-        if self._vector_index is not None:
-            tx._rpc.features.check_vector()
-            self._table_type = TableType.Regular
-            return
-
-        is_sorted = self._stats.sorting_key_enabled
-        is_partitioned = self._stats.partitioning_info is not None
-
-        if self._table_type is None:
-            if is_sorted and is_partitioned:
-                self._set_sorted_partitions_table(tx)
-            elif is_sorted:
-                self._set_sorted_table(tx)
-            elif is_partitioned:
-                self._set_partitioned_table(tx)
-            else:
-                self._set_regular_table()
-        else:
-            if is_sorted and self.table_type not in {TableType.Elysium, TableType.SortedPartitions}:
-                raise ValueError(
-                    "Actual table is sorted (TableType.Elysium / TableType.SortedPartitions), was not inited as such"
-                )
-
-            if is_partitioned and self.table_type not in {TableType.Partitioned, TableType.SortedPartitions}:
-                raise ValueError(
-                    "Actual table is partitioned (TableType.Partitioned / TableType.SortedPartitions), was not inited as such"
-                )
-
-    def _parse_stats_vector_index(self):
-        vector_index_is_set = self._vector_index is not None
-
-        if vector_index_is_set and self._stats.vector_index != self._vector_index:
-            raise ValueError(
-                f"Table has index {self._stats.vector_index}, but was initialized as {self._vector_index}"
-                )
-        else:
-            self._vector_index = self._stats.vector_index
-
-    def _set_sorted_partitions_table(self, tx: "Transaction") -> None:
-        self._table_type = TableType.SortedPartitions
-        tx._rpc.features.check_elysium()
-        tx._rpc.features.check_partitioned()
-
-    def _set_sorted_table(self, tx: "Transaction") -> None:
-        self._table_type = TableType.Elysium
-        tx._rpc.features.check_elysium()
-
-    def _set_partitioned_table(self, tx: "Transaction") -> None:
-        self._table_type = TableType.Partitioned
-        tx._rpc.features.check_partitioned()
-
-    def _set_regular_table(self) -> None:
-        self._table_type = TableType.Regular
 
     @property
     def partitioning(self) -> Optional[PartitionSpec]:

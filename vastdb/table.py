@@ -201,7 +201,6 @@ class _Partitions:
             TableMetadata(dataclasses.replace(table.ref, table=f"{table.ref.table}___VAST_PARTITIONS")),
             table._tx
         )
-        self._pit.reload_stats()
         self._pit.reload_schema()
         self._pit._metadata.arrow_schema = pa.schema(
             f for f in self._pit.arrow_schema if f.name != _internal.PIT_SORTING_SCORE_FIELD.name
@@ -970,7 +969,7 @@ class TableInTransaction(ITable):
 
     def _assert_partitioned(self) -> None:
         if self._metadata.table_type is None:
-            raise AssertionError("Table type is not loaded, please use table.load_stats()")
+            raise AssertionError("Table type is not loaded, please use table.load_schema()")
 
         if self._metadata.table_type not in {TableType.Partitioned, TableType.SortedPartitions}:
             raise AssertionError("partitions can only be used on a partitioned table")
