@@ -11,7 +11,6 @@ variables:
   ORION_PREFIX: $DOCKER_REGISTRY/dev/orion
   PYSDK_IMAGE_PREFIX: $ORION_PREFIX:vastdb-python-sdk-pipe-$CI_PIPELINE_ID
   VASTDB_PYTHON_SDK_REPO: $DOCKER_REGISTRY/dev/vastdb-python-sdk
-  ORION_BRANCH: TEAM/tabular-5.5
   BUILDER_DOCKER_BASE_IMAGE: $VASTDB_PYTHON_SDK_REPO:alonid-rockylinux-rpm-builder-8.6.20227707
 
 
@@ -55,7 +54,7 @@ build:
       - PYTHON_VERSION: ['3.10', '3.11', '3.12', '3.13']
 
 
-test_orion [branch]:
+test_orion:
   stage: test
   trigger:
     project: dev/orion
@@ -74,6 +73,9 @@ test_orion [branch]:
     - if: '$RUN_INTEG_TEST == "false"'
       when: never
     - if: '$CI_COMMIT_BRANCH != "main"'
+  parallel:
+    matrix:
+      - ORION_BRANCH: ['follower/5.4.0', 'TEAM/tabular-5.5']
 
 
 upload_to_artifactory:
