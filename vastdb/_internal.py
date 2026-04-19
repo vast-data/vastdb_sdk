@@ -132,7 +132,7 @@ from vastdb.vast_flatbuf.tabular.ListTablesResponse import (
 from vastdb.vast_flatbuf.tabular.VectorIndexMetadata import VectorIndexMetadata
 
 # Blob expansion protobuf messages
-from vastdb.vast_protobuf.tabular.blob_expansion_pb2 import (
+from vastdb.vast_protobuf.tabular.blob_expansion_pb2 import (  # type: ignore[attr-defined]
     AlterBlobExpansionRequest,
     CreateBlobExpansionRequest,
     GetBlobExpansionResponse,
@@ -2421,7 +2421,7 @@ class VastdbApi:
         txid: int = 0,
         client_tags: list = [],
         expected_retvals: list = [],
-    ) -> tuple[str, str, str, list, bool]:
+    ) -> tuple[str, str, str, list, bool, bool, bool]:
         """
         Show a blob expansion by showing the target table
         GET /bucket/schema/table?blob-expansion HTTP/1.1
@@ -2436,7 +2436,8 @@ class VastdbApi:
         Returns
         -------
         tuple
-            (source_column_name, target_table_name, expansion_format, columns, copy_source_column)
+            (source_column_name, target_table_name, expansion_format, columns, copy_source_column,
+            add_missing_values_output, add_excessive_values_output)
             where columns is a list of [column_name, column_type, column_metadata] tuples
 
         Raises
@@ -2464,7 +2465,8 @@ class VastdbApi:
             for field in arrow_schema:
                 columns.append([field.name, field.type, field.metadata])
 
-        result = (rsp.source_column_name, rsp.target_table_name, rsp.expansion_format, columns, rsp.copy_source_column)
+        result = (rsp.source_column_name, rsp.target_table_name, rsp.expansion_format, columns, rsp.copy_source_column,
+                  rsp.add_missing_values_output, rsp.add_excessive_values_output)
 
         if not result:
             raise errors.MissingBlobExpansion(table_ref, source_column_name)

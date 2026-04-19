@@ -13,6 +13,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Support for deleting partitions usinng the `delete_partitions()` method of `ITable`
 - `ITable::select()` support for querying a partitioned table - NO API CHANGE
 
+### Fixed
+- Value of the fields `BlobExpansionConfig.add_missing_values_output` and `BlobExpansionConfig.add_excessive_values_output` are now correctly updated when using `Table.blob_expansion()`
+
 ### Deprecated
 - `TableInterface.reload_sorted_columns` - will be removed on vastdb 3.0.0
   - sorted columns are loaded as part of loading the schema of a table

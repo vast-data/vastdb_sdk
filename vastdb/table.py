@@ -380,7 +380,8 @@ class TableInTransaction(ITable):
         self._assert_not_imports_table()
         self._tx._rpc.features.check_blob_expansion()
 
-        source_column, target_table_name, expansion_format_str, columns, copy_source_column = \
+        source_column, target_table_name, expansion_format_str, columns, copy_source_column, \
+            add_missing_values_output, add_excessive_values_output = \
             self._tx._rpc.api.get_blob_expansion(
                 self.ref, source_column_name, txid=self._tx.active_txid)
 
@@ -392,7 +393,9 @@ class TableInTransaction(ITable):
 
         config = BlobExpansionConfig(
             expansion_format=expansion_format,
-            copy_source_column=copy_source_column)
+            copy_source_column=copy_source_column,
+            add_missing_values_output=add_missing_values_output,
+            add_excessive_values_output=add_excessive_values_output)
 
         return BlobExpansion(
             source_column_name=source_column,

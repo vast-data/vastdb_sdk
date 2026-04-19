@@ -50,7 +50,6 @@ def test_basic_blob_expansion(session: Session, clean_bucket_name: str):
         )
 
         assert be.source_column_name == 'data'
-        # TODO: The endswith is a patch due to ORION-340918
         assert be.target_table_name.endswith(f'/{clean_bucket_name}/s1/t1_expanded')
         assert be.config.expansion_format == ExpansionFormat.JSON
         assert be.config.copy_source_column is False
@@ -58,6 +57,8 @@ def test_basic_blob_expansion(session: Session, clean_bucket_name: str):
         be_retrieved = t.blob_expansion('data')
         assert be_retrieved.source_column_name == be.source_column_name
         assert be_retrieved.target_table_name == be.target_table_name
+        assert be_retrieved.config.add_missing_values_output == be.config.add_missing_values_output
+        assert be_retrieved.config.add_excessive_values_output == be.config.add_excessive_values_output
 
         be.drop()
 
@@ -382,7 +383,6 @@ def test_blob_expansion_nested_schema(session: Session, clean_bucket_name: str):
         )
 
         assert be.source_column_name == 'json_blob'
-        # TODO: The endswith is a patch due to ORION-340918
         assert be.target_table_name.endswith(f'/{clean_bucket_name}/s1/t1_complex_expanded')
 
         be.drop()

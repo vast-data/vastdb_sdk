@@ -1,0 +1,57 @@
+
+/* Copyright (C) Vast Data Ltd. */
+syntax = "proto3";
+
+package vast_protobuf.tabular;
+
+message CreateBlobExpansionRequest {
+  // URL: POST /#BUCKET/#SCHEMA/#TABLE?query-data=CreateBlobExpansion HTTP/1.1
+
+  optional string target_table_name = 1;
+  string expansion_format = 2;
+  /// Schema of the columns to parse - serialized Arrow schema
+  bytes arrow_schema = 3;
+  /// Whether to copy the source column to the target table
+  optional bool copy_source_column = 4;
+  /// Whether to flatten nested struct columns
+  optional bool flatten_path = 5;
+  /// Delimiter for flattened path column names (default: "__")
+  optional string flatten_delimiter = 6;
+  /// The schema where the target table will be created (defaults to source table's schema)
+  optional string target_table_schema = 7;
+  /// Whether to add the missing values output column (default: true)
+  optional bool add_missing_values_output = 8;
+  /// Whether to add the excessive values output column (default: true)
+  optional bool add_excessive_values_output = 9;
+}
+
+message AlterBlobExpansionRequest {
+  // URL: PUT /#BUCKET/#SCHEMA/#TABLE?query-data=AlterBlobExpansion HTTP/1.1
+
+  /// Schema of the columns to add/remove - serialized Arrow schema
+  bytes arrow_schema = 1;
+  /// Whether to remove columns (true) or add columns (false)
+  bool remove = 2;
+  optional bool add_copy_source_column = 3;
+  optional bool remove_copy_source_column = 4;
+  optional bool add_missing_values_output = 5;
+  optional bool remove_missing_values_output = 6;
+  optional bool add_excessive_values_output = 7;
+  optional bool remove_excessive_values_output = 8;
+}
+
+message GetBlobExpansionResponse {
+  // URL: GET /#BUCKET/#SCHEMA/#TABLE?query-data=GetBlobExpansion HTTP/1.1
+
+  string source_column_name = 1;
+  string target_table_name = 2;
+  string expansion_format = 3;
+  /// Schema of the expanded columns - serialized Arrow schema
+  bytes arrow_schema = 4;
+  /// Whether the source column is copied to the target table
+  bool copy_source_column = 5;
+  /// Whether the missing values output column exists in the target table
+  bool add_missing_values_output = 6;
+  /// Whether the excessive values output column exists in the target table
+  bool add_excessive_values_output = 7;
+}
