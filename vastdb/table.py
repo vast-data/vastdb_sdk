@@ -669,8 +669,8 @@ class TableInTransaction(ITable):
         # threads that fetch the pages.
         # also, this queue should be at least the amount of workers. otherwise a deadlock may arise.
         # each worker must be able to send the final None message without blocking.
-        log.warn("Using the number of endpoints as a heuristic for concurrency.")
         max_workers = len(endpoints)
+        log.debug(f"Using {max_workers} endpoints as a heuristic for concurrency.")
         record_batches_queue: Queue[pa.RecordBatch] = Queue(
             maxsize=max_workers)
 
