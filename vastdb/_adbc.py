@@ -133,6 +133,7 @@ class AdbcConnection:
 
     def close(self):
         self._cursor.close()
+        self._adbc_conn.close()
 
     def vector_search(
         self,
