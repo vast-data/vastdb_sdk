@@ -1,3 +1,5 @@
+line-length = 120
+
 exclude = [
 	"vast_flatbuf", # auto-generated code
 	"vast_protobuf", # auto-generated code
