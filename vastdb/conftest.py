@@ -16,19 +16,24 @@ AWS_SECRET_ACCESS_KEY = "AWS_SECRET_ACCESS_KEY"
 
 
 def get_aws_cred_from_system(cred_name):
-    orion_dir = Path(os.path.expanduser(os.environ.get("ORION_DIR", "~/orion")))
-    orion_file_path = orion_dir / 'data' / cred_name
-
     env_value = os.environ.get(cred_name)
 
     if env_value is not None:
         return env_value
 
-    if not orion_file_path.exists():
-        return None
+    files_to_try = (
+        Path(os.path.expanduser(os.environ.get("ORION_DIR", "~/orion"))) / 'data' / cred_name,
+        Path("/tmp") / cred_name
+    )
 
-    with open(orion_file_path, "r") as f:
-        return f.read().strip()
+    for file_path in files_to_try:
+        if not file_path.exists():
+            continue
+
+        with open(file_path, "r") as f:
+            return f.read().strip()
+
+    return None
 
 
 def pytest_addoption(parser):
