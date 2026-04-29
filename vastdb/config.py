@@ -2,9 +2,13 @@
 
 import logging
 from dataclasses import dataclass, field
-from typing import Callable, List, Optional
+from datetime import timedelta
+from typing import TYPE_CHECKING, Callable, List, Optional
 
 import backoff
+
+if TYPE_CHECKING:
+    from .transaction import Transaction
 
 
 @dataclass
@@ -69,3 +73,38 @@ class ImportConfig:
 
     # import key column names
     key_names: Optional[List[str]] = None
+
+
+@dataclass(frozen=True)
+class BufferedInsertConfig:
+    """Flush configuration for a by partition buffered inserter."""
+
+    # Max size in bytes of the data the buffer can hold at a give time
+    capacity_in_bytes: int = 10 * 1024 * 1024
+
+    # Time interval after which data will be flushed to server, regardless of anything else
+    timeout: Optional[timedelta] = None
+
+    # If set, will be used for the entire buffered insert process, otherwise each flush will occur in a separate transaction
+    tx: Optional["Transaction"] = None
+
+    # The minimum required number of rows buffered in some partition in order to flush it
+    # If the buffer is out of capacity and this target is not reached yet, some flush will occur anyway (same for timer)
+    target_num_rows_per_partition: int = 2 ** 16
+
+    def __post_init__(self):
+        """Validate params."""
+        if self.capacity_in_bytes <= 0:
+            raise ValueError("Capacity in bytes must be a positive integer")
+
+        if self.tx is not None and not self.tx.is_active:
+            raise ValueError("Provided transaction must be active")
+
+        if self.timeout is not None and self.timeout.total_seconds() <= 0:
+            raise ValueError("Timeout must be a positive duration.")
+
+        if self.target_num_rows_per_partition <= 0:
+            raise ValueError("Target number of rows per partition must be a positive integer")
+
+        if self.tx is not None and self.timeout is not None:
+            raise ValueError("Cannot set a timeout when an explicit transaction is provided")

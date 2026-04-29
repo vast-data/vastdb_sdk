@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [2.1.0] (2026-04-13)
+## [2.1.0] (2026-04-29)
 [2.1.0]: https://github.com/vast-data/vastdb_sdk/compare/v2.0.14...v2.1.0
 
 ### Added
@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Support for querying the partitions using the `partitions()` method of `ITable`
 - Support for deleting partitions usinng the `delete_partitions()` method of `ITable`
 - `ITable::select()` support for querying a partitioned table - NO API CHANGE
+- `Session.buffered_inserter()` to execute long record batch streaming into partitioned tables
 
 ### Fixed
 - Value of the fields `BlobExpansionConfig.add_missing_values_output` and `BlobExpansionConfig.add_excessive_values_output` are now correctly updated when using `Table.blob_expansion()`

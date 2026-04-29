@@ -7,10 +7,15 @@ For more details see:
 - [Tabular identity policy with the proper permissions](https://support.vastdata.com/s/article/UUID-14322b60-d6a2-89ac-3df0-3dfbb6974182)
 """
 
+import copy
 import os
+from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Optional
 
-from vastdb.transaction import Transaction
+from ._by_partition_insert import ByPartitionBufferedInserter as _BufferedInserter
+from .config import BufferedInsertConfig
+from .table_metadata import TableMetadata, TableRef
+from .transaction import Transaction
 
 if TYPE_CHECKING:
     from .config import BackoffConfig
@@ -67,3 +72,26 @@ class Session:
         """
         from . import transaction
         return transaction.Transaction(self, _adbc_driver_path=self.adbc_driver_path, _end_user=self._end_user)
+
+    def buffered_inserter(
+        self,
+        metadata: TableRef | TableMetadata,
+        executor: ThreadPoolExecutor,
+        flush_config: BufferedInsertConfig | None = None
+    ) -> "_BufferedInserter":
+        """Buffered Insert."""
+        self.features.check_partitioned()
+        flush_config = flush_config or BufferedInsertConfig()
+
+        if isinstance(metadata, TableRef):
+            metadata = TableMetadata(ref=copy.copy(metadata))
+
+            if flush_config.tx is None:
+                with self.transaction() as tx:
+                    metadata.load(tx)
+            else:
+                metadata.load(flush_config.tx)
+        else:
+            metadata = copy.deepcopy(metadata)
+
+        return _BufferedInserter(lambda: self.transaction(), metadata, executor, flush_config)

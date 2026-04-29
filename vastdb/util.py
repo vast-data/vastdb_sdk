@@ -1,5 +1,7 @@
 import logging
 import re
+import threading
+from datetime import timedelta
 from typing import TYPE_CHECKING, Callable, List, Optional, Union
 
 import pyarrow as pa
@@ -167,3 +169,38 @@ def prefix_to_range(prefix: str):
     # https://en.wikipedia.org/wiki/UTF-8#Encoding guarantees that the last byte is not 0xFF
     upper[-1] = upper[-1] + 1
     return (lower, bytes(upper))
+
+
+class Timer:
+    def __init__(self, timeout_callback: Callable[[], None], timeout: timedelta):
+        if timeout.total_seconds() <= 0:
+            raise ValueError("Timeout must be a positive duration.")
+
+        self._timeout_callback = timeout_callback
+        self._timeout = timeout
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._stop_event = threading.Event()
+        self._reset_event = threading.Event()
+        self._thread.start()
+
+    def reset(self) -> None:
+        if self._stop_event.is_set():
+            raise AssertionError("Already stopped, cannot reset timer")
+
+        self._reset_event.set()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        self._thread.join()
+
+    def _loop(self) -> None:
+        while not self._stop_event.is_set():
+            wait_interrupted = self._reset_event.wait(self._timeout.total_seconds())
+
+            if self._stop_event.is_set():
+                break
+
+            if wait_interrupted:
+                self._reset_event.clear()
+            else:
+                self._timeout_callback()
