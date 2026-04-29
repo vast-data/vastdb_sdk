@@ -78,6 +78,22 @@ class TableRef:
         return self.full_path
 
 
+@dataclass
+class PartitionsMetadata:
+    """Partitions Metadata.
+
+    Used in order to keep the server as the source of truth for post transform column names
+    """
+
+    spec: PartitionSpec
+    post_transform_names: list[str]
+
+    def __post_init__(self):
+        """Validate params."""
+        if len(self.spec.partition_keys) != len(self.post_transform_names):
+            raise ValueError("Length and order of post_transform_names must match the number of keys in spec")
+
+
 class TableMetadata:
     """Table Metadata."""
 
@@ -87,7 +103,7 @@ class TableMetadata:
     _ibis_table: ibis.Table
     _stats: Optional[TableStats]
     _vector_index: Optional[VectorIndex]
-    _partitioning: Optional[PartitionSpec]
+    _partitions_metadata: Optional[PartitionsMetadata]
 
     def __init__(
         self,
@@ -95,7 +111,7 @@ class TableMetadata:
         arrow_schema: Optional[pa.Schema] = None,
         table_type: Optional[TableType] = None,
         vector_index: Optional[VectorIndex] = None,
-        partitioning: Optional[PartitionSpec] = None
+        partitions_metadata: Optional[PartitionsMetadata] = None,
     ):
         """Table Metadata."""
         self._ref = deepcopy(ref)
@@ -104,10 +120,10 @@ class TableMetadata:
         self._sorted_columns = None
         self._stats = None
         self._vector_index = vector_index
-        self._partitioning = partitioning
+        self._partitions_metadata = partitions_metadata
 
-        if table_type not in {TableType.SortedPartitions, TableType.Partitioned, None} and partitioning is not None:
-            raise ValueError(f"Only a partitioned table may have partitioning. Given TableType: {table_type} with partitioning: {partitioning}")
+        if table_type not in {TableType.SortedPartitions, TableType.Partitioned, None} and partitions_metadata is not None:
+            raise ValueError(f"Only a partitioned table may have partitions metadata. Given TableType: {table_type}")
 
     def __eq__(self, other: object) -> bool:
         """TableMetadata Equal."""
@@ -146,9 +162,9 @@ class TableMetadata:
             return
 
         self._sorted_columns = self._load_sorted_columns(self.arrow_schema, tx)
-        self._partitioning = TableMetadata._parse_partition_spec(self.arrow_schema)
+        self._partitions_metadata = TableMetadata._parse_partition_spec(self.arrow_schema)
 
-        match (self._sorted_columns, self._partitioning):
+        match (self._sorted_columns, self._partitions_metadata):
             case (None, None):
                 self._table_type = TableType.Regular
             case (None, _):
@@ -206,18 +222,20 @@ class TableMetadata:
             return None
 
     @staticmethod
-    def _parse_partition_spec(schema: pa.Schema) -> Optional[PartitionSpec]:
+    def _parse_partition_spec(schema: pa.Schema) -> Optional[PartitionsMetadata]:
         if (partition_spec_json := schema.metadata.get(_internal.TABLE_METADATA_PARTITION_SPEC_PROPERTY)) is None:
             return None
 
         partition_keys: list[PartitionKey] = []
+        post_transform_names = []
         partitioning: list[dict[str, str]] = json.loads(partition_spec_json)
 
         for partition_column in partitioning:
             column_metadata = _PartitionColumnMetadata.model_validate(partition_column)
+            post_transform_names.append(column_metadata.column_name)
             partition_keys.append(
                 PartitionKey(
-                    column_metadata.column_name,
+                    column_metadata.source_column_name,
                     column_metadata.as_iceberg_transform(),
                 )
             )
@@ -225,7 +243,7 @@ class TableMetadata:
         if len(partition_keys) == 0:
             raise AssertionError("Server returned an empty partition spec")
 
-        return PartitionSpec(partition_keys=partition_keys)
+        return PartitionsMetadata(PartitionSpec(partition_keys=partition_keys), post_transform_names)
 
     def load_sorted_columns(self, tx: "Transaction") -> None:
         """Return sorted columns' metadata."""
@@ -269,9 +287,9 @@ class TableMetadata:
         )
 
     @property
-    def partitioning(self) -> Optional[PartitionSpec]:
-        """Get table's partitioning."""
-        return self._partitioning
+    def partitioning(self) -> Optional[PartitionsMetadata]:
+        """Get table's partitions metadata."""
+        return self._partitions_metadata
 
     @property
     def stats(self) -> Optional[TableStats]:

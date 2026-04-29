@@ -30,7 +30,13 @@ import pyarrow as pa
 import urllib3
 
 from vastdb._table_interface import IbisPredicate, ITable, ReadOnlyTable
-from vastdb.table_metadata import TableMetadata, TableRef, TableStats, TableType
+from vastdb.table_metadata import (
+    PartitionsMetadata,
+    TableMetadata,
+    TableRef,
+    TableStats,
+    TableType,
+)
 
 from . import _by_column_inserter, _ibis_support, _internal, errors, util
 from ._ibis_support import validate_ibis_support_schema
@@ -42,7 +48,6 @@ from ._internal import (
     VectorIndex,
 )
 from .config import ImportConfig, QueryConfig
-from .partitioning import PartitionSpec as _PartitionSpec
 
 if TYPE_CHECKING:
     from .transaction import Transaction
@@ -195,8 +200,7 @@ class _Partitions:
         if table._metadata.partitioning is None:
             raise ValueError("_Partitions __init__ requires a partitioned table")
 
-        self._partition_spec = typing.cast(_PartitionSpec, table._metadata.partitioning)
-
+        self._partitions_metadata = typing.cast(PartitionsMetadata, table._metadata.partitioning)
         self._pit = TableInTransaction(
             TableMetadata(dataclasses.replace(table.ref, table=f"{table.ref.table}___VAST_PARTITIONS")),
             table._tx
@@ -208,8 +212,8 @@ class _Partitions:
 
         if include_pre_transform_columns:
             pre_transform_fields_without_identity = (
-                table.arrow_schema.field(key.pre_transform_name)
-                for key in self._partition_spec.partition_keys if not key.is_identity
+                table.arrow_schema.field(key.column)
+                for key in self._partitions_metadata.spec.partition_keys if not key.is_identity
             )
             self._pit._metadata.arrow_schema = pa.schema(
                 itertools.chain(
@@ -788,8 +792,8 @@ class TableInTransaction(ITable):
             return pa.RecordBatchReader.from_batches(schema, batches)
 
         pit = _Partitions(self, include_pre_transform_columns=True)
-        partition_spec = typing.cast(_PartitionSpec, self._metadata.partitioning)
-        pre_transform_partition_names = {k.pre_transform_name for k in partition_spec.partition_keys}
+        partitions_metadata = typing.cast(PartitionsMetadata, self._metadata.partitioning)
+        pre_transform_partition_names = {k.column for k in partitions_metadata.spec.partition_keys}
 
         if isinstance(predicate, ibis.common.deferred.Deferred):
             # may raise if the predicate is invalid (e.g. wrong types / missing column)
@@ -804,8 +808,7 @@ class TableInTransaction(ITable):
                 fields_map = {name: pit[name] for name in pre_transform_partition_names}
                 pit_predicate = _ibis_support.change_columns(pit_predicate, fields_map).to_expr()
 
-        partition_keys = [k.column for k in partition_spec.partition_keys]
-        partition_batches = pit.select(partition_keys, predicate=pit_predicate, config=config)
+        partition_batches = pit.select(partitions_metadata.post_transform_names, pit_predicate, config)
 
         if columns is None:
             columns = self.arrow_schema.names
@@ -829,8 +832,8 @@ class TableInTransaction(ITable):
         for batch in partition_batches:
             for row in range(batch.num_rows):
                 partition_pred = functools.reduce(operator.and_, [
-                    pit[key.column] == batch.column(column_index)[row].as_py()
-                    for column_index, key in enumerate(partition_spec.partition_keys)
+                    pit[name] == batch.column(column_index)[row].as_py()
+                    for column_index, name in enumerate(partitions_metadata.post_transform_names)
                 ])
                 full_pred = partition_pred if predicate is None else predicate & partition_pred
                 _, iterator = self._select_single_table(full_schema, columns.copy(), full_pred, config, internal_row_id, limit_rows)
@@ -864,7 +867,7 @@ class TableInTransaction(ITable):
         sorted_column_names = (set() if self._metadata._sorted_columns is None
                                else set(f.name for f in self._metadata._sorted_columns))
         partition_column_names = (set() if self._metadata.partitioning is None
-                             else set(col.column for col in self._metadata.partitioning.partition_keys))
+                             else set(col.column for col in self._metadata.partitioning.spec.partition_keys))
         vector_column_names = set() if self.vector_index is None else {self.vector_index.column}
 
         def insert_rows_rpc(batch: pa.RecordBatch) -> pa.Array:

@@ -3,10 +3,7 @@
 from dataclasses import dataclass
 from typing import Any
 
-from pyiceberg.transforms import (
-    IdentityTransform,
-    Transform,
-)
+from pyiceberg.transforms import IdentityTransform, Transform
 
 
 @dataclass
@@ -18,16 +15,8 @@ class PartitionKey:
 
     @property
     def is_identity(self) -> bool:
-        """Returns whether the trasform of self is identity."""
+        """Returns whether the transform of self is identity."""
         return isinstance(self.transform, IdentityTransform)
-
-    @property
-    def pre_transform_name(self) -> str:
-        """Returns the name of the column prior to its transform."""
-        if self.is_identity:
-            return self.column
-
-        return self.column.rsplit("_", 1)[0]
 
 
 @dataclass

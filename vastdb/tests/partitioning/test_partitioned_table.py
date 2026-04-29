@@ -20,6 +20,7 @@ from pyiceberg.transforms import (
 from vastdb import _internal, errors
 from vastdb.partitioning import PartitionKey, PartitionSpec
 from vastdb.session import Session
+from vastdb.table_metadata import PartitionsMetadata
 
 _ARROW_SCHEMA = pa.schema(
     [
@@ -92,12 +93,7 @@ def _post_transform_name(column_name: str, transform: Transform) -> str:
     return f"{column_name}{transform_suffix}"
 
 
-def _create_partition_spec(
-    column_name: str, transform: Transform, post_transform: bool = False
-) -> PartitionSpec:
-    if post_transform:
-        column_name = _post_transform_name(column_name, transform)
-
+def _create_partition_spec(column_name: str, transform: Transform) -> PartitionSpec:
     return PartitionSpec(
         partition_keys=[
             PartitionKey(column="a", transform=IdentityTransform()),
@@ -138,12 +134,25 @@ def test_create_partitioned_table(
             partition_spec=_create_partition_spec(column_name, transform),
         )
 
-        assert t._metadata.partitioning == _create_partition_spec(
-            column_name, transform, post_transform=True
+        assert t._metadata.partitioning == PartitionsMetadata(
+            _create_partition_spec(column_name, transform),
+            ["a", _post_transform_name(column_name, transform)]
         )
 
         t.drop()
         s.drop()
+
+
+def test_create_partitioned_table_negative(hydra_session: Session, clean_bucket_name: str):
+    with hydra_session.transaction() as tx:
+        s = tx.bucket(clean_bucket_name).create_schema("s")
+
+        with pytest.raises(ValueError, match="Partition key column 'B' does not exist in the provided Arrow schema"):
+            s.create_table(
+            "partitioned_table",
+            _ARROW_SCHEMA,
+            partition_spec=_create_partition_spec("B", IdentityTransform()),
+        )
 
 
 @pytest.mark.parametrize("column_name, transform", _TRANSFORMS)
