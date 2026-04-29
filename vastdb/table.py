@@ -864,11 +864,6 @@ class TableInTransaction(ITable):
         by_columns is kept only for backward compatability - DO NOT REMOVE IT
         """
         self._assert_not_imports_table()
-        sorted_column_names = (set() if self._metadata._sorted_columns is None
-                               else set(f.name for f in self._metadata._sorted_columns))
-        partition_column_names = (set() if self._metadata.partitioning is None
-                             else set(col.column for col in self._metadata.partitioning.spec.partition_keys))
-        vector_column_names = set() if self.vector_index is None else {self.vector_index.column}
 
         def insert_rows_rpc(batch: pa.RecordBatch) -> pa.Array:
             res = self._tx._rpc.api.insert_rows(
@@ -895,7 +890,7 @@ class TableInTransaction(ITable):
             update_rows_rpc,
             _internal.MAX_REQUEST_BODY_SIZE,
             self.arrow_schema,
-            sorted_column_names | partition_column_names | vector_column_names,
+            self._metadata.non_updatable_column_names()
         )
 
         if isinstance(rows, pa.Table):

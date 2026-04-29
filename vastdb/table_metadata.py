@@ -314,6 +314,15 @@ class TableMetadata:
             self._arrow_schema = None
             self._ibis_table = None
 
+    def non_updatable_column_names(self) -> set[str]:
+        """Return non-updatable column names."""
+        sorted_column_names = (set() if self._sorted_columns is None
+                               else set(f.name for f in self._sorted_columns))
+        partition_column_names = (set() if self._partitions_metadata is None
+                                  else set(key.column for key in self._partitions_metadata.spec.partition_keys))
+        vector_column_names = set() if self._vector_index is None else {self._vector_index.column}
+        return sorted_column_names | partition_column_names | vector_column_names
+
     @property
     def sorted_columns(self) -> list[pa.Field]:
         """Sorted columns."""
