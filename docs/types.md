@@ -10,6 +10,9 @@ The following [Arrow data types](https://arrow.apache.org/docs/cpp/api/datatype.
  - INT16
  - INT32
  - INT64
+ - FLOAT16
+ - FLOAT32
+ - FLOAT64
  - STRING
  - LIST
  - STRUCT

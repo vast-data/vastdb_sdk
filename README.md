@@ -273,6 +273,94 @@ with session.transaction() as tx:
     print(distinct_elements)
 ```
 
+## Table Partitioning And Sorting
+
+When creating a new table, both partitioning and sorting columns can be specified.
+
+```python
+import pyarrow as pa
+from pyiceberg.transforms import BucketTransform, YearTransform
+from vastdb.partitioning import PartitionKey, PartitionSpec
+from vastdb.table import SortingKey
+
+schema = pa.schema([
+    ("id", pa.int64()),
+    ("category", pa.utf8()),
+    ("timestamp", pa.timestamp("us")),
+    ("value", pa.float64()),
+])
+
+partition_spec = PartitionSpec([
+    PartitionKey("category", BucketTransform(4)),
+])
+sorting_keys = ["timestamp"]
+
+with session.transaction() as tx:
+    bucket = tx.bucket("mybucket")
+    schema_obj = bucket.create_schema("myschema")
+    table = schema_obj.create_table(
+        "mytable",
+        schema,
+        sorting_keys=sorting_keys,
+        partition_spec=partition_spec,
+    )
+
+    ...
+```
+
+## Vector Search
+
+In order to use vector search functionality, the SDK must be installed with ADBC support and be provided with an ADBC driver.
+
+Install the SDK with ADBC support:
+
+```bash
+pip install vastdb[adbc]
+```
+
+Supply an ADBC driver upon connection:
+
+```python
+session = vastdb.connect(
+    endpoint=endpoint,
+    access=AWS_ACCESS_KEY_ID,
+    secret=AWS_SECRET_ACCESS_KEY,
+    adbc_driver_path="/path/to/vast_adbc_driver.so"
+)
+```
+
+Use vector search functionaility:
+
+```python
+import pyarrow as pa
+from vastdb.schema import VectorIndexSpec
+
+vector_schema = pa.schema([
+    ("id", pa.int32()),
+    ("vector_column", pa.list_(pa.field("item", pa.float32()), 128)),  # 128-dimension vector
+])
+
+vector_index = VectorIndexSpec(column="vector_column", distance_metric="l2sq")
+
+with session.transaction() as tx:
+    bucket = tx.bucket("mybucket")
+    schema_obj = bucket.create_schema("myschema")
+    table = schema_obj.create_table(
+        "myvectortable",
+        vector_schema,
+        vector_index=vector_index,
+    )
+
+with session.transaction() as tx:
+    table = tx.bucket("mybucket").schema("myschema").table("myvectortable")
+    arrow_table = table.vector_search(
+            vec=query_vector.tolist(),
+            columns=['id', 'vector_column'],
+            limit=2,
+            predicate=table['id'] > 50
+    ).read_all()
+```
+
 ## More Information
 
 See these blog posts for more examples:
