@@ -1,5 +1,6 @@
 """Tests for vector index functionality."""
 
+import itertools
 import logging
 from typing import Optional
 
@@ -7,80 +8,73 @@ import pyarrow as pa
 import pytest
 
 from vastdb import errors
-from vastdb._internal import VectorIndexSpec
+from vastdb._internal import DefaultQuantization, VectorIndexSpec
 from vastdb.session import Session
+
+from .util import pytest_skip_if_vector_index_not_supported
 
 log = logging.getLogger(__name__)
 
+_QUANTIZATION_VALUES = ["scalar_8bit", "none"]
 
-@pytest.mark.parametrize("table_name,vector_index", [
-    # Test 1: Table without vector index
-    ("table_without_index", None),
-    # Test 2: Table with L2 vector index
-    ("table_with_l2_index", VectorIndexSpec("embedding", "l2sq")),
-    # Test 3: Table with inner product vector index
-    ("table_with_ip_index", VectorIndexSpec("embedding", "ip")),
-])
-def test_create_table_with_vector_index_metadata(session: Session,
-                                                 clean_bucket_name: str,
-                                                 table_name: str,
-                                                 vector_index: Optional[VectorIndexSpec]):
-    if vector_index is not None:
-        try:
-            session.features.check_vector()
-        except errors.NotSupportedVersion:
-            pytest.skip("Vector index is not supported on this vast server version")
-    """Test that table creation and stats retrieval work correctly with vector index metadata."""
-    schema_name = "schema1"
+_INVALID_QUANTIZATION_COMBINATIONS = {
+    ("scalar_8bit", "none"),
+}
 
+_DEFAULT_VECTOR_QUANTIZATION = "scalar_8bit"
+
+
+def _resolved_quantization(value: str | DefaultQuantization) -> str:
+    return _DEFAULT_VECTOR_QUANTIZATION if isinstance(value, DefaultQuantization) else value
+
+
+def _run_vector_index_test(session: Session,
+                           clean_bucket_name: str,
+                           schema_name: str,
+                           input_spec: Optional[VectorIndexSpec],
+                           expect_success: bool,
+                           expected_spec: Optional[VectorIndexSpec]):
+    if input_spec is not None:
+        pytest_skip_if_vector_index_not_supported(session)
     with session.transaction() as tx:
-        log.info(f"Testing table '{table_name}' with {vector_index}")
-
-        # Create schema
         bucket = tx.bucket(clean_bucket_name)
         schema = bucket.create_schema(schema_name)
 
-        # Create the appropriate schema based on whether vector index is needed
-        if vector_index is None:
-            # Simple table without vector index
-            arrow_schema = pa.schema([
-                ('id', pa.int64()),
-                ('data', pa.string())
-            ])
+        if input_spec is None:
+            arrow_schema = pa.schema([('id', pa.int64()), ('data', pa.string())])
         else:
-            # Table with vector column
-            vector_dimension = 128  # Fixed-size vector dimension
+            vector_dimension = 128
             vec_type = pa.list_(pa.field('', pa.float32(), False), vector_dimension)
-            arrow_schema = pa.schema([
-                ('id', pa.int64()),
-                ('embedding', vec_type)  # Fixed-size vector column
-            ])
+            arrow_schema = pa.schema([('id', pa.int64()), ('embedding', vec_type)])
 
-        # Create table with or without vector index
-        log.info(f"Creating table: {table_name}")
-        table = schema.create_table(
-            table_name=table_name,
-            columns=arrow_schema,
-            vector_index=vector_index
-        )
+        if not expect_success:
+            with pytest.raises(errors.BadRequest):
+                schema.create_table(table_name="vec_table", columns=arrow_schema, vector_index=input_spec)
+            return
 
-        # Reload stats to ensure we get the vector index metadata
+        table = schema.create_table(table_name="vec_table", columns=arrow_schema, vector_index=input_spec)
         table.reload_stats()
 
-        # Get vector index metadata
-        result_vector_index = table._metadata._vector_index
+        result = table._metadata._vector_index
+        result_spec = None if result is None else result.to_vector_index_spec()
+        assert result_spec == expected_spec
 
-        log.info(f"Vector index metadata: {result_vector_index}")
 
-        # Assert expected values (should match input parameters)
-        result_vector_index_spec = (
-            None
-            if result_vector_index is None
-            else result_vector_index.to_vector_index_spec()
-        )
-        assert result_vector_index_spec == vector_index
-
-        log.info(f"✓ Test passed for table '{table_name}'")
+@pytest.mark.parametrize("schema_name,input_vector_index", [
+    ("schema_no_index", None),
+    ("schema_l2sq", VectorIndexSpec("embedding", "l2sq")),
+    ("schema_ip", VectorIndexSpec("embedding", "ip")),
+])
+def test_create_table_with_vector_index_basic_metadata(session: Session,
+                                                       clean_bucket_name: str,
+                                                       schema_name: str,
+                                                       input_vector_index: Optional[VectorIndexSpec]):
+    expected_vector_index = None
+    if input_vector_index is not None:
+        expected_vector_index = VectorIndexSpec(input_vector_index.column, input_vector_index.distance_metric,
+                                                _DEFAULT_VECTOR_QUANTIZATION, _DEFAULT_VECTOR_QUANTIZATION)
+    _run_vector_index_test(session, clean_bucket_name, schema_name,
+                           input_vector_index, True, expected_vector_index)
 
 
 @pytest.mark.parametrize("table_name,vector_index,expected_error", [
@@ -96,10 +90,7 @@ def test_create_table_with_invalid_vector_index(session: Session,
                                                 expected_error: str):
     """Test that table creation fails with appropriate error messages for invalid vector index parameters."""
     if vector_index is not None:
-        try:
-            session.features.check_vector()
-        except errors.NotSupportedVersion:
-            pytest.skip("Vector index is not supported on this vast server version")
+        pytest_skip_if_vector_index_not_supported(session)
     schema_name = "schema1"
 
     with session.transaction() as tx:
@@ -135,10 +126,7 @@ def test_create_table_with_invalid_vector_index(session: Session,
 
 def test_vector_index_metadata_from_stats(session: Session, clean_bucket_name: str):
     """Test that vector index metadata is correctly retrieved from table stats."""
-    try:
-        session.features.check_vector()
-    except errors.NotSupportedVersion:
-        pytest.skip("Vector index is not supported on this vast server version")
+    pytest_skip_if_vector_index_not_supported(session)
 
     schema_name = "schema1"
     table_name = "vector_table"
@@ -175,3 +163,32 @@ def test_vector_index_metadata_from_stats(session: Session, clean_bucket_name: s
         assert table._metadata._vector_index.distance_metric == "l2sq"
 
         log.info("✓ Vector index metadata correctly retrieved from stats")
+
+
+@pytest.mark.parametrize("schema_name,input_spec", [
+    ("default_quantization", VectorIndexSpec("embedding", "l2sq")),
+    ("cluster_scalar_8bit_default_search", VectorIndexSpec("embedding", "l2sq", "scalar_8bit")),
+    ("cluster_none_default_search", VectorIndexSpec("embedding", "l2sq", "none")),
+    *[
+        (f"cluster_{cluster_quant}_search_{search_quant}",
+         VectorIndexSpec("embedding", "l2sq", cluster_quantization=cluster_quant, search_quantization=search_quant))
+        for cluster_quant, search_quant in itertools.product(_QUANTIZATION_VALUES, repeat=2)
+    ],
+])
+def test_vector_index_quantization_values(session: Session, clean_bucket_name: str,
+                                          schema_name: str, input_spec: VectorIndexSpec):
+    pytest_skip_if_vector_index_not_supported(session)
+
+    resolved_cluster_quantization = _resolved_quantization(input_spec.cluster_quantization)
+    resolved_search_quantization = _resolved_quantization(input_spec.search_quantization)
+
+    is_invalid = (resolved_cluster_quantization, resolved_search_quantization) in _INVALID_QUANTIZATION_COMBINATIONS
+    expected_spec = None if is_invalid else VectorIndexSpec(
+        input_spec.column,
+        input_spec.distance_metric,
+        resolved_cluster_quantization,
+        resolved_search_quantization,
+    )
+
+    _run_vector_index_test(session, clean_bucket_name, schema_name,
+                           input_spec, not is_invalid, expected_spec)

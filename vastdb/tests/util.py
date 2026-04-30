@@ -5,14 +5,23 @@ from typing import Any, Iterator, List, cast
 import numpy as np
 import pandas as pd
 import pyarrow as pa
+import pytest
 from packaging.version import Version
 
+from vastdb import errors
 from vastdb._internal import SortingKey
 from vastdb.session import Session
 from vastdb.table import Table
 from vastdb.transaction import Transaction
 
 log = logging.getLogger(__name__)
+
+
+def pytest_skip_if_vector_index_not_supported(session: Session) -> None:
+    try:
+        session.features.check_vector()
+    except errors.NotSupportedVersion:
+        pytest.skip("Vector index is not supported on this vast server version")
 
 
 def assert_row_ids_ascending_on_first_insertion_to_table(row_ids, expected_num_rows, sorted_table):

@@ -830,13 +830,30 @@ def _parse_table_info(obj) -> TableInfo:
                      partition_key_enabled)
 
 
+@dataclass(frozen=True)
+class DefaultQuantization:
+    pass
+
+
 @dataclass
 class VectorIndexSpec:
     """
     Vector Index Specification when creating a table.
+
+    Supported values:
+    -----------------
+       distance_metric: "l2sq" or "ip".
+       cluster_quantization: "scalar_8bit" or "none"
+       search_quantization: "scalar_8bit" or "none"
+
+    If cluster/search quantization is not provided, server defaults are used.
+    Some quantization combinations may be rejected by the server
+       (for example: cluster="scalar_8bit", search="none").
     """
     column: str
     distance_metric: str
+    cluster_quantization: str | DefaultQuantization = DefaultQuantization()
+    search_quantization: str | DefaultQuantization = DefaultQuantization()
 
 
 @dataclass
@@ -844,10 +861,14 @@ class VectorIndex:
     column: str
     distance_metric: str
     sql_distance_function: str
+    cluster_quantization: str
+    search_quantization: str
 
     def to_vector_index_spec(self) -> VectorIndexSpec:
         return VectorIndexSpec(self.column,
-                               self.distance_metric)
+                               self.distance_metric,
+                               self.cluster_quantization,
+                               self.search_quantization)
 
 
 @dataclass
@@ -1409,6 +1430,10 @@ class VastdbApi:
         if vector_index is not None:
             headers['tabular-vector-index-column'] = vector_index.column
             headers['tabular-vector-index-distance-metric'] = vector_index.distance_metric
+            if not isinstance(vector_index.cluster_quantization, DefaultQuantization):
+                headers['tabular-vector-index-cluster-quantization'] = vector_index.cluster_quantization
+            if not isinstance(vector_index.search_quantization, DefaultQuantization):
+                headers['tabular-vector-index-search-quantization'] = vector_index.search_quantization
 
         url_params = {'topic_partitions': str(topic_partitions)} if topic_partitions else {}
         if create_imports_table:
@@ -1466,18 +1491,22 @@ class VastdbApi:
             column_name = vector_index_metadata.ColumnName()
             distance_metric = vector_index_metadata.DistanceMetric()
             sql_distance_function = vector_index_metadata.SqlFunctionName()
+            cluster_quantization = vector_index_metadata.ClusterQuantization()
+            search_quantization = vector_index_metadata.SearchQuantization()
 
-            if (column_name is None or
-                distance_metric is None or
-                sql_distance_function is None):
+            vector_index_values = (column_name, distance_metric, sql_distance_function, cluster_quantization, search_quantization)
+            if any(value is None for value in vector_index_values):
                 raise errors.ApiResponseError(
-                    "VectorIndexMetadata properties (column_name, distance_metric, sql_function_name) must all be set."
+                    "VectorIndexMetadata properties (column_name, distance_metric, sql_function_name, cluster_quantization, search_quantization) must all be set."
                 )
 
             vector_index = VectorIndex(
                 column=column_name.decode('utf-8'),
                 distance_metric=distance_metric.decode('utf-8'),
-                sql_distance_function=sql_distance_function.decode('utf-8'))
+                sql_distance_function=sql_distance_function.decode('utf-8'),
+                cluster_quantization=cluster_quantization.decode('utf-8'),
+                search_quantization=search_quantization.decode('utf-8'),
+            )
         else:
             vector_index = None
 

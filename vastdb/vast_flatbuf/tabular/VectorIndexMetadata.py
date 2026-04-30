@@ -45,7 +45,21 @@ class VectorIndexMetadata(object):
             return self._tab.String(o + self._tab.Pos)
         return None
 
-def Start(builder): builder.StartObject(3)
+    # VectorIndexMetadata
+    def ClusterQuantization(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(10))
+        if o != 0:
+            return self._tab.String(o + self._tab.Pos)
+        return None
+
+    # VectorIndexMetadata
+    def SearchQuantization(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(12))
+        if o != 0:
+            return self._tab.String(o + self._tab.Pos)
+        return None
+
+def Start(builder): builder.StartObject(5)
 def VectorIndexMetadataStart(builder):
     """This method is deprecated. Please switch to Start."""
     return Start(builder)
@@ -61,6 +75,14 @@ def AddSqlFunctionName(builder, sqlFunctionName): builder.PrependUOffsetTRelativ
 def VectorIndexMetadataAddSqlFunctionName(builder, sqlFunctionName):
     """This method is deprecated. Please switch to AddSqlFunctionName."""
     return AddSqlFunctionName(builder, sqlFunctionName)
+def AddClusterQuantization(builder, clusterQuantization): builder.PrependUOffsetTRelativeSlot(3, flatbuffers.number_types.UOffsetTFlags.py_type(clusterQuantization), 0)
+def VectorIndexMetadataAddClusterQuantization(builder, clusterQuantization):
+    """This method is deprecated. Please switch to AddClusterQuantization."""
+    return AddClusterQuantization(builder, clusterQuantization)
+def AddSearchQuantization(builder, searchQuantization): builder.PrependUOffsetTRelativeSlot(4, flatbuffers.number_types.UOffsetTFlags.py_type(searchQuantization), 0)
+def VectorIndexMetadataAddSearchQuantization(builder, searchQuantization):
+    """This method is deprecated. Please switch to AddSearchQuantization."""
+    return AddSearchQuantization(builder, searchQuantization)
 def End(builder): return builder.EndObject()
 def VectorIndexMetadataEnd(builder):
     """This method is deprecated. Please switch to End."""

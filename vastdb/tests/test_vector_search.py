@@ -4,17 +4,25 @@ import numpy as np
 import pyarrow as pa
 import pytest
 
-from vastdb import errors
 from vastdb._adbc import _ibis_to_qe_predicates
 from vastdb._internal import VectorIndex, VectorIndexSpec
 from vastdb._table_interface import IbisPredicate
 from vastdb.table_metadata import TableMetadata, TableRef, TableType
+
+from .util import pytest_skip_if_vector_index_not_supported
 
 DEFAULT_VECTOR_COLUMN_NAME = "vector_col"
 
 DIM = 8
 TEST_DISTANCE_FUNC = 'array_distance'
 TEST_DISTANCE_METRIC = 'l2sq'
+TEST_QUANTIZATION = "scalar_8bit"
+
+
+def _create_test_vector_index(column: str) -> VectorIndex:
+    return VectorIndex(column, TEST_DISTANCE_METRIC, TEST_DISTANCE_FUNC,
+                       TEST_QUANTIZATION, TEST_QUANTIZATION)
+
 
 VectorColumnArrowType = pa.list_(
     pa.field(name='item', type=pa.float32(), nullable=False), DIM)
@@ -96,9 +104,7 @@ def test_sanity(session, clean_bucket_name: str, vector_column_name: str):
     table_md = TableMetadata(ref,
                              arrow_schema,
                              TableType.Regular,
-                             vector_index=VectorIndex(vector_column_name,
-                                                      TEST_DISTANCE_METRIC,
-                                                      TEST_DISTANCE_FUNC))
+                             vector_index=_create_test_vector_index(vector_column_name))
     data_table = pa.table(schema=arrow_schema, data=into_arrow_arrays(data))
 
     with session.transaction() as tx:
@@ -127,9 +133,7 @@ def test_with_predicates(session, clean_bucket_name: str):
 
     ref = TableRef(clean_bucket_name, 's', 't')
     table_md = TableMetadata(ref, arrow_schema, TableType.Regular,
-                             vector_index=VectorIndex(vector_column_name,
-                                                      TEST_DISTANCE_METRIC,
-                                                      TEST_DISTANCE_FUNC))
+                             vector_index=_create_test_vector_index(vector_column_name))
 
     data = get_example_data(vector_column_name)
     data_table = pa.table(schema=arrow_schema, data=into_arrow_arrays(data))
@@ -172,14 +176,13 @@ def test_ibis_to_query_engine_predicates(ibis_predicate: IbisPredicate, expected
 
 def test_with_predicates_get_vector_index_properties_from_server(session,
                                                                  clean_bucket_name: str):
-    try:
-        session.features.check_vector()
-    except errors.NotSupportedVersion:
-        pytest.skip("Vector index is not supported on this vast server version")
+    pytest_skip_if_vector_index_not_supported(session)
 
     vector_column_name = 'vector_column'
     vector_index_distance_metric = 'l2sq'
     vector_index_sql_distance_function = "array_distance"
+    cluster_quantization = "scalar_8bit"
+    search_quantization = "scalar_8bit"
 
     arrow_schema = pa.schema([('id', pa.int32()), ('n1', pa.int32(
     )), ('n2', pa.int32()), (vector_column_name, VectorColumnArrowType),])
@@ -196,7 +199,9 @@ def test_with_predicates_get_vector_index_properties_from_server(session,
                  .create_table('t',
                                arrow_schema,
                                vector_index=VectorIndexSpec(vector_column_name,
-                                                            vector_index_distance_metric)))
+                                                            vector_index_distance_metric,
+                                                            cluster_quantization,
+                                                            search_quantization)))
         table.insert(data_table)
 
     with session.transaction() as tx:
@@ -206,7 +211,9 @@ def test_with_predicates_get_vector_index_properties_from_server(session,
         assert table.vector_index == VectorIndex(
             column=vector_column_name,
             distance_metric=vector_index_distance_metric,
-            sql_distance_function=vector_index_sql_distance_function)
+            sql_distance_function=vector_index_sql_distance_function,
+            cluster_quantization=cluster_quantization,
+            search_quantization=search_quantization)
 
         pred = table_md.ibis_table['n2'] == 200
         reader = table.vector_search(vec=query_vector.tolist(),
