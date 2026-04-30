@@ -1,5 +1,6 @@
 import itertools
 from datetime import datetime
+from typing import Callable
 
 import ibis
 import pyarrow as pa
@@ -278,6 +279,43 @@ def test_query_partitioned_table(
         for col in ("a", column_name, "s"):
             queried_data = pa.Table.from_batches(t.select([col])).combine_chunks()
             assert _DATA.select([col]).equals(queried_data)
+
+
+@pytest.mark.parametrize(
+    "predicate_generator, arrow_filter",
+    [
+        (lambda t: t["a"] == -1, pc.field("a") == -1),
+        (lambda t: (t["a"] == 1) & (t["a"] == 2), (pc.field("a") == 1) & (pc.field("a") == 2)),
+        (lambda t: t["a"] == 1, pc.field("a") == 1),
+        (lambda t: t["b"] >= 6, pc.field("b") >= 6),
+    ],
+)
+@pytest.mark.parametrize("column_name, transform", _TRANSFORMS)
+def test_predicate_partitioned_table(
+    hydra_session: Session,
+    clean_bucket_name: str,
+    column_name: str,
+    transform: Transform,
+    predicate_generator: Callable,
+    arrow_filter,
+):
+    schema_name = f"s_{column_name}"
+    table_name = f"partitioned_table_{column_name}"
+
+    with hydra_session.transaction() as tx:
+        s = tx.bucket(clean_bucket_name).create_schema(schema_name)
+        t = s.create_table(
+            table_name,
+            _ARROW_SCHEMA,
+            partition_spec=_create_partition_spec(column_name, transform),
+        )
+        t.insert(_DATA)
+
+    with hydra_session.transaction() as tx:
+        t = tx.bucket(clean_bucket_name).schema(schema_name).table(table_name)
+        actual = t.select(["a", "s"], predicate=predicate_generator(t)).read_all()
+        expected_table = _DATA.filter(arrow_filter).select(["a", "s"])
+        assert expected_table.equals(actual), f"Predicate {predicate_generator(t)} did not return expected results"
 
 
 @pytest.mark.parametrize("column_name, transform", _TRANSFORMS)
