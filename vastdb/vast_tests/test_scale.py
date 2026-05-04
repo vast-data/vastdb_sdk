@@ -55,15 +55,22 @@ def test_table_stats(session, test_bucket_name, schema_name, table_name):
             res = t.select(columns=[col.name]).read_all().column(col.name)
             rand_values[col.name] = res[int(r.uniform(0, len(res)))].as_py()
 
-    logger.info(f"rand row to insert to the table - {rand_values}, {NUM_TIMES_TO_INSERT} times")
+    logger.info(f"Row to insert {NUM_TIMES_TO_INSERT} times to the table: {rand_values}")
     rb = pa.RecordBatch.from_pylist([rand_values] * NUM_TIMES_TO_INSERT)
     with session.transaction() as tx:
         t = tx.bucket(test_bucket_name).schema(schema_name).table(table_name)
         t.insert(rb)
-        time.sleep(2)  # waiting for stats to get updated
-        new_stat = t.get_stats()
-
-    logger.info("inserted to table")
+        logger.info("Inserted is complete")
+        max_attempts = 10
+        sleep_interval = 3
+        attempts = 0
+        while attempts < max_attempts:
+            attempts += 1
+            time.sleep(sleep_interval)  # waiting for stats to get updated
+            new_stat = t.get_stats()
+            if new_stat.size_in_bytes == initial_stat.size_in_bytes:
+                logger.info(f"Size was not updated after {attempts * sleep_interval} seconds")
+                new_stat = t.get_stats()
     assert new_stat.size_in_bytes != initial_stat.size_in_bytes
     assert new_stat.num_rows - NUM_TIMES_TO_INSERT == initial_stat.num_rows
 
