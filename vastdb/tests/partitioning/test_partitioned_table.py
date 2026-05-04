@@ -244,7 +244,7 @@ def test_query_partitioned_table(
 
     with hydra_session.transaction() as tx:
         t = tx.bucket(clean_bucket_name).schema(schema_name).table(table_name)
-        queried_data = pa.Table.from_batches(t.select()).combine_chunks()
+        queried_data = pa.Table.from_batches(t.select())
         assert _DATA.equals(queried_data)
 
         value_to_filter_by = _DATA[column_name][2].as_py()
@@ -253,7 +253,7 @@ def test_query_partitioned_table(
             t.select(
                 predicate=((t["a"] == 2) & (t[column_name] == value_to_filter_by))
             )
-        ).combine_chunks()
+        )
         assert _DATA.filter(
             (pc.field("a") == 2) & (pc.field(column_name) == value_to_filter_by)
         ).equals(queried_data)
@@ -267,7 +267,7 @@ def test_query_partitioned_table(
                     & (t["s"] == str_value_to_filter_by)
                 )
             )
-        ).combine_chunks()
+        )
         assert _DATA.filter(
             (pc.field("a") == 2)
             & (pc.field(column_name) == value_to_filter_by)
@@ -277,7 +277,7 @@ def test_query_partitioned_table(
         assert list(t.select(predicate=t["a"] == 0)) == []
 
         for col in ("a", column_name, "s"):
-            queried_data = pa.Table.from_batches(t.select([col])).combine_chunks()
+            queried_data = pa.Table.from_batches(t.select([col]))
             assert _DATA.select([col]).equals(queried_data)
 
 
