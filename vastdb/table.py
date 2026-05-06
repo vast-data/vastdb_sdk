@@ -54,7 +54,6 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-
 MAX_ROWS_PER_BATCH = 512 * 1024
 # for insert we need a smaller limit due to response amplification
 # for example insert of 512k uint8 result in 512k*8bytes response since row_ids are uint64
@@ -62,6 +61,8 @@ MAX_INSERT_ROWS_PER_PATCH = 512 * 1024
 # in case insert has TooWideRow - need to insert in smaller batches - each cell could contain up to 128K, and our wire is limited to 5MB
 MAX_COLUMN_IN_BATCH = int(5 * 1024 / 128)
 SORTING_SCORE_BITS = 63
+_NUM_ROWS_IN_ROW_GROUP = 2**16
+_ELYSIUM_SPLIT_ESTIMATION_SPLIT_ID = 0xffffffff - 3
 
 
 class ExpansionFormat(Enum):
@@ -513,10 +514,16 @@ class TableInTransaction(ITable):
                 stop_event.set()
                 # ThreadPoolExecutor will be joined at the end of the context
 
-    def _get_row_estimate(self,
+    def _get_elysium_row_estimate(self,
                           columns: list[str],
                           predicate: ibis.expr.types.BooleanColumn,
                           arrow_schema: pa.Schema):
+        """Get Elysium num rows estimation.
+
+        Uses QUERY_DATA with _ELYSIUM_SPLIT_ESTIMATION_SPLIT_ID
+        in order to get the elysium split estimation
+        which returns the num_row_groups estimate as the batch's num_rows
+        """
         query_data_request = _internal.build_query_data_request(
             schema=arrow_schema,
             predicate=predicate,
@@ -526,15 +533,50 @@ class TableInTransaction(ITable):
             schema=self.ref.schema,
             table=self.ref.table,
             params=query_data_request.serialized,
-            split=(0xffffffff - 3, 1, 1),
+            split=(_ELYSIUM_SPLIT_ESTIMATION_SPLIT_ID, 1, 1),
             txid=self._tx.active_txid)
         batch = _internal.read_first_batch(response.raw)
-        return batch.num_rows * 2**16 if batch is not None else 0
+        num_row_groups = batch.num_rows if batch is not None else 0
+        return num_row_groups * _NUM_ROWS_IN_ROW_GROUP
+
+    def _get_split_estimation(
+            self,
+            config: QueryConfig,
+            query_schema: pa.Schema,
+            columns: list[str],
+            predicate: ibis.expr.types.BooleanColumn
+    ) -> int:
+        if config.num_splits is not None:
+            return config.num_splits
+
+        def num_rows_to_num_splits(num_rows: int) -> int:
+            return max(1, num_rows // config.rows_per_split)
+
+        split_estimation_from_stats: int | None = (
+            num_rows_to_num_splits(self.stats.num_rows)
+            if self.stats else None
+        )
+
+        match (split_estimation_from_stats, self._is_sorted_table):
+            case (None, False):
+                raise AssertionError(
+                    "Select requires either config.num_splits or loaded stats or sorted_table.")
+            case (stats_splits, False) if stats_splits is not None:
+                return stats_splits
+            case (1 | 2, True):
+                # optimization: if split estimation from num_row stats yields low results just use it
+                return split_estimation_from_stats  # type: ignore[return-value]
+            case (stats_splits, True):
+                elysium_row_estimate = self._get_elysium_row_estimate(columns, predicate, query_schema)
+                elysium_splits = num_rows_to_num_splits(elysium_row_estimate)
+                return min(elysium_splits, stats_splits or 1)
+            case _:
+                raise AssertionError("Unreachable")
 
     def _select_prepare(self,
                         query_schema: pa.Schema,
                         config: QueryConfig,
-                        columns: Optional[list[str]] = None,
+                        columns: list[str] | None = None,
                         predicate: Union[ibis.expr.types.BooleanColumn,
                                          ibis.common.deferred.Deferred] = None,
                         *,
@@ -547,41 +589,28 @@ class TableInTransaction(ITable):
             endpoints = tuple(config.data_endpoints)
         log.debug("endpoints: %s", endpoints)
 
-        if columns is None:
-            columns = query_schema.names
+        select_columns: list[str] = query_schema.names if columns is None else columns
 
         if internal_row_id:
             queried_fields = [self._internal_rowid_field]
             queried_fields.extend(query_schema)
             query_schema = pa.schema(queried_fields)
-            columns.append(INTERNAL_ROW_ID)
+            select_columns.append(INTERNAL_ROW_ID)
 
         if predicate is True:
             predicate = None
         if predicate is False:
             raise _EmptyResultException(
-                response_schema=_internal.get_response_schema(schema=query_schema, field_names=columns))
+                response_schema=_internal.get_response_schema(schema=query_schema, field_names=select_columns))
 
         if isinstance(predicate, ibis.common.deferred.Deferred):
             # may raise if the predicate is invalid (e.g. wrong types / missing column)
             predicate = predicate.resolve(self._metadata.ibis_table)
 
-        if config.num_splits:
-            num_splits = config.num_splits
-        else:
-            num_rows = 0
-            if self._is_sorted_table:
-                num_rows = self._get_row_estimate(
-                    columns, predicate, query_schema)
-                log.debug(f'sorted estimate: {num_rows}')
-
-            if num_rows == 0:
-                if self.stats is None:
-                    raise AssertionError("Select requires either config.num_splits or loaded stats.")
-
-                num_rows = self.stats.num_rows
-
-            num_splits = max(1, num_rows // config.rows_per_split)
+        num_splits = self._get_split_estimation(config,
+                                                query_schema,
+                                                select_columns,
+                                                predicate)
 
         log.debug("config: %s", config)
 
@@ -591,7 +620,7 @@ class TableInTransaction(ITable):
         query_data_request = _internal.build_query_data_request(
             schema=query_schema,
             predicate=predicate,
-            field_names=columns)
+            field_names=select_columns)
         if len(query_data_request.serialized) > util.MAX_QUERY_DATA_REQUEST_SIZE:
             raise errors.TooLargeRequest(
                 f"{len(query_data_request.serialized)} bytes")

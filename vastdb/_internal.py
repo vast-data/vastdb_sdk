@@ -1026,7 +1026,7 @@ class VastdbApi:
     def __init__(self, endpoint: str, access_key: str, secret_key: str,
                  *,
                  max_entities_per_page: int,
-                 ssl_verify: bool = True,
+                 ssl_verify: Union[bool, str] = True,
                  timeout=None,
                  backoff_config: Optional[BackoffConfig] = None,
                  version_check: bool = True):
