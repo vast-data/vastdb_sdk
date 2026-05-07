@@ -201,7 +201,7 @@ def test_pit(
             with pytest.raises(IbisTypeError, match=f"Column '{column_name}' is not found in table"):
                 pit[column_name]
 
-        partitions = pa.Table.from_batches(pit.select())
+        partitions = pit.select().read_all()
         assert expected_partitions.equals(partitions.select(["a", post_transform_column_name]))
 
         column_type = _DATA.schema.field(column_name).type
@@ -210,21 +210,20 @@ def test_pit(
             pa.array([_DATA[column_name][2]], type=column_type)
         )[0].as_py()
 
-        partitions = pa.Table.from_batches(
-            pit.select(
-                predicate=(
-                    (pit["a"] == 2)
-                    & (pit[post_transform_column_name] == value_to_filter_by)
-                )
+        partitions = pit.select(
+            predicate=(
+                (pit["a"] == 2)
+                & (pit[post_transform_column_name] == value_to_filter_by)
             )
-        )
+        ).read_all()
+
         assert expected_partitions.filter(
             (pc.field("a") == 2)
             & (pc.field(post_transform_column_name) == value_to_filter_by)
         ).equals(partitions.select(["a", post_transform_column_name]))
 
         for col in ("a", post_transform_column_name):
-            partitions = pa.Table.from_batches(pit.select([col]))
+            partitions = pit.select([col]).read_all()
             assert expected_partitions.select([col]).equals(partitions)
 
 
@@ -246,30 +245,28 @@ def test_query_partitioned_table(
 
     with hydra_session.transaction() as tx:
         t = tx.bucket(clean_bucket_name).schema(schema_name).table(table_name)
-        queried_data = pa.Table.from_batches(t.select())
+        queried_data = t.select().read_all()
         assert _DATA.equals(queried_data)
 
         value_to_filter_by = _DATA[column_name][2].as_py()
 
-        queried_data = pa.Table.from_batches(
-            t.select(
+        queried_data = t.select(
                 predicate=((t["a"] == 2) & (t[column_name] == value_to_filter_by))
-            )
-        )
+        ).read_all()
+
         assert _DATA.filter(
             (pc.field("a") == 2) & (pc.field(column_name) == value_to_filter_by)
         ).equals(queried_data)
 
         str_value_to_filter_by = _DATA["s"][2].as_py()
-        queried_data = pa.Table.from_batches(
-            t.select(
+        queried_data = t.select(
                 predicate=(
                     (t["a"] == 2)
                     & (t[column_name] == value_to_filter_by)
                     & (t["s"] == str_value_to_filter_by)
                 )
-            )
-        )
+            ).read_all()
+
         assert _DATA.filter(
             (pc.field("a") == 2)
             & (pc.field(column_name) == value_to_filter_by)
@@ -279,7 +276,7 @@ def test_query_partitioned_table(
         assert list(t.select(predicate=t["a"] == 0)) == []
 
         for col in ("a", column_name, "s"):
-            queried_data = pa.Table.from_batches(t.select([col]))
+            queried_data = t.select([col]).read_all()
             assert _DATA.select([col]).equals(queried_data)
 
 
