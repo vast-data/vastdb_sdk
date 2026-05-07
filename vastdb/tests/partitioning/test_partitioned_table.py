@@ -25,6 +25,7 @@ from vastdb.table_metadata import PartitionsMetadata
 
 _ARROW_SCHEMA = pa.schema(
     [
+        ("id", pa.int64()),
         ("a", pa.int64()),
         ("b", pa.int32()),
         ("s", pa.utf8()),
@@ -36,6 +37,7 @@ _ARROW_SCHEMA = pa.schema(
 )
 _DATA = pa.Table.from_pydict(
     {
+        "id": [0, 1, 2, 3, 4],
         "a": [1, 1, 2, 2, 3],
         "b": [4, 4, 6, 6, 7],
         "s": ["aaz", "aaz", "bbz", "bbz", "ccz"],
@@ -316,6 +318,40 @@ def test_predicate_partitioned_table(
         actual = t.select(["a", "s"], predicate=predicate_generator(t)).read_all()
         expected_table = _DATA.filter(arrow_filter).select(["a", "s"])
         assert expected_table.equals(actual), f"Predicate {predicate_generator(t)} did not return expected results"
+
+
+@pytest.mark.parametrize("column_name, transform", _TRANSFORMS)
+@pytest.mark.parametrize("limit_rows", [0, 1, 3, 5, 6])
+def test_query_partitioned_table_with_limit(
+    hydra_session: Session,
+    clean_bucket_name: str,
+    column_name: str,
+    transform: Transform,
+    limit_rows: int,
+):
+    schema_name = f"s_limit_{column_name}_{limit_rows}"
+    table_name = f"partitioned_table_{column_name}"
+
+    with hydra_session.transaction() as tx:
+        s = tx.bucket(clean_bucket_name).create_schema(schema_name)
+        t = s.create_table(
+            table_name,
+            _ARROW_SCHEMA,
+            partition_spec=_create_partition_spec(column_name, transform),
+        )
+        t.insert(_DATA)
+
+    with hydra_session.transaction() as tx:
+        t = tx.bucket(clean_bucket_name).schema(schema_name).table(table_name)
+        query_result = t.select(limit_rows=limit_rows).read_all()
+
+        expected_rows = min(limit_rows, _DATA.num_rows)
+        assert query_result.num_rows == expected_rows
+        row_ids = query_result["id"].to_pylist()
+        assert len(row_ids) == len(set(row_ids))
+
+        expected_data = _DATA.filter(pc.field("id").isin(row_ids))
+        assert expected_data.equals(query_result.sort_by("id"))
 
 
 @pytest.mark.parametrize("column_name, transform", _TRANSFORMS)

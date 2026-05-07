@@ -826,6 +826,7 @@ class TableInTransaction(ITable):
         else:
             result_schema = pa.schema([self.arrow_schema.field(name) for name in columns])
 
+        assert columns is not None
         batches_iterators = []
         partitions_stop_event = Event()
         config = None if config is None else dataclasses.replace(config, num_splits=1)
@@ -833,9 +834,6 @@ class TableInTransaction(ITable):
             self.arrow_schema,
             (f for f in pit.arrow_schema if f.name not in pre_transform_partition_names | set(_internal.PIT_METADATA_COLUMNS_TO_INCLUDE.names))
         ))
-
-        if limit_rows is not None:
-            raise NotImplementedError("Partitioned query with limit rows")
 
         if internal_row_id:
             result_schema = pa.schema(itertools.chain(result_schema, [self._internal_rowid_field]))
@@ -859,7 +857,30 @@ class TableInTransaction(ITable):
                 batches_iterators.append(iterator)
 
         all_batches = itertools.chain(*batches_iterators)
-        return pa.RecordBatchReader.from_batches(result_schema, all_batches)
+
+        if limit_rows is None:
+            return pa.RecordBatchReader.from_batches(result_schema, all_batches)
+
+        def limited_batches_iterator() -> Iterable[pa.RecordBatch]:
+            remaining_rows = limit_rows
+            assert remaining_rows is not None
+            try:
+                for batch in all_batches:
+                    if remaining_rows > 0:
+                        if batch.num_rows < remaining_rows:
+                            yield batch
+                            remaining_rows -= batch.num_rows
+                        else:
+                            yield batch.slice(length=remaining_rows)
+                            remaining_rows = 0
+                            partitions_stop_event.set()
+                    else:
+                        # Keep draining until all readers stop, to ensure worker threads exit cleanly.
+                        continue
+            finally:
+                partitions_stop_event.set()
+
+        return pa.RecordBatchReader.from_batches(result_schema, limited_batches_iterator())
 
     def insert_in_column_batches(self, rows: pa.RecordBatch) -> pa.ChunkedArray:
         """Split the RecordBatch into an insert + updates.
