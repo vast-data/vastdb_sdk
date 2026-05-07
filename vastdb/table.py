@@ -650,7 +650,14 @@ class TableInTransaction(ITable):
                                 ibis.common.deferred.Deferred] = None,
                 config: Optional[QueryConfig] = None,
                 internal_row_id: bool = False,
-                limit_rows: Optional[int] = None) -> tuple[pa.Schema, pa.RecordBatchReader]:
+                limit_rows: Optional[int] = None,
+                external_stop_event: Optional[Event] = None) -> tuple[pa.Schema, pa.RecordBatchReader]:
+        if limit_rows is not None and limit_rows < 0:
+            raise ValueError("limit_rows must be a non-negative integer or None")
+
+        if limit_rows is not None and external_stop_event is not None:
+            raise AssertionError("limit_rows and external_stop_event cannot be used together")
+
         config = config or QueryConfig()
 
         try:
@@ -678,7 +685,8 @@ class TableInTransaction(ITable):
         record_batches_queue: Queue[pa.RecordBatch] = Queue(
             maxsize=max_workers)
 
-        stop_event = Event()
+        should_stop_when_done = external_stop_event is None
+        stop_event = external_stop_event or Event()
 
         class StoppedException(Exception):
             pass
@@ -764,7 +772,9 @@ class TableInTransaction(ITable):
                                 "one worker thread finished, remaining: %d", tasks_running)
 
                 finally:
-                    stop_event.set()
+                    if should_stop_when_done:
+                        stop_event.set()
+
                     while tasks_running > 0:
                         if record_batches_queue.get() is None:
                             tasks_running -= 1
@@ -817,6 +827,7 @@ class TableInTransaction(ITable):
             result_schema = pa.schema([self.arrow_schema.field(name) for name in columns])
 
         batches_iterators = []
+        partitions_stop_event = Event()
         config = None if config is None else dataclasses.replace(config, num_splits=1)
         full_schema = pa.schema(itertools.chain(
             self.arrow_schema,
@@ -836,7 +847,15 @@ class TableInTransaction(ITable):
                     for column_index, name in enumerate(partitions_metadata.post_transform_names)
                 ])
                 full_pred = partition_pred if predicate is None else predicate & partition_pred
-                _, iterator = self._select_single_table(full_schema, columns.copy(), full_pred, config, internal_row_id, limit_rows)
+                _, iterator = self._select_single_table(
+                    full_schema,
+                    columns.copy(),
+                    full_pred,
+                    config,
+                    internal_row_id,
+                    None,
+                    partitions_stop_event,
+                )
                 batches_iterators.append(iterator)
 
         all_batches = itertools.chain(*batches_iterators)
