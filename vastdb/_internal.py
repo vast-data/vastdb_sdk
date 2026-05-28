@@ -2623,10 +2623,16 @@ def read_first_batch(fileobj):
             return None
 
         if stream_id == TABULAR_QUERY_DATA_FAILED_STREAM_ID:
-            # read the terminating end chunk from socket
-            res = fileobj.read()
-            _logger.debug("stream_id=%d res=%s (failed)", stream_id, res)
-            raise QueryDataInternalError()  # connection closed by server due to an internal error
+            # After this, connection is supposed to be closed by server
+            error_code, = struct.unpack('<Q', fileobj.read(8))
+            termination_length, = struct.unpack('<L', fileobj.read(4))
+
+            if termination_length != 0:
+                raise QueryDataInternalError(f"Query received a QUERY_DATA_FAILED_STREAM_ID and in it a non 0 len from server: {termination_length}, but error code was: {error_code}")
+
+            error_message = f"Query failed due to server error: {error_code=}"
+            _logger.debug(error_message)
+            raise QueryDataInternalError(error_message)
 
         next_row_id_bytes = fileobj.read(8)
         next_row_id, = struct.unpack('<Q', next_row_id_bytes)
@@ -2668,10 +2674,16 @@ def _iter_query_data_response_columns(fileobj, stream_ids=None):
             return
 
         if stream_id == TABULAR_QUERY_DATA_FAILED_STREAM_ID:
-            # read the terminating end chunk from socket
-            res = fileobj.read()
-            _logger.debug("stream_id=%d res=%s (failed)", stream_id, res)
-            raise QueryDataInternalError()  # connection closed by server due to an internal error
+            # After this, connection is supposed to be closed by server
+            error_code, = struct.unpack('<Q', fileobj.read(8))
+            termination_length, = struct.unpack('<L', fileobj.read(4))
+
+            if termination_length != 0:
+                raise QueryDataInternalError(f"Query received a QUERY_DATA_FAILED_STREAM_ID and in it a non 0 len from server: {termination_length}, but error code was: {error_code}")
+
+            error_message = f"Query failed due to server error: {error_code=}"
+            _logger.debug(error_message)
+            raise QueryDataInternalError(error_message)
 
         next_row_id_bytes = fileobj.read(8)
         next_row_id, = struct.unpack('<Q', next_row_id_bytes)
