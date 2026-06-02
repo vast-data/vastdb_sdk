@@ -1464,3 +1464,18 @@ def test_list_columns_with_pagination(session: Session, clean_bucket_name: str):
             assert t.arrow_schema is None
     finally:
         session.api._max_entities_per_page = original_page_size
+
+
+def test_table_metadata_does_not_currupt_schema_ORION_351713():
+    inner_field = pa.field("item", pa.float32(), nullable=False)
+    arrow_schema = pa.schema([
+        pa.field("vector", pa.list_(inner_field, 128))
+    ])
+
+    table_md = TableMetadata(
+        ref=TableRef(bucket="b", schema="s", table="t"),
+        arrow_schema=arrow_schema
+    )
+
+    assert table_md.arrow_schema.field('vector').type.value_field.nullable == arrow_schema.field(
+        'vector').type.value_field.nullable, "arrow schema changed nullability after initialization TableMetadata"

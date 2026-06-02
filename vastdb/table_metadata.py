@@ -116,7 +116,7 @@ class TableMetadata:
         """Table Metadata."""
         self._ref = deepcopy(ref)
         self._table_type = table_type
-        self.arrow_schema = deepcopy(arrow_schema)
+        self.arrow_schema = arrow_schema
         self._sorted_columns = None
         self._stats = None
         self._vector_index = vector_index
