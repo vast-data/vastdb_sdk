@@ -92,6 +92,10 @@ class BufferedInsertConfig:
     # If the buffer is out of capacity and this target is not reached yet, some flush will occur anyway (same for timer)
     target_num_rows_per_partition: int = 2 ** 16
 
+    # if not supplied the default endpoint/s will be used
+    # single endpoint can be specified more than once
+    data_endpoints: list[str] = field(default_factory=list)
+
     def __post_init__(self):
         """Validate params."""
         if self.capacity_in_bytes <= 0:

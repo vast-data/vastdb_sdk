@@ -129,13 +129,20 @@ class ByPartitionBuffer:
 
 
 class ByPartitionBufferedInserter:
-    def __init__(self, transaction_creator: Callable[[], Transaction], table_metadata: TableMetadata, executor: ThreadPoolExecutor, flush_config: BufferedInsertConfig) -> None:
+    def __init__(self,
+                 transaction_creator: Callable[[], Transaction],
+                 api: _internal.VastdbApi,
+                 table_metadata: TableMetadata,
+                 executor: ThreadPoolExecutor,
+                 flush_config: BufferedInsertConfig) -> None:
         if table_metadata.partitioning is None:
             raise ValueError("Table must be partitioned to use a buffered inserter")
 
+        self._api = api
         self._transaction_creator = transaction_creator
         self._tx = flush_config.tx
-        self._by_partition_buffer = ByPartitionBuffer(flush_config.capacity_in_bytes, flush_config.target_num_rows_per_partition, table_metadata.partitioning.spec)
+        self._by_partition_buffer = ByPartitionBuffer(
+            flush_config.capacity_in_bytes, flush_config.target_num_rows_per_partition, table_metadata.partitioning.spec)
         self._metadata = table_metadata
         self._executor = executor
         self._timer = None if flush_config.timeout is None else util.Timer(self._flush_all, flush_config.timeout)
@@ -187,7 +194,7 @@ class ByPartitionBufferedInserter:
         tx, should_close_tx = (self._transaction_creator(), True) if self._tx is None else (self._tx, False)
 
         def insert_rows_rpc(batch: pa.RecordBatch) -> pa.Array:
-            res = tx._rpc.api.insert_rows(
+            res = self._api.insert_rows(
                 self._metadata.ref.bucket,
                 self._metadata.ref.schema,
                 self._metadata.ref.table,
@@ -198,7 +205,7 @@ class ByPartitionBufferedInserter:
             return ids_batch[_internal.INTERNAL_ROW_ID]
 
         def update_rows_rpc(batch: pa.RecordBatch) -> None:
-            tx._rpc.api.update_rows(
+            self._api.update_rows(
                 self._metadata.ref.bucket,
                 self._metadata.ref.schema,
                 self._metadata.ref.table,

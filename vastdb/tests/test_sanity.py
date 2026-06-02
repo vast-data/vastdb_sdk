@@ -6,25 +6,27 @@ from itertools import cycle
 
 import pytest
 
+import vastdb.config
 import vastdb.errors
 from vastdb._internal import UnsupportedServer
+from vastdb.session import Session
 
 log = logging.getLogger(__name__)
 
 
-def test_hello_world(session):
+def test_hello_world(session: Session):
     with session.transaction() as tx:
         assert tx.txid is not None
 
 
-def test_bad_credentials(session):
-    bad_session = vastdb.connect(access='BAD', secret='BAD', endpoint=session.api.url)
+def test_bad_credentials(session: Session):
+    bad_session = vastdb.connect(access='BAD', secret='BAD', endpoint=str(session.api.next_endpoint()))
     with pytest.raises(vastdb.errors.Forbidden):
         with bad_session.transaction():
             pass
 
 
-def test_bad_endpoint(session):
+def test_bad_endpoint(session: Session):
     backoff_config = vastdb.config.BackoffConfig(max_tries=3)
     with pytest.raises(vastdb.errors.ConnectionError):
         vastdb.connect(access='BAD', secret='BAD', endpoint='http://invalid-host-name-for-tests:12345', backoff_config=backoff_config)

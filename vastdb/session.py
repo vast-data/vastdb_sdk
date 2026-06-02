@@ -42,12 +42,12 @@ class Session:
         if endpoint is None:
             endpoint = os.environ['AWS_S3_ENDPOINT_URL']
 
-        self.endpoint = endpoint
-        self.access = access
-        self.secret = secret
+        self.endpoint: str = endpoint
+        self.access: str = access
+        self.secret: str = secret
 
         self.api = _internal.VastdbApi(
-            endpoint=self.endpoint,
+            endpoints=[self.endpoint],
             access_key=self.access,
             secret_key=self.secret,
             max_entities_per_page=max_entities_per_page,
@@ -60,7 +60,7 @@ class Session:
 
     def __repr__(self):
         """Don't show the secret key."""
-        return f'{self.__class__.__name__}(endpoint={self.api.url}, access={self.api.access_key})'
+        return f'{self.__class__.__name__}(endpoints={self.api.endpoints}, access={self.api.access_key})'
 
     def transaction(self) -> Transaction:
         """Create a non-initialized transaction object.
@@ -77,7 +77,7 @@ class Session:
         self,
         metadata: TableRef | TableMetadata,
         executor: ThreadPoolExecutor,
-        flush_config: BufferedInsertConfig | None = None
+        flush_config: BufferedInsertConfig | None = None,
     ) -> "_BufferedInserter":
         """Buffered Insert."""
         self.features.check_partitioned()
@@ -94,4 +94,10 @@ class Session:
         else:
             metadata = copy.deepcopy(metadata)
 
-        return _BufferedInserter(lambda: self.transaction(), metadata, executor, flush_config)
+        api = (
+            self.api.with_endpoints(flush_config.data_endpoints)
+            if len(flush_config.data_endpoints) != 0
+            else self.api
+        )
+
+        return _BufferedInserter(lambda: self.transaction(), api, metadata, executor, flush_config)

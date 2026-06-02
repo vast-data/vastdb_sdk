@@ -1,6 +1,7 @@
 import itertools
 import json
 import logging
+import random
 import re
 import struct
 import time
@@ -25,7 +26,6 @@ import flatbuffers
 import ibis
 import pyarrow as pa
 import requests
-import urllib3
 import xmltodict
 from aws_requests_auth.aws_auth import AWSRequestsAuth
 from ibis.expr.operations import Field, Node
@@ -49,6 +49,7 @@ from ibis.expr.operations.logical import (
 from ibis.expr.operations.strings import StartsWith, StringContains
 from ibis.expr.operations.structs import StructField
 from pyiceberg.transforms import BucketTransform, TruncateTransform
+from urllib3.util import Url, parse_url
 
 import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.BinaryLiteral as fb_binary_lit
 import vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.BooleanLiteral as fb_bool_lit
@@ -1023,7 +1024,7 @@ class VastdbApi:
     # we expect the vast version to be <major>.<minor>.<patch>.<protocol>
     VAST_VERSION_REGEX = re.compile(r'^vast (\d+\.\d+\.\d+\.\d+)$')
 
-    def __init__(self, endpoint: str, access_key: str, secret_key: str,
+    def __init__(self, endpoints: list[str], access_key: str, secret_key: str,
                  *,
                  max_entities_per_page: int,
                  ssl_verify: Union[bool, str] = True,
@@ -1036,15 +1037,16 @@ class VastdbApi:
         from . import version  # import lazily here (to avoid circular dependencies)
         self.client_sdk_version = f"VAST Database Python SDK {version()} - 2024 (c)"
 
-        url = urllib3.util.parse_url(endpoint)
+        self._ssl_verify: Union[bool, str] = ssl_verify
+
+        self._endpoints: list[Url] = [parse_url(endpoint) for endpoint in endpoints]
+        self._sessions: dict[str, requests.Session] = {}
+
         self.access_key = access_key
         self.secret_key = secret_key
 
         self.timeout = timeout
         self._max_entities_per_page = max_entities_per_page
-        self._session = requests.Session()
-        self._session.verify = ssl_verify
-        self._session.headers['user-agent'] = self.client_sdk_version
 
         self.backoff_config = backoff_config or BackoffConfig()
         self._backoff_decorator = backoff.on_exception(
@@ -1057,30 +1059,17 @@ class VastdbApi:
             backoff_log_level=self.backoff_config.backoff_log_level)
         self._request = self._backoff_decorator(self._single_request)
 
-        if url.port in {80, 443, None}:
-            self.aws_host = f'{url.host}'
-        else:
-            self.aws_host = f'{url.host}:{url.port}'
-
-        self.url = str(url)
-        _logger.debug('url=%s aws_host=%s', self.url, self.aws_host)
-
-        self._session.auth = AWSRequestsAuth(aws_access_key=access_key,
-                                            aws_secret_access_key=secret_key,
-                                            aws_host=self.aws_host,
-                                            aws_region='',
-                                            aws_service='s3')
-
         if version_check:
             # probe the cluster for its version
-            res = self._request(method="GET", url=self._url(command="transaction"), skip_status_check=True)  # used only for the response headers
+            res: requests.Response = self._request(method="GET", url=self._url(command="transaction"), skip_status_check=True)  # used only for the response headers
+
             _logger.debug("headers=%s code=%s content=%s", res.headers, res.status_code, res.content)
             server_header = res.headers.get("Server")
             if server_header is None:
                 _logger.error("Response doesn't contain 'Server' header")
             else:
                 if not server_header.startswith(self.VAST_SERVER_PREFIX):
-                    raise UnsupportedServer(f'{self.url} is not a VAST DB server endpoint ("{server_header}")')
+                    raise UnsupportedServer(f'{res.url} is not a VAST DB server endpoint ("{server_header}")')
 
                 if m := self.VAST_VERSION_REGEX.match(server_header):
                     self.vast_version: Tuple[int, ...] = tuple(int(v) for v in m.group(1).split("."))
@@ -1102,23 +1091,65 @@ class VastdbApi:
 
     def __exit__(self, *args):
         """Make sure that the connections closed."""
-        self._session.close()
+        for session in self._sessions.values():
+            session.close()
 
     def with_endpoint(self, endpoint: str) -> 'VastdbApi':
         """Open a new session for targeting a specific endpoint."""
-        return VastdbApi(endpoint=endpoint,
-            access_key=self.access_key,
-            secret_key=self.secret_key,
-            max_entities_per_page=self._max_entities_per_page,
-            ssl_verify=self._session.verify,
-            timeout=self.timeout,
-            backoff_config=self.backoff_config,
-            version_check=False)
+        return self.with_endpoints([endpoint])
 
-    def _single_request(self, *, method, url, skip_status_check=False, **kwargs):
+    def with_endpoints(self, endpoints: list[str]) -> 'VastdbApi':
+        """Open a new session for targeting a specific endpoint."""
+        return VastdbApi(endpoints=endpoints,
+                         access_key=self.access_key,
+                         secret_key=self.secret_key,
+                         max_entities_per_page=self._max_entities_per_page,
+                         ssl_verify=self._ssl_verify,
+                         timeout=self.timeout,
+                         backoff_config=self.backoff_config,
+                         version_check=False)
+
+    def next_endpoint(self) -> Url:
+        return random.choice(self._endpoints)
+
+    @property
+    def endpoints(self) -> list[Url]:
+        return self._endpoints.copy()
+
+    def _session_get_or_create(self, url: Url) -> requests.Session:
+        if url.host is None:
+            raise AssertionError(f"unable to create session using url '{url}'. url must consist of a host")
+        host: str = url.host
+        if host not in self._sessions:
+            self._sessions[host] = self._session_create(url)
+
+        return self._sessions[host]
+
+    def _session_create(self, url: Url) -> requests.Session:
+        session = requests.Session()
+        session.verify = self._ssl_verify
+        session.headers['user-agent'] = self.client_sdk_version
+
+        if url.port in {80, 443, None}:
+            aws_host = f'{url.host}'
+        else:
+            aws_host = f'{url.host}:{url.port}'
+
+        _logger.debug('url=%s aws_host=%s', url, aws_host)
+
+        session.auth = AWSRequestsAuth(aws_access_key=self.access_key,
+                                       aws_secret_access_key=self.secret_key,
+                                       aws_host=aws_host,
+                                       aws_region='',
+                                       aws_service='s3')
+
+        return session
+
+    def _single_request(self, *, method, url: Url, skip_status_check=False, **kwargs) -> requests.Response:
         _logger.debug("Sending request: %s %s %s timeout=%s", method, url, kwargs, self.timeout)
         try:
-            res = self._session.request(method=method, url=url, timeout=self.timeout, **kwargs)
+            session = self._session_get_or_create(url)
+            res = session.request(method=method, url=str(url), timeout=self.timeout, **kwargs)
         except requests.exceptions.ConnectionError as err:
             # low-level connection issue, it is safe to retry only read-only requests
             may_retry = (method in {"HEAD", "GET"})
@@ -1129,8 +1160,10 @@ class VastdbApi:
                 raise exc  # application-level error
         return res  # successful response
 
-    def _url(self, bucket="", schema="", table="", command="", url_params={}):
-        prefix_list = [self.url]
+    def _url(self, bucket="", schema="", table="", command="", url_params: dict | None = None) -> Url:
+        url_params = url_params or {}
+        endpoint: str = str(self.next_endpoint())
+        prefix_list: list[str] = [endpoint]
         if len(bucket):
             prefix_list.append(bucket)
 
@@ -1153,7 +1186,8 @@ class VastdbApi:
             params_list.append(f"{k}={urllib.parse.quote_plus(v)}")
 
         prefix += '&'.join(params_list)
-        return prefix
+
+        return parse_url(prefix)
 
     def _fill_common_headers(self, txid=0, client_tags=[], version_id=1, sorting_key=[]):
         common_headers = {
@@ -1510,8 +1544,6 @@ class VastdbApi:
         else:
             vector_index = None
 
-        endpoints = [self.url]  # we cannot replace the host by a VIP address in HTTPS-based URLs
-
         return TableStats(
           num_rows=num_rows,
           size_in_bytes=size_in_bytes,
@@ -1521,7 +1553,7 @@ class VastdbApi:
           is_external_rowid_alloc=is_external_rowid_alloc,
           sorting_key_enabled=sorting_key_enabled,
           sorting_done=sorting_done,
-          endpoints=tuple(endpoints),
+          endpoints=tuple(str(endpoint) for endpoint in self._endpoints),
           vector_index=vector_index,
           partitioning_info=partitioning_info)
 
@@ -1925,7 +1957,7 @@ class VastdbApi:
     """
     source_files: list of (bucket_name, file_name)
     """
-    def import_data(self, bucket, schema, table, source_files, txid=0, client_tags=[], expected_retvals=[], case_sensitive=True,
+    def import_data(self, bucket, schema, table, source_files: dict[tuple[str, str], bytes], txid=0, client_tags=[], expected_retvals=[], case_sensitive=True,
                     schedule_id=None, retry_count=0, blocking=True, key_names=[]):
         """
         POST /mybucket/myschema/mytable?data HTTP/1.1
@@ -2944,7 +2976,7 @@ def build_field(builder: flatbuffers.Builder, f: pa.Field, include_name=True):
 
 
 class QueryDataRequest:
-    def __init__(self, serialized, response_schema, response_parser):
+    def __init__(self, serialized, response_schema: pa.Schema, response_parser):
         self.serialized = serialized
         self.response_schema: pa.Schema = response_schema
         self.response_parser = response_parser

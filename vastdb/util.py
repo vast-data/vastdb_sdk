@@ -28,7 +28,7 @@ def create_table_from_files(
     tx = schema.tx
     current_schema = pa.schema([])
     s3fs = pa.fs.S3FileSystem(
-        access_key=tx._rpc.api.access_key, secret_key=tx._rpc.api.secret_key, endpoint_override=tx._rpc.api.url)
+        access_key=tx._rpc.api.access_key, secret_key=tx._rpc.api.secret_key, endpoint_override=str(tx._rpc.api.next_endpoint()))
     for prq_file in parquet_files:
         if not prq_file.startswith('/'):
             raise InvalidArgument(f"Path {prq_file} must start with a '/'")

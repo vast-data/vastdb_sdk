@@ -451,8 +451,7 @@ class TableInTransaction(ITable):
         if config.data_endpoints is None:
             # TODO: Do we want to validate concurrency isn't too high?
             assert config.import_concurrency > 0
-            endpoints = [self._tx._rpc.api.url for _ in range(
-                        config.import_concurrency)]
+            endpoints = [str(self._tx._rpc.api.next_endpoint()) for _ in range(config.import_concurrency)]
         else:
             log.info("Using concurrency based on endpoints: {}".format(config.data_endpoints))
             if len(config.data_endpoints) == 0:
@@ -474,14 +473,14 @@ class TableInTransaction(ITable):
             ceil(len(source_files) / len(endpoints)), max_batch_size)
         log.info("Setting batch size to %s files", num_files_in_batch)
 
-        def import_worker(q, endpoint):
+        def import_worker(q, endpoint: str):
             try:
                 with self._tx._rpc.api.with_endpoint(endpoint) as session:
                     while not q.empty():
                         if stop_event.is_set():
                             log.debug("stop_event is set, exiting")
                             break
-                        files_batch = {}
+                        files_batch: dict[tuple[str, str], bytes] = {}
                         try:
                             for _ in range(num_files_in_batch):
                                 files_batch.update({q.get(block=False)})
@@ -584,7 +583,7 @@ class TableInTransaction(ITable):
                         limit_rows: Optional[int] = None) -> tuple[SplitWorkerConfig, _internal.QueryDataRequest, tuple[str, ...]]:
 
         if config.data_endpoints is None:
-            endpoints = tuple([self._tx._rpc.api.url])
+            endpoints = tuple([str(self._tx._rpc.endpoint)])
         else:
             endpoints = tuple(config.data_endpoints)
         log.debug("endpoints: %s", endpoints)
