@@ -857,7 +857,8 @@ class TableInTransaction(ITable):
         assert columns is not None
         batches_iterators = []
         partitions_stop_event = Event()
-        config = None if config is None else dataclasses.replace(config, num_splits=1)
+        config = config or QueryConfig()
+        config = dataclasses.replace(config, num_splits=1)
         full_schema = pa.schema(itertools.chain(
             self.arrow_schema,
             (f for f in pit.arrow_schema if f.name not in pre_transform_partition_names | set(_internal.PIT_METADATA_COLUMNS_TO_INCLUDE.names))
