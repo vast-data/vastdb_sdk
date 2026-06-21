@@ -18,7 +18,7 @@ from pyiceberg.transforms import (
     YearTransform,
 )
 
-from vastdb import _internal, errors
+from vastdb import _internal, errors, table
 from vastdb.partitioning import PartitionKey, PartitionSpec
 from vastdb.session import Session
 from vastdb.table_metadata import PartitionsMetadata
@@ -114,6 +114,19 @@ def _transform_table(table: pa.Table, column: str, transform) -> pa.Table:
         column,
         transformed_column,
     )
+
+
+def _updated_values_for_field(field: pa.Field, num_rows: int) -> pa.Array | pa.ChunkedArray:
+    if pa.types.is_integer(field.type):
+        return pa.array([900 + i for i in range(num_rows)], type=field.type)
+
+    if pa.types.is_string(field.type):
+        return pa.array([f"updated_{i}" for i in range(num_rows)], type=field.type)
+
+    if pa.types.is_timestamp(field.type):
+        return pa.array([datetime(2030, 1, 1, 0, i) for i in range(num_rows)], type=field.type)
+
+    raise AssertionError(f"Unsupported type for test updates: {field.type}")
 
 
 @pytest.fixture
@@ -531,3 +544,165 @@ def test_data_engine_example2(hydra_session: Session, clean_bucket_name: str):
             (pc.field("h") <= datetime(2025, 1, 1, 2, 5)) &
             ((pc.field("s") == "aaz") | (pc.field("s") == "bbz"))
         ))
+
+
+@pytest.mark.parametrize(
+    "delete_predicate_generator, expected_remaining_filter",
+    [
+        (lambda t: t["a"] == 1, pc.field("a") != 1),
+        (lambda t: t["a"] >= 2, pc.field("a") < 2),
+        (lambda t: t["id"] == 4, pc.field("id") != 4),
+        (lambda t: t["b"] == 6, pc.field("b") != 6),
+        (lambda t: t["s"] == "bbz", pc.field("s") != "bbz"),
+        (
+                lambda t: (t["id"] >= 1) & (t["id"] <= 3),
+                (pc.field("id") < 1) | (pc.field("id") > 3)),
+        (
+                lambda t: (t["a"] > 1) & (t["b"] < 7),
+                (pc.field("a") <= 1) | (pc.field("b") >= 7)),
+        (
+                lambda t: (t["a"].isin([1, 3])) & (t["id"] < 4),
+                ~(pc.field("a").isin([1, 3]) & (pc.field("id") < 4)),
+        ),
+    ],
+)
+@pytest.mark.parametrize("column_name, transform", _TRANSFORMS)
+def test_delete_rows_partitioned_table(
+    hydra_session: Session,
+    clean_bucket_name: str,
+    column_name: str,
+    transform: Transform,
+    delete_predicate_generator: Callable,
+    expected_remaining_filter,
+):
+    schema_name = f"s_delete_rows_{column_name}"
+    table_name = f"partitioned_table_{column_name}"
+
+    with hydra_session.transaction() as tx:
+        s = tx.bucket(clean_bucket_name).create_schema(schema_name)
+        t = s.create_table(
+            table_name,
+            _ARROW_SCHEMA,
+            partition_spec=_create_partition_spec(column_name, transform),
+        )
+        t.insert(_DATA)
+
+    with hydra_session.transaction() as tx:
+        t = tx.bucket(clean_bucket_name).schema(schema_name).table(table_name)
+        rows_to_delete = t.select(
+            predicate=delete_predicate_generator(t),
+            internal_row_id=True,
+        ).read_all()
+        t.delete(rows_to_delete.select([table.INTERNAL_ROW_ID]))
+
+    with hydra_session.transaction() as tx:
+        t = tx.bucket(clean_bucket_name).schema(schema_name).table(table_name)
+        actual = t.select().read_all().sort_by("id")
+        expected = _DATA.filter(expected_remaining_filter).sort_by("id")
+        assert expected.equals(actual)
+
+
+@pytest.mark.parametrize("column_name, transform", _TRANSFORMS)
+def test_update_rows_partitioned_table(
+    hydra_session: Session,
+    clean_bucket_name: str,
+    column_name: str,
+    transform: Transform,
+):
+    schema_name = f"s_update_rows_{column_name}"
+    table_name = f"partitioned_table_{column_name}"
+
+    with hydra_session.transaction() as tx:
+        s = tx.bucket(clean_bucket_name).create_schema(schema_name)
+        t = s.create_table(
+            table_name,
+            _ARROW_SCHEMA,
+            partition_spec=_create_partition_spec(column_name, transform),
+        )
+        t.insert(_DATA)
+
+    column_to_update = "s" if column_name == "b" else "b"
+
+    with hydra_session.transaction() as tx:
+        t = tx.bucket(clean_bucket_name).schema(schema_name).table(table_name)
+
+        rows_to_update = t.select(
+            internal_row_id=True,
+        ).read_all()
+
+        update_data = pa.table(
+            {
+                table.INTERNAL_ROW_ID: rows_to_update[table.INTERNAL_ROW_ID],
+                column_to_update: _updated_values_for_field(_ARROW_SCHEMA.field(column_to_update), rows_to_update.num_rows),
+            }
+        )
+
+        t.update(update_data)
+
+    with (hydra_session.transaction() as tx):
+        t = tx.bucket(clean_bucket_name).schema(schema_name).table(table_name)
+        actual_data = t.select().read_all().sort_by("id")
+        all_columns_without_updated_one = _ARROW_SCHEMA.names
+        all_columns_without_updated_one.remove(column_to_update)
+
+        updated_data = pa.table(
+            {
+                column_to_update: _updated_values_for_field(_ARROW_SCHEMA.field(column_to_update), rows_to_update.num_rows),
+            }
+        )
+
+        assert _DATA.select(all_columns_without_updated_one).equals(actual_data.select(all_columns_without_updated_one))
+        assert actual_data.select([column_to_update]).equals(updated_data)
+
+
+@pytest.mark.parametrize("column_name, transform", _TRANSFORMS)
+def test_update_rows_fails_on_partition_column(
+        hydra_session: Session,
+        clean_bucket_name: str,
+        column_name: str,
+        transform: Transform,
+):
+    schema_name = f"s_update_rows_partition_columns_{column_name}_fails"
+    table_name = f"partitioned_table_{column_name}"
+
+    with hydra_session.transaction() as tx:
+        s = tx.bucket(clean_bucket_name).create_schema(schema_name)
+        t = s.create_table(
+            table_name,
+            _ARROW_SCHEMA,
+            partition_spec=_create_partition_spec(column_name, transform),
+        )
+        t.insert(_DATA)
+
+    with hydra_session.transaction() as tx:
+        t = tx.bucket(clean_bucket_name).schema(schema_name).table(table_name)
+
+        rows_to_update = t.select(
+            predicate=(t["id"] >= 2) & (t["id"] <= 3),
+            internal_row_id=True,
+        ).read_all()
+        assert rows_to_update.num_rows == 2
+
+        update_data_column_a = pa.table(
+            {
+                table.INTERNAL_ROW_ID: rows_to_update[table.INTERNAL_ROW_ID],
+                "a": _updated_values_for_field(_ARROW_SCHEMA.field("a"), rows_to_update.num_rows),
+            }
+        )
+
+        with pytest.raises(errors.BadRequest, match="InvalidArgument"):
+            t.update(update_data_column_a)
+
+        update_data_other_partition_column = pa.table(
+            {
+                table.INTERNAL_ROW_ID: rows_to_update[table.INTERNAL_ROW_ID],
+                column_name: _updated_values_for_field(_ARROW_SCHEMA.field(column_name), rows_to_update.num_rows),
+            }
+        )
+
+        with pytest.raises(errors.BadRequest, match="InvalidArgument"):
+            t.update(update_data_other_partition_column)
+
+    with hydra_session.transaction() as tx:
+        t = tx.bucket(clean_bucket_name).schema(schema_name).table(table_name)
+        assert _DATA.equals(t.select().read_all().sort_by("id"))
