@@ -124,12 +124,12 @@ class Transaction:
 
     @property
     def is_active(self) -> bool:
-        """Return whether transaction is active."""
+        """Whether transaction is active."""
         return self.txid is not None
 
     @property
     def active_txid(self) -> int:
-        """Return active transaction ID."""
+        """Active transaction ID."""
         if self.txid is None:
             raise TransactionNotActiveError()
         return self.txid

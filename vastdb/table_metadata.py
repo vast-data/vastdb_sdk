@@ -288,12 +288,12 @@ class TableMetadata:
 
     @property
     def partitioning(self) -> Optional[PartitionsMetadata]:
-        """Get table's partitions metadata."""
+        """Table's partitions metadata."""
         return self._partitions_metadata
 
     @property
     def stats(self) -> Optional[TableStats]:
-        """Get table's stats."""
+        """Table's stats."""
         return self._stats
 
     @property

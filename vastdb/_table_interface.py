@@ -55,7 +55,7 @@ class ITable(ABC):
     @property
     @abstractmethod
     def ref(self) -> TableRef:
-        """Return Table Ref."""
+        """Table ref."""
         pass
 
     @abstractmethod
@@ -78,7 +78,7 @@ class ITable(ABC):
     @property
     @abstractmethod
     def path(self) -> str:
-        """Return table's path."""
+        """Table's path."""
         pass
 
     @abstractmethod

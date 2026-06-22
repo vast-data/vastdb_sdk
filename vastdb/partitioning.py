@@ -15,7 +15,7 @@ class PartitionKey:
 
     @property
     def is_identity(self) -> bool:
-        """Returns whether the transform of self is identity."""
+        """Whether the transform of self is identity."""
         return isinstance(self.transform, IdentityTransform)
 
 

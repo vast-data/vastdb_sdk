@@ -192,7 +192,7 @@ class SplitWorker:
 
     @property
     def done(self):
-        """Returns true iff the pagination over."""
+        """Whether pagination is over."""
         return all(row_id == _internal.TABULAR_INVALID_ROW_ID for row_id in self.subsplits_state.values())
 
 
@@ -324,7 +324,7 @@ class TableInTransaction(ITable):
 
     @property
     def path(self) -> str:
-        """Return table's path."""
+        """Table's path."""
         return self.ref.full_path
 
     @property
@@ -1162,12 +1162,12 @@ class Table(TableInTransaction):
 
     @property
     def tx(self):
-        """Return transaction."""
+        """Transaction used for self."""
         return self._tx
 
     @property
     def stats(self) -> TableStats:
-        """Fetch table's statistics from server."""
+        """Table's statistics from server."""
         self.reload_stats()
         assert self._metadata.stats is not None
         return self._metadata.stats
@@ -1395,12 +1395,12 @@ class BlobExpansion:
 
     @property
     def table_metadata(self) -> TableMetadata:
-        """Return the metadata of the target table."""
+        """Metadata of the target table."""
         return self._table_metadata
 
     @property
     def tx(self) -> "Transaction":
-        """Return the transaction."""
+        """Transaction used for self."""
         return self._tx
 
     def add_columns(
