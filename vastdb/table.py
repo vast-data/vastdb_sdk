@@ -892,7 +892,7 @@ class TableInTransaction(ITable):
             result_schema = pa.schema(itertools.chain(result_schema, [self._internal_rowid_field]))
 
         for batch in partition_batches:
-            row_estimate_column = batch.column(-1)
+            row_estimate_column = batch.column(_internal.PIT_ROW_ESTIMATE_FIELD.name)
 
             for row in range(batch.num_rows):
                 row_count_estimate = row_estimate_column[row].as_py()

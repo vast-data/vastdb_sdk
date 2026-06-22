@@ -21,7 +21,7 @@ from pyiceberg.transforms import (
 from vastdb import _internal, errors, table
 from vastdb.partitioning import PartitionKey, PartitionSpec
 from vastdb.session import Session
-from vastdb.table_metadata import PartitionsMetadata
+from vastdb.table_metadata import PartitionsMetadata, TableMetadata, TableRef
 
 _ARROW_SCHEMA = pa.schema(
     [
@@ -622,7 +622,8 @@ def test_delete_rows_partitioned_table(
         t.delete(rows_to_delete.select([table.INTERNAL_ROW_ID]))
 
     with hydra_session.transaction() as tx:
-        t = tx.bucket(clean_bucket_name).schema(schema_name).table(table_name)
+        t = tx.table_from_metadata(TableMetadata(TableRef(clean_bucket_name, schema_name, table_name)))
+        t.reload_schema()
         actual = t.select().read_all().sort_by("id")
         expected = _DATA.filter(expected_remaining_filter).sort_by("id")
         assert expected.equals(actual)
@@ -669,7 +670,8 @@ def test_update_rows_partitioned_table(
         t.update(update_data)
 
     with (hydra_session.transaction() as tx):
-        t = tx.bucket(clean_bucket_name).schema(schema_name).table(table_name)
+        t = tx.table_from_metadata(TableMetadata(TableRef(clean_bucket_name, schema_name, table_name)))
+        t.reload_schema()
         actual_data = t.select().read_all().sort_by("id")
         all_columns_without_updated_one = _ARROW_SCHEMA.names
         all_columns_without_updated_one.remove(column_to_update)
@@ -736,5 +738,6 @@ def test_update_rows_fails_on_partition_column(
             t.update(update_data_other_partition_column)
 
     with hydra_session.transaction() as tx:
-        t = tx.bucket(clean_bucket_name).schema(schema_name).table(table_name)
+        t = tx.table_from_metadata(TableMetadata(TableRef(clean_bucket_name, schema_name, table_name)))
+        t.reload_schema()
         assert _DATA.equals(t.select().read_all().sort_by("id"))
