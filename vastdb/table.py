@@ -207,6 +207,7 @@ class _Partitions:
             table._tx
         )
         self._pit.reload_schema()
+        self._pit.reload_stats()
         self._pit._metadata.arrow_schema = pa.schema(
             f for f in self._pit.arrow_schema if f.name != _internal.PIT_SORTING_SCORE_FIELD.name
         )
@@ -543,7 +544,8 @@ class TableInTransaction(ITable):
             config: QueryConfig,
             query_schema: pa.Schema,
             columns: list[str],
-            predicate: ibis.expr.types.BooleanColumn
+            predicate: ibis.expr.types.BooleanColumn,
+            row_count_estimate: Optional[int]
     ) -> int:
         if config.num_splits is not None:
             return config.num_splits
@@ -552,8 +554,8 @@ class TableInTransaction(ITable):
             return max(1, num_rows // config.rows_per_split)
 
         split_estimation_from_stats: int | None = (
-            num_rows_to_num_splits(self.stats.num_rows)
-            if self.stats else None
+            num_rows_to_num_splits(row_count_estimate)
+            if row_count_estimate is not None else None
         )
 
         match (split_estimation_from_stats, self._is_sorted_table):
@@ -572,16 +574,18 @@ class TableInTransaction(ITable):
             case _:
                 raise AssertionError("Unreachable")
 
-    def _select_prepare(self,
-                        query_schema: pa.Schema,
-                        config: QueryConfig,
-                        columns: list[str] | None = None,
-                        predicate: Union[ibis.expr.types.BooleanColumn,
-                                         ibis.common.deferred.Deferred] = None,
-                        *,
-                        internal_row_id: bool = False,
-                        limit_rows: Optional[int] = None) -> tuple[SplitWorkerConfig, _internal.QueryDataRequest, tuple[str, ...]]:
-
+    def _select_prepare(
+            self,
+            query_schema: pa.Schema,
+            config: QueryConfig,
+            columns: list[str] | None = None,
+            predicate: Union[ibis.expr.types.BooleanColumn,
+            ibis.common.deferred.Deferred] = None,
+            row_count_estimate: Optional[int] = None,
+            *,
+            internal_row_id: bool = False,
+            limit_rows: Optional[int] = None
+    ) -> tuple[SplitWorkerConfig, _internal.QueryDataRequest, tuple[str, ...]]:
         if config.data_endpoints is None:
             endpoints = tuple([str(self._tx._rpc.endpoint)])
         else:
@@ -609,7 +613,8 @@ class TableInTransaction(ITable):
         num_splits = self._get_split_estimation(config,
                                                 query_schema,
                                                 select_columns,
-                                                predicate)
+                                                predicate,
+                                                row_count_estimate)
 
         log.debug("config: %s", config)
 
@@ -649,8 +654,9 @@ class TableInTransaction(ITable):
         config = config or QueryConfig()
 
         try:
+            row_count_estimate = None if self.stats is None else self.stats.num_rows
             split_config, query_data_request, endpoints = self._select_prepare(
-                self.arrow_schema, config, columns, predicate, internal_row_id=internal_row_id, limit_rows=limit_rows)
+                self.arrow_schema, config, columns, predicate, row_count_estimate, internal_row_id=internal_row_id, limit_rows=limit_rows)
         except _EmptyResultException:
             return []
 
@@ -673,13 +679,17 @@ class TableInTransaction(ITable):
             for split in range(split_config.num_splits)
         ]
 
-    def _select_single_table(self, schema: pa.Schema, columns: Optional[list[str]] = None,
-               predicate: Union[ibis.expr.types.BooleanColumn,
-                                ibis.common.deferred.Deferred] = None,
-                config: Optional[QueryConfig] = None,
-                internal_row_id: bool = False,
-                limit_rows: Optional[int] = None,
-                external_stop_event: Optional[Event] = None) -> tuple[pa.Schema, pa.RecordBatchReader]:
+    def _select_single_table(
+            self,
+            schema: pa.Schema,
+            columns: Optional[list[str]] = None,
+            predicate: Union[ibis.expr.types.BooleanColumn, ibis.common.deferred.Deferred] = None,
+            config: Optional[QueryConfig] = None,
+            internal_row_id: bool = False,
+            limit_rows: Optional[int] = None,
+            external_stop_event: Optional[Event] = None,
+            row_count_estimate: Optional[int] = None,
+    ) -> tuple[pa.Schema, pa.RecordBatchReader]:
         if limit_rows is not None and limit_rows < 0:
             raise ValueError("limit_rows must be a non-negative integer or None")
 
@@ -694,7 +704,8 @@ class TableInTransaction(ITable):
                                                                                columns,
                                                                                predicate,
                                                                                internal_row_id=internal_row_id,
-                                                                               limit_rows=limit_rows)
+                                                                               limit_rows=limit_rows,
+                                                                               row_count_estimate=row_count_estimate)
         except _EmptyResultException as e:
             return e.response_schema, []
 
@@ -826,7 +837,16 @@ class TableInTransaction(ITable):
         Query-execution configuration options can be specified via the optional `config` argument.
         """
         if self._metadata.table_type not in {TableType.Partitioned, TableType.SortedPartitions}:
-            schema, batches = self._select_single_table(self.arrow_schema, columns, predicate, config, internal_row_id, limit_rows)
+            row_count_estimate = None if self.stats is None else self.stats.num_rows
+            schema, batches = self._select_single_table(
+                self.arrow_schema,
+                columns,
+                predicate,
+                config,
+                internal_row_id,
+                limit_rows,
+                row_count_estimate=row_count_estimate
+            )
             return pa.RecordBatchReader.from_batches(schema, batches)
 
         pit = _Partitions(self, include_pre_transform_columns=True)
@@ -846,7 +866,13 @@ class TableInTransaction(ITable):
                 fields_map = {name: pit[name] for name in pre_transform_partition_names}
                 pit_predicate = _ibis_support.change_columns(pit_predicate, fields_map).to_expr()
 
-        partition_batches = pit.select(partitions_metadata.post_transform_names, pit_predicate, config)
+        partition_batches = pit.select(
+            list(itertools.chain(
+                partitions_metadata.post_transform_names,
+                [_internal.PIT_ROW_ESTIMATE_FIELD.name]
+            )),
+            pit_predicate,
+        )
 
         if columns is None:
             columns = self.arrow_schema.names
@@ -857,8 +883,6 @@ class TableInTransaction(ITable):
         assert columns is not None
         batches_iterators = []
         partitions_stop_event = Event()
-        config = config or QueryConfig()
-        config = dataclasses.replace(config, num_splits=1)
         full_schema = pa.schema(itertools.chain(
             self.arrow_schema,
             (f for f in pit.arrow_schema if f.name not in pre_transform_partition_names | set(_internal.PIT_METADATA_COLUMNS_TO_INCLUDE.names))
@@ -868,7 +892,11 @@ class TableInTransaction(ITable):
             result_schema = pa.schema(itertools.chain(result_schema, [self._internal_rowid_field]))
 
         for batch in partition_batches:
+            row_estimate_column = batch.column(-1)
+
             for row in range(batch.num_rows):
+                row_count_estimate = row_estimate_column[row].as_py()
+
                 partition_pred = functools.reduce(operator.and_, [
                     pit[name] == batch.column(column_index)[row].as_py()
                     for column_index, name in enumerate(partitions_metadata.post_transform_names)
@@ -882,6 +910,7 @@ class TableInTransaction(ITable):
                     internal_row_id,
                     None,
                     partitions_stop_event,
+                    row_count_estimate
                 )
                 batches_iterators.append(iterator)
 
@@ -1118,7 +1147,7 @@ class TableInTransaction(ITable):
 
     @property
     def _is_sorted_table(self) -> bool:
-        return self._metadata.table_type is TableType.Elysium
+        return self._metadata.table_type in {TableType.Elysium, TableType.SortedPartitions}
 
     def vector_search(
         self,

@@ -171,8 +171,9 @@ COLUMN_METADATA_SORTED = b"Sorted"
 COLUMN_METADATA_SORT_INDEX_PROPERTY = b"VAST:sort_index"
 
 PIT_SORTING_SCORE_FIELD = pa.field("sorting_score", pa.int64())
+PIT_ROW_ESTIMATE_FIELD = pa.field("est_row_count", pa.int64())
 PIT_METADATA_COLUMNS_TO_INCLUDE = pa.schema([
-    pa.field("est_row_count", pa.int64()),
+    PIT_ROW_ESTIMATE_FIELD,
     pa.field("est_byte_size", pa.int64()),
 ])
 

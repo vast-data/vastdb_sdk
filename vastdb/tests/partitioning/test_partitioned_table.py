@@ -33,6 +33,7 @@ _ARROW_SCHEMA = pa.schema(
         ("m", pa.timestamp("us")),
         ("d", pa.timestamp("us")),
         ("h", pa.timestamp("us")),
+        ("sorted_col", pa.int32()),
     ]
 )
 _DATA = pa.Table.from_pydict(
@@ -69,6 +70,7 @@ _DATA = pa.Table.from_pydict(
             datetime(2025, 1, 1, 2),
             datetime(2025, 1, 1, 3),
         ],
+        "sorted_col": [17, 30, 12, 80, 100],
     },
     schema=_ARROW_SCHEMA,
 )
@@ -81,6 +83,7 @@ _TRANSFORMS: tuple[tuple[str, Transform], ...] = (
     ("y", YearTransform()),
     ("h", HourTransform()),
 )
+_SORTING_KEYS: tuple[list[str], ...] = ([], ["sorted_col"])
 
 
 def _post_transform_name(column_name: str, transform: Transform) -> str:
@@ -139,8 +142,9 @@ def hydra_session(session: Session) -> Session:
 
 
 @pytest.mark.parametrize("column_name, transform", _TRANSFORMS)
+@pytest.mark.parametrize("sorting_keys", _SORTING_KEYS)
 def test_create_partitioned_table(
-    hydra_session: Session, clean_bucket_name: str, column_name: str, transform: Transform
+    hydra_session: Session, clean_bucket_name: str, column_name: str, transform: Transform, sorting_keys: list[str]
 ):
     with hydra_session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).create_schema(f"s_{column_name}")
@@ -148,6 +152,7 @@ def test_create_partitioned_table(
             f"partitioned_table_{column_name}",
             _ARROW_SCHEMA,
             partition_spec=_create_partition_spec(column_name, transform),
+            sorting_key=sorting_keys,
         )
 
         assert t._metadata.partitioning == PartitionsMetadata(
@@ -159,7 +164,8 @@ def test_create_partitioned_table(
         s.drop()
 
 
-def test_create_partitioned_table_negative(hydra_session: Session, clean_bucket_name: str):
+@pytest.mark.parametrize("sorting_keys", _SORTING_KEYS)
+def test_create_partitioned_table_negative(hydra_session: Session, clean_bucket_name: str, sorting_keys: list[str]):
     with hydra_session.transaction() as tx:
         s = tx.bucket(clean_bucket_name).create_schema("s")
 
@@ -168,12 +174,14 @@ def test_create_partitioned_table_negative(hydra_session: Session, clean_bucket_
             "partitioned_table",
             _ARROW_SCHEMA,
             partition_spec=_create_partition_spec("B", IdentityTransform()),
+            sorting_key=sorting_keys,
         )
 
 
 @pytest.mark.parametrize("column_name, transform", _TRANSFORMS)
+@pytest.mark.parametrize("sorting_keys", _SORTING_KEYS)
 def test_pit(
-    hydra_session: Session, clean_bucket_name: str, column_name: str, transform: Transform
+    hydra_session: Session, clean_bucket_name: str, column_name: str, transform: Transform, sorting_keys: list[str]
 ):
     if isinstance(transform, DayTransform):
         pytest.skip("Server currently returns a date type on the transformed column and not an int like iceberg")
@@ -194,6 +202,7 @@ def test_pit(
             table_name,
             _ARROW_SCHEMA,
             partition_spec=_create_partition_spec(column_name, transform),
+            sorting_key=sorting_keys,
         )
         t.insert(_DATA)
 
@@ -241,8 +250,9 @@ def test_pit(
 
 
 @pytest.mark.parametrize("column_name, transform", _TRANSFORMS)
+@pytest.mark.parametrize("sorting_keys", _SORTING_KEYS)
 def test_query_partitioned_table(
-    hydra_session: Session, clean_bucket_name: str, column_name: str, transform: Transform
+    hydra_session: Session, clean_bucket_name: str, column_name: str, transform: Transform, sorting_keys: list[str]
 ):
     schema_name = f"s_{column_name}"
     table_name = f"partitioned_table_{column_name}"
@@ -253,6 +263,7 @@ def test_query_partitioned_table(
             table_name,
             _ARROW_SCHEMA,
             partition_spec=_create_partition_spec(column_name, transform),
+            sorting_key=sorting_keys,
         )
         t.insert(_DATA)
 
@@ -303,11 +314,13 @@ def test_query_partitioned_table(
     ],
 )
 @pytest.mark.parametrize("column_name, transform", _TRANSFORMS)
+@pytest.mark.parametrize("sorting_keys", _SORTING_KEYS)
 def test_predicate_partitioned_table(
     hydra_session: Session,
     clean_bucket_name: str,
     column_name: str,
     transform: Transform,
+    sorting_keys: list[str],
     predicate_generator: Callable,
     arrow_filter,
 ):
@@ -320,6 +333,7 @@ def test_predicate_partitioned_table(
             table_name,
             _ARROW_SCHEMA,
             partition_spec=_create_partition_spec(column_name, transform),
+            sorting_key=sorting_keys,
         )
         t.insert(_DATA)
 
@@ -332,11 +346,13 @@ def test_predicate_partitioned_table(
 
 @pytest.mark.parametrize("column_name, transform", _TRANSFORMS)
 @pytest.mark.parametrize("limit_rows", [0, 1, 3, 5, 6])
+@pytest.mark.parametrize("sorting_keys", _SORTING_KEYS)
 def test_query_partitioned_table_with_limit(
     hydra_session: Session,
     clean_bucket_name: str,
     column_name: str,
     transform: Transform,
+    sorting_keys: list[str],
     limit_rows: int,
 ):
     schema_name = f"s_limit_{column_name}_{limit_rows}"
@@ -348,6 +364,7 @@ def test_query_partitioned_table_with_limit(
             table_name,
             _ARROW_SCHEMA,
             partition_spec=_create_partition_spec(column_name, transform),
+            sorting_key=sorting_keys,
         )
         t.insert(_DATA)
 
@@ -372,11 +389,13 @@ def test_query_partitioned_table_with_limit(
         lambda _: None,
     ],
 )
+@pytest.mark.parametrize("sorting_keys", _SORTING_KEYS)
 def test_delete_partition(
     hydra_session: Session,
     clean_bucket_name: str,
     column_name: str,
     transform: Transform,
+    sorting_keys: list[str],
     filter_generator,
 ):
     schema_name = f"s_{column_name}_{hash(filter_generator)}"
@@ -388,6 +407,7 @@ def test_delete_partition(
             table_name,
             _ARROW_SCHEMA,
             partition_spec=_create_partition_spec(column_name, transform),
+            sorting_key=sorting_keys,
         )
         t.insert(_DATA)
 
@@ -405,8 +425,9 @@ def test_delete_partition(
 
 
 @pytest.mark.parametrize("column_name, transform", _TRANSFORMS)
+@pytest.mark.parametrize("sorting_keys", _SORTING_KEYS)
 def test_delete_partition_invalid_input(
-    hydra_session: Session, clean_bucket_name: str, column_name: str, transform: Transform
+    hydra_session: Session, clean_bucket_name: str, column_name: str, transform: Transform, sorting_keys: list[str]
 ):
     if isinstance(transform, DayTransform):
         pytest.skip("Server currently returns a date type on the transformed column and not an int like iceberg")
@@ -420,6 +441,7 @@ def test_delete_partition_invalid_input(
             table_name,
             _ARROW_SCHEMA,
             partition_spec=_create_partition_spec(column_name, transform),
+            sorting_key=sorting_keys,
         )
         t.insert(_DATA)
 
@@ -464,7 +486,8 @@ def test_delete_partition_invalid_input(
         assert len(list(t.partitions().select())) == partitions_batches_count
 
 
-def test_non_partitioned_table(hydra_session: Session, clean_bucket_name: str):
+@pytest.mark.parametrize("sorting_keys", _SORTING_KEYS)
+def test_non_partitioned_table(hydra_session: Session, clean_bucket_name: str, sorting_keys: list[str]):
     schema_name = "s"
     table_name = "non_partitioned_table"
 
@@ -472,7 +495,7 @@ def test_non_partitioned_table(hydra_session: Session, clean_bucket_name: str):
         (
             tx.bucket(clean_bucket_name)
             .create_schema(schema_name)
-            .create_table(table_name, _ARROW_SCHEMA)
+            .create_table(table_name, _ARROW_SCHEMA, sorting_key=sorting_keys)
         )
 
     with hydra_session.transaction() as tx:
@@ -567,11 +590,13 @@ def test_data_engine_example2(hydra_session: Session, clean_bucket_name: str):
     ],
 )
 @pytest.mark.parametrize("column_name, transform", _TRANSFORMS)
+@pytest.mark.parametrize("sorting_keys", _SORTING_KEYS)
 def test_delete_rows_partitioned_table(
     hydra_session: Session,
     clean_bucket_name: str,
     column_name: str,
     transform: Transform,
+    sorting_keys: list[str],
     delete_predicate_generator: Callable,
     expected_remaining_filter,
 ):
@@ -584,6 +609,7 @@ def test_delete_rows_partitioned_table(
             table_name,
             _ARROW_SCHEMA,
             partition_spec=_create_partition_spec(column_name, transform),
+            sorting_key=sorting_keys,
         )
         t.insert(_DATA)
 
@@ -603,11 +629,13 @@ def test_delete_rows_partitioned_table(
 
 
 @pytest.mark.parametrize("column_name, transform", _TRANSFORMS)
+@pytest.mark.parametrize("sorting_keys", _SORTING_KEYS)
 def test_update_rows_partitioned_table(
     hydra_session: Session,
     clean_bucket_name: str,
     column_name: str,
     transform: Transform,
+    sorting_keys: list[str],
 ):
     schema_name = f"s_update_rows_{column_name}"
     table_name = f"partitioned_table_{column_name}"
@@ -618,6 +646,7 @@ def test_update_rows_partitioned_table(
             table_name,
             _ARROW_SCHEMA,
             partition_spec=_create_partition_spec(column_name, transform),
+            sorting_key=sorting_keys,
         )
         t.insert(_DATA)
 
@@ -656,11 +685,13 @@ def test_update_rows_partitioned_table(
 
 
 @pytest.mark.parametrize("column_name, transform", _TRANSFORMS)
+@pytest.mark.parametrize("sorting_keys", _SORTING_KEYS)
 def test_update_rows_fails_on_partition_column(
         hydra_session: Session,
         clean_bucket_name: str,
         column_name: str,
         transform: Transform,
+        sorting_keys: list[str],
 ):
     schema_name = f"s_update_rows_partition_columns_{column_name}_fails"
     table_name = f"partitioned_table_{column_name}"
@@ -671,6 +702,7 @@ def test_update_rows_fails_on_partition_column(
             table_name,
             _ARROW_SCHEMA,
             partition_spec=_create_partition_spec(column_name, transform),
+            sorting_key=sorting_keys,
         )
         t.insert(_DATA)
 
