@@ -5,12 +5,11 @@ pyarrow>=18.0,<=23.0.1
 pyarrow-hotfix==0.7
 flatbuffers
 packaging
-pandas
 numpy
 requests
 xmltodict
 backoff==2.2.1
 adbc_driver_manager
 protobuf
-pyiceberg[pyiceberg-core]~=0.10.0
+pyiceberg[pyiceberg-core]>=0.10.0,<=0.20.0
 pydantic

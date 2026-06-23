@@ -24,4 +24,3 @@ setuptools
 twine
 typer
 packaging
-pyiceberg[pyiceberg-core]
