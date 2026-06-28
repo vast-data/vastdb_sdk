@@ -30,6 +30,7 @@ class ByPartitionBuffer:
         self._partition_spec = partition_spec
         self._buffers: dict[tuple, list[pa.RecordBatch]] = dict()
         self._buffers_lock = threading.Lock()
+        self._approximate_buffer_size = 0
 
     @property
     def partition_spec(self) -> PartitionSpec:
@@ -45,7 +46,7 @@ class ByPartitionBuffer:
 
     def current_size_in_bytes(self) -> int:
         with self._buffers_lock:
-            return self._approximate_size()
+            return self._approximate_buffer_size
 
     def add(self, record_batch: pa.RecordBatch) -> Iterable[pa.Table]:
         if record_batch.num_rows == 0:
@@ -57,6 +58,7 @@ class ByPartitionBuffer:
         with self._buffers_lock:
             for partition_key, batch in new_partitions:
                 current = self._buffers.get(partition_key)
+                self._approximate_buffer_size += batch.nbytes
 
                 if current is None:
                     current = [batch]
@@ -67,8 +69,9 @@ class ByPartitionBuffer:
                 if sum(b.num_rows for b in current) >= self._target_num_rows_per_batch:
                     batches_list = self._buffers.pop(partition_key)
                     buffers_to_send.append(pa.Table.from_batches(batches_list))
+                    self._approximate_buffer_size -= sum(b.nbytes for b in current)
 
-            if self._approximate_size() > self._capacity_in_bytes:
+            if self._approximate_buffer_size > self._capacity_in_bytes:
                 buffers_to_send.extend(self._flush_until_below_capacity())
 
             return buffers_to_send
@@ -99,24 +102,19 @@ class ByPartitionBuffer:
                 key = tuple(c[i] for c in chunks_as_lists)
                 yield key, sub_batch
 
-    def _approximate_size(self) -> int:
-        return sum(sum(b.nbytes for b in batches_list) for batches_list in self._buffers.values())
-
     def _flush_until_below_capacity(self) -> Iterable[pa.Table]:
         sorted_buffers = sorted(
             self._buffers.items(),
             key=lambda item: sum(b.nbytes for b in item[1]),
             reverse=True,
         )
-        current_size = self._approximate_size()
-        accumulated_size_to_flush = 0
         keys_to_send = []
 
         for key, batches_list in sorted_buffers:
             keys_to_send.append(key)
-            accumulated_size_to_flush += sum(b.nbytes for b in batches_list)
+            self._approximate_buffer_size -= sum(b.nbytes for b in batches_list)
 
-            if current_size - accumulated_size_to_flush < self._capacity_in_bytes:
+            if self._approximate_buffer_size < self._capacity_in_bytes:
                 break
 
         return (pa.Table.from_batches(self._buffers.pop(key)) for key in keys_to_send)
@@ -125,6 +123,7 @@ class ByPartitionBuffer:
         with self._buffers_lock:
             buffers_to_send = self._buffers.values()
             self._buffers = dict()
+            self._approximate_buffer_size = 0
             return (pa.Table.from_batches(batches) for batches in buffers_to_send)
 
 
