@@ -8,7 +8,7 @@ from vastdb.table import QueryConfig
 log = logging.getLogger(__name__)
 
 
-DELAY_TO_LET_SERVER_UPDATE: int = 3
+DELAY_TO_LET_SERVER_UPDATE: int = 15
 
 
 def test_basic_projections(session, clean_bucket_name):
