@@ -75,7 +75,7 @@ test_orion:
     - if: '$CI_COMMIT_BRANCH != "main"'
   parallel:
     matrix:
-      - ORION_BRANCH: ['follower/5.4', 'follower/5.5', 'follower/tabular/5.6']
+      - ORION_BRANCH: ['follower/5.4', 'follower/5.5', 'QE/ido.silverwater/get2post']
 
 
 upload_to_artifactory:

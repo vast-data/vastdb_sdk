@@ -119,6 +119,7 @@ class SplitWorker:
                  txid: Optional[int],
                  query_imports_table: bool,
                  split_id: int,
+                 use_new_query_method: bool,
                  config: SplitWorkerConfig) -> None:
         """Initialize query split state."""
         self.api = api
@@ -130,6 +131,7 @@ class SplitWorker:
         self.table_name = table_name
         self.txid = txid
         self.query_imports_table = query_imports_table
+        self.use_new_query_method = use_new_query_method
         self.config = config
 
     def __iter__(self):
@@ -146,6 +148,7 @@ class SplitWorker:
                     schema=self.schema_name,
                     table=self.table_name,
                     params=self.query_data_request.serialized,
+                    use_new_query_method=self.use_new_query_method,
                     split=(self.split_id, self.config.num_splits,
                            self.config.num_row_groups_per_sub_split),
                     num_sub_splits=self.config.num_sub_splits,
@@ -562,6 +565,7 @@ class TableInTransaction(ITable):
             schema=self.ref.schema,
             table=self.ref.table,
             params=query_data_request.serialized,
+            use_new_query_method=self._tx._rpc.features.use_new_query_method,
             split=(_ELYSIUM_SPLIT_ESTIMATION_SPLIT_ID, 1, 1),
             txid=self._tx.active_txid)
         batch = _internal.read_first_batch(response.raw)
@@ -705,6 +709,7 @@ class TableInTransaction(ITable):
                 txid=self._tx.active_txid,
                 query_imports_table=self._metadata.is_imports_table,
                 split_id=split,
+                use_new_query_method=self._tx._rpc.features.use_new_query_method,
                 config=split_config
             ).split_record_batch_reader()
             for split in range(split_config.num_splits)
@@ -786,6 +791,7 @@ class TableInTransaction(ITable):
                             txid=self._tx.active_txid,
                             query_imports_table=self._metadata.is_imports_table,
                             split_id=split,
+                            use_new_query_method=self._tx._rpc.features.use_new_query_method,
                             config=split_config)
 
                         process_with_retries = backoff_decorator(

@@ -1948,9 +1948,12 @@ class VastdbApi:
             url_params['name'] = projection
         return url_params
 
-    def query_data(self, bucket, schema, table, params, split=(0, 1, 8), num_sub_splits=1, response_row_id=False,
-                   txid: Optional[int] = 0, client_tags=[], expected_retvals=[], limit_rows=0, schedule_id=None, retry_count=0,
-                   search_path=None, sub_split_start_row_ids=[], tenant_guid=None, projection: Optional[str] = '', enable_sorted_projections=True,
+    def query_data(self, bucket, schema, table, params, use_new_query_method: bool,
+                   split=(0, 1, 8), num_sub_splits=1, response_row_id=False,
+                   txid: Optional[int] = 0, client_tags=[], expected_retvals=[],
+                   limit_rows=0, schedule_id=None, retry_count=0,
+                   search_path=None, sub_split_start_row_ids=[], tenant_guid=None,
+                   projection: Optional[str] = '', enable_sorted_projections=True,
                    request_format='string', response_format='string', query_imports_table=False):
         """
         GET /mybucket/myschema/mytable?data HTTP/1.1
@@ -1977,10 +1980,19 @@ class VastdbApi:
 
         url_params = self._build_query_data_url_params(projection, query_imports_table)
 
+        method, command = (
+            ("POST", "query-data=LegacyQueryData")
+            if use_new_query_method
+            else ("GET", "data"))
+
         # The retries will be done during SelectSplitState processing:
         return self._single_request(
-            method="GET",
-            url=self._url(bucket=bucket, schema=schema, table=table, command="data", url_params=url_params),
+            method=method,
+            url=self._url(bucket=bucket,
+                          schema=schema,
+                          table=table,
+                          command=command,
+                          url_params=url_params),
             data=params, headers=headers, stream=True)
 
     """
