@@ -13,7 +13,8 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Optional
 
 from ._by_partition_insert import ByPartitionBufferedInserter as _BufferedInserter
-from .config import BufferedInsertConfig
+from ._session_context import SessionContext
+from .config import BufferedInsertConfig, SessionConfig
 from .table_metadata import TableMetadata, TableRef
 from .transaction import Transaction
 
@@ -31,25 +32,40 @@ class Session:
                  timeout=None,
                  backoff_config: Optional["BackoffConfig"] = None,
                  adbc_driver_path: Optional[str] = None,
-                 end_user: Optional[str] = None):
+                 end_user: Optional[str] = None,
+                 config: SessionConfig | None = None
+    ):
         """Connect to a VAST Database endpoint, using specified credentials."""
         from . import _internal, features
+
+        env_endpoint = os.environ.get('AWS_S3_ENDPOINT_URL')
+        effective_endpoint: str
+        if endpoint is None and env_endpoint is None:
+            raise ValueError("One of endpoint and AWS_S3_ENDPOINT_URL env is required")
+        elif env_endpoint is not None:
+            effective_endpoint = env_endpoint
+        elif endpoint is not None:
+            effective_endpoint = endpoint
+
+        self._context = SessionContext(
+            data_endpoints=(
+                config.data_endpoints
+                if config is not None and config.data_endpoints is not None
+                else [effective_endpoint])
+        )
 
         if access is None:
             access = os.environ['AWS_ACCESS_KEY_ID']
         if secret is None:
             secret = os.environ['AWS_SECRET_ACCESS_KEY']
-        if endpoint is None:
-            endpoint = os.environ['AWS_S3_ENDPOINT_URL']
 
-        self.endpoint: str = endpoint
         self.access: str = access
         self.secret: str = secret
 
         self.api = _internal.VastdbApi(
-            endpoints=[self.endpoint],
             access_key=self.access,
             secret_key=self.secret,
+            session_context=self._context,
             max_entities_per_page=max_entities_per_page,
             ssl_verify=ssl_verify,
             timeout=timeout,
@@ -71,7 +87,10 @@ class Session:
                 tx.bucket("bucket").create_schema("schema")
         """
         from . import transaction
-        return transaction.Transaction(self, _adbc_driver_path=self.adbc_driver_path, _end_user=self._end_user)
+        return transaction.Transaction(_rpc=self,
+                                       _adbc_driver_path=self.adbc_driver_path,
+                                       _end_user=self._end_user,
+                                       _session_context=self._context)
 
     def buffered_inserter(
         self,

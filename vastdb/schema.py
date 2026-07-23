@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Iterable, List, Optional
 
 import pyarrow as pa
 
+from vastdb._session_context import SessionContext
 from vastdb.table_metadata import TableMetadata, TableRef
 
 from . import bucket, errors, schema, table
@@ -158,7 +159,7 @@ class Schema:
         Otherwise, list only the specific table (if exists).
         """
         return [
-            _parse_table_info(table_info, self)
+            _parse_table_info(table_info, self, self.tx._session_context)
             for table_info in self._iter_tables(table_name=table_name, page_size=page_size)
         ]
 
@@ -178,7 +179,8 @@ class Schema:
         self.name = new_name
 
 
-def _parse_table_info(table_info: TableInfo, schema: "schema.Schema"):
+def _parse_table_info(table_info: TableInfo, schema: "schema.Schema",
+                      session_context: SessionContext):
     ref = TableRef(bucket=schema.bucket.name,
                    schema=schema.name,
                    table=table_info.name)
@@ -186,4 +188,5 @@ def _parse_table_info(table_info: TableInfo, schema: "schema.Schema"):
 
     return table.Table(handle=int(table_info.handle),
                        metadata=table_metadata,
-                       tx=schema.tx)
+                       tx=schema.tx,
+                       session_context=session_context)

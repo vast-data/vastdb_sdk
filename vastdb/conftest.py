@@ -8,6 +8,7 @@ import pytest
 
 import vastdb
 import vastdb.errors
+from vastdb.config import SessionConfig
 from vastdb.schema import Schema
 from vastdb.session import Session
 
@@ -57,6 +58,18 @@ def session_kwargs(request: pytest.FixtureRequest, tabular_endpoint_urls):
         secret=request.config.getoption("--tabular-secret-key"),
         endpoint=tabular_endpoint_urls[0],
     )
+
+
+@pytest.fixture(scope="session")
+def session_provider(request, tabular_endpoint_urls):
+    def provider(session_config: SessionConfig) -> Session:
+        return Session(
+            access=request.config.getoption("--tabular-access-key"),
+            secret=request.config.getoption("--tabular-secret-key"),
+            endpoint=tabular_endpoint_urls[0],
+            config=session_config,
+        )
+    return provider
 
 
 @pytest.fixture(scope="session")

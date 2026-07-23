@@ -469,7 +469,13 @@ def test_delete_partition_invalid_input(
             t.delete_partitions(batch, allow_non_acid=True)
 
         # a partition with these values doesnt exist
-        with pytest.raises(errors.BadRequest, match="InvalidArgument"):
+        error, message = (
+            (errors.NotFound, r"NoSuchKey.*not found in partition index table")
+            if hydra_session.features.vast_version >= (5, 6)
+            else (errors.BadRequest, r"InvalidArgument")
+        )
+
+        with pytest.raises(error, match=message):
             batch = pa.RecordBatch.from_arrays(
                 [
                     pa.array([2]),

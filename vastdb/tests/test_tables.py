@@ -1,3 +1,4 @@
+import contextlib
 import datetime as dt
 import decimal
 import itertools
@@ -1460,7 +1461,14 @@ def test_list_columns_with_pagination(session: Session, clean_bucket_name: str):
                 assert "list column result size" in str(e)
             t = tx.table_from_metadata(TableMetadata(TableRef(clean_bucket_name, schema_name, table_name)))
             # names only requires less wire capacity so should succeed in one rpc
-            assert len(t.retrieve_column_names()) == columns_count
+            expected_retreive_column_names = (
+                contextlib.nullcontext()
+                if session.features.list_only_column_names
+                else pytest.raises(errors.BadRequest, match=r"list column result.*too long")
+            )
+            with expected_retreive_column_names:
+                assert len(t.retrieve_column_names()) == columns_count
+
             assert t.arrow_schema is None
     finally:
         session.api._max_entities_per_page = original_page_size

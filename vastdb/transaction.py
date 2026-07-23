@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Iterable, Optional
 
 from vastdb._adbc import AdbcConnection, AdbcDriverVastdbNotInstalledException
+from vastdb._session_context import SessionContext
 from vastdb._table_interface import ITable
 from vastdb.table import TableInTransaction
 from vastdb.table_metadata import TableMetadata
@@ -51,6 +52,7 @@ class Transaction:
     """A holder of a single VAST transaction."""
 
     _rpc: "session.Session"
+    _session_context: SessionContext
     txid: Optional[int] = None
     _adbc_driver_path: Optional[str] = None
     _adbc_conn: Optional[AdbcConnection] = None
@@ -63,7 +65,7 @@ class Transaction:
 
         try:
             self._adbc_conn = AdbcConnection(
-                self._rpc.endpoint,
+                self._rpc._context.data_endpoints[0],
                 self._rpc.access,
                 self._rpc.secret,
                 self.txid,
@@ -136,7 +138,7 @@ class Transaction:
 
     def table_from_metadata(self, metadata: TableMetadata) -> ITable:
         """Create Table from TableMetadata."""
-        return TableInTransaction(deepcopy(metadata), tx=self)
+        return TableInTransaction(deepcopy(metadata), tx=self, session_context=self._session_context)
 
     @property
     def adbc_conn(self) -> AdbcConnection:

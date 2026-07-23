@@ -39,8 +39,6 @@ def test_parallel_imports_with_endpoints_negative(session: Session, clean_bucket
         log.info("Starting import of %d files", len(files))
         with pytest.raises(ConnectionError):
             t.import_files(files, config=ImportConfig(data_endpoints=['http://no.such.endpoint']))
-        with pytest.raises(ImportFilesError):
-            t.import_files(files, config=ImportConfig(data_endpoints=[]))
 
 
 def test_parallel_imports_with_endpoints(session: Session, clean_bucket_name: str, s3):

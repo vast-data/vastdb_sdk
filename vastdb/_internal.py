@@ -105,6 +105,7 @@ import vastdb.vast_flatbuf.tabular.CreateSchemaRequest as tabular_create_schema
 import vastdb.vast_flatbuf.tabular.ImportDataRequest as tabular_import_data
 import vastdb.vast_flatbuf.tabular.KeyName as import_key_name
 import vastdb.vast_flatbuf.tabular.S3File as tabular_s3_file
+from vastdb._session_context import SessionContext
 from vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.Deref import Deref
 from vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.ExpressionImpl import (
     ExpressionImpl,
@@ -1025,8 +1026,9 @@ class VastdbApi:
     # we expect the vast version to be <major>.<minor>.<patch>.<protocol>
     VAST_VERSION_REGEX = re.compile(r'^vast (\d+\.\d+\.\d+\.\d+)$')
 
-    def __init__(self, endpoints: list[str], access_key: str, secret_key: str,
+    def __init__(self, access_key: str, secret_key: str,
                  *,
+                 session_context: SessionContext,
                  max_entities_per_page: int,
                  ssl_verify: Union[bool, str] = True,
                  timeout=None,
@@ -1040,7 +1042,7 @@ class VastdbApi:
 
         self._ssl_verify: Union[bool, str] = ssl_verify
 
-        self._endpoints: list[Url] = [parse_url(endpoint) for endpoint in endpoints]
+        self._endpoints: list[Url] = [parse_url(endpoint) for endpoint in session_context.data_endpoints]
         self._sessions: dict[str, requests.Session] = {}
 
         self.access_key = access_key
@@ -1101,9 +1103,9 @@ class VastdbApi:
 
     def with_endpoints(self, endpoints: list[str]) -> 'VastdbApi':
         """Open a new session for targeting a specific endpoint."""
-        return VastdbApi(endpoints=endpoints,
-                         access_key=self.access_key,
+        return VastdbApi(access_key=self.access_key,
                          secret_key=self.secret_key,
+                         session_context=SessionContext(data_endpoints=endpoints),
                          max_entities_per_page=self._max_entities_per_page,
                          ssl_verify=self._ssl_verify,
                          timeout=self.timeout,

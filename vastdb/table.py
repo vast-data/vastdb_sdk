@@ -29,6 +29,7 @@ import ibis
 import pyarrow as pa
 import urllib3
 
+from vastdb._session_context import SessionContext
 from vastdb._table_interface import IbisPredicate, ITable, ReadOnlyTable
 from vastdb.table_metadata import (
     PartitionsMetadata,
@@ -197,14 +198,19 @@ class SplitWorker:
 
 
 class _Partitions:
-    def __init__(self, table: "TableInTransaction", include_pre_transform_columns: bool = False) -> None:
+    def __init__(self,
+                 table: "TableInTransaction",
+                 session_context: SessionContext,
+                 include_pre_transform_columns: bool = False,
+                 ) -> None:
         if table._metadata.partitioning is None:
             raise ValueError("_Partitions __init__ requires a partitioned table")
 
         self._partitions_metadata = typing.cast(PartitionsMetadata, table._metadata.partitioning)
         self._pit = TableInTransaction(
             TableMetadata(dataclasses.replace(table.ref, table=f"{table.ref.table}___VAST_PARTITIONS")),
-            table._tx
+            table._tx,
+            session_context
         )
         self._pit.reload_schema()
         self._pit.reload_stats()
@@ -253,13 +259,16 @@ class TableInTransaction(ITable):
 
     _metadata: TableMetadata
     _tx: "Transaction"
+    _session_context: SessionContext
 
     def __init__(self,
                  metadata: TableMetadata,
-                 tx: "Transaction"):
+                 tx: "Transaction",
+                 session_context: SessionContext):
         """VastDB Table."""
         self._metadata = metadata
         self._tx = tx
+        self._session_context = session_context
 
     @property
     def ref(self) -> TableRef:
@@ -301,7 +310,7 @@ class TableInTransaction(ITable):
             sorted_columns=False,
             txid=self._tx.active_txid,
             list_imports_table=self._metadata.is_imports_table,
-            names_only=True
+            names_only=self._tx._rpc.features.list_only_column_names
         )
         return [f.name for f in schema]
 
@@ -443,26 +452,19 @@ class TableInTransaction(ITable):
             serialized_batch = _serialize_record_batch(record_batch)
             source_files[(bucket_name, object_path)] = serialized_batch.to_pybytes()
 
-        self._execute_import(source_files, config=config)
+        self._execute_import(source_files, config)
 
     def _execute_import(self,
                         source_files: dict[tuple[str, str], bytes],
                         config: Optional[ImportConfig]):
-        config = config or ImportConfig()
-        if config.data_endpoints is None:
-            # TODO: Do we want to validate concurrency isn't too high?
-            assert config.import_concurrency > 0
-            endpoints = [str(self._tx._rpc.api.next_endpoint()) for _ in range(config.import_concurrency)]
-        else:
-            log.info("Using concurrency based on endpoints: {}".format(config.data_endpoints))
-            if len(config.data_endpoints) == 0:
-                raise errors.ImportFilesError("Empty data_endpoints is not allowed", {})
-            endpoints = config.data_endpoints
+        effective_config = (config or ImportConfig()).override_missing(self._session_context)
+        data_endpoints = effective_config.require_endpoints()
+
         max_batch_size = 10  # Enforced in server side.
 
         files_queue: Queue = Queue()
 
-        key_names = config.key_names or []
+        key_names = effective_config.key_names or []
         if key_names:
             self._tx._rpc.features.check_zip_import()
 
@@ -471,7 +473,7 @@ class TableInTransaction(ITable):
 
         stop_event = Event()
         num_files_in_batch = min(
-            ceil(len(source_files) / len(endpoints)), max_batch_size)
+            ceil(len(source_files) / len(data_endpoints)), max_batch_size)
         log.info("Setting batch size to %s files", num_files_in_batch)
 
         def import_worker(q, endpoint: str):
@@ -501,9 +503,9 @@ class TableInTransaction(ITable):
 
         futures = []
         with concurrent.futures.ThreadPoolExecutor(
-                max_workers=config.import_concurrency, thread_name_prefix='import_thread') as pool:
+                max_workers=effective_config.import_concurrency, thread_name_prefix='import_thread') as pool:
             try:
-                for endpoint in endpoints:
+                for endpoint in data_endpoints:
                     futures.append(pool.submit(
                         import_worker, files_queue, endpoint))
 
@@ -586,11 +588,10 @@ class TableInTransaction(ITable):
             internal_row_id: bool = False,
             limit_rows: Optional[int] = None
     ) -> tuple[SplitWorkerConfig, _internal.QueryDataRequest, tuple[str, ...]]:
-        if config.data_endpoints is None:
-            endpoints = tuple([str(self._tx._rpc.endpoint)])
-        else:
-            endpoints = tuple(config.data_endpoints)
-        log.debug("endpoints: %s", endpoints)
+        effective_config = config.override_missing(self._session_context)
+        data_endpoints = effective_config.require_endpoints()
+
+        log.debug("endpoints: %s", data_endpoints)
 
         select_columns: list[str] = query_schema.names if columns is None else columns
 
@@ -610,15 +611,15 @@ class TableInTransaction(ITable):
             # may raise if the predicate is invalid (e.g. wrong types / missing column)
             predicate = predicate.resolve(self._metadata.ibis_table)
 
-        num_splits = self._get_split_estimation(config,
+        num_splits = self._get_split_estimation(effective_config,
                                                 query_schema,
                                                 select_columns,
                                                 predicate,
                                                 row_count_estimate)
 
-        log.debug("config: %s", config)
+        log.debug("config: %s", effective_config)
 
-        if config.semi_sorted_projection_name:
+        if effective_config.semi_sorted_projection_name:
             self._tx._rpc.features.check_enforce_semisorted_projection()
 
         query_data_request = _internal.build_query_data_request(
@@ -631,14 +632,14 @@ class TableInTransaction(ITable):
 
         split_config = SplitWorkerConfig(
             num_splits=num_splits,
-            num_sub_splits=config.num_sub_splits,
-            num_row_groups_per_sub_split=config.num_row_groups_per_sub_split,
-            limit_rows_per_sub_split=limit_rows or config.limit_rows_per_sub_split,
-            use_semi_sorted_projections=config.use_semi_sorted_projections,
-            queue_priority=config.queue_priority,
-            semi_sorted_projection_name=config.semi_sorted_projection_name)
+            num_sub_splits=effective_config.num_sub_splits,
+            num_row_groups_per_sub_split=effective_config.num_row_groups_per_sub_split,
+            limit_rows_per_sub_split=limit_rows or effective_config.limit_rows_per_sub_split,
+            use_semi_sorted_projections=effective_config.use_semi_sorted_projections,
+            queue_priority=effective_config.queue_priority,
+            semi_sorted_projection_name=effective_config.semi_sorted_projection_name)
 
-        return split_config, query_data_request, endpoints
+        return split_config, query_data_request, tuple(data_endpoints)
 
     def select_splits(self, columns: Optional[list[str]] = None,
                       predicate: Union[ibis.expr.types.BooleanColumn,
@@ -849,7 +850,7 @@ class TableInTransaction(ITable):
             )
             return pa.RecordBatchReader.from_batches(schema, batches)
 
-        pit = _Partitions(self, include_pre_transform_columns=True)
+        pit = _Partitions(self, self._session_context, include_pre_transform_columns=True)
         partitions_metadata = typing.cast(PartitionsMetadata, self._metadata.partitioning)
         pre_transform_partition_names = {k.column for k in partitions_metadata.spec.partition_keys}
 
@@ -1080,7 +1081,7 @@ class TableInTransaction(ITable):
         The returned table should be used only to execute a query
         """
         self._assert_partitioned()
-        return _Partitions(self)
+        return _Partitions(self, self._session_context)
 
     def delete_partitions(self, partitions: pa.RecordBatch, *, allow_non_acid: bool = False) -> None:
         """Delete partitions of a table.
@@ -1110,7 +1111,8 @@ class TableInTransaction(ITable):
         """Get the imports table of this table."""
         imports_table_metadata = self.imports_table_metadata()
         return TableInTransaction(metadata=imports_table_metadata,
-                                  tx=self._tx)
+                                  tx=self._tx,
+                                  session_context=self._session_context)
 
     def imports_table_metadata(self) -> TableMetadata:
         """Get TableMetadata for import table."""
@@ -1178,9 +1180,10 @@ class Table(TableInTransaction):
     def __init__(self,
                  metadata: TableMetadata,
                  handle: int,
-                 tx: "Transaction"):
+                 tx: "Transaction",
+                 session_context: SessionContext):
         """Vast Interactive Table."""
-        super().__init__(metadata, tx)
+        super().__init__(metadata, tx, session_context)
         self._metadata.load(tx)
 
         self._handle = handle
@@ -1221,7 +1224,8 @@ class Table(TableInTransaction):
         imports_table_metadata = self.imports_table_metadata()
         return Table(handle=self.handle,
                      metadata=imports_table_metadata,
-                     tx=self.tx)
+                     tx=self.tx,
+                     session_context=self._session_context)
 
     @property
     def sorted_table(self) -> bool:

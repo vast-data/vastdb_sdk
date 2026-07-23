@@ -1,11 +1,13 @@
 """Configuration-related dataclasses."""
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import timedelta
 from typing import TYPE_CHECKING, Callable, List, Optional
 
 import backoff
+
+from vastdb._session_context import SessionContext
 
 if TYPE_CHECKING:
     from .transaction import Transaction
@@ -20,6 +22,18 @@ class BackoffConfig:
     max_tries: int = 10
     max_time: float = 60.0  # in seconds
     backoff_log_level: int = logging.DEBUG
+
+
+@dataclass(frozen=True)
+class SessionConfig:
+    """Session Defaults Config."""
+
+    data_endpoints: list[str] | None
+
+    def __post_init__(self):
+        """Post init."""
+        if self.data_endpoints is not None and len(self.data_endpoints) == 0:
+            raise ValueError("data_endpoints cannot be empty")
 
 
 @dataclass
@@ -61,6 +75,20 @@ class QueryConfig:
     # - if unset, the request will be added to the queue's end.
     queue_priority: Optional[int] = None
 
+    def override_missing(self, session_context: SessionContext) -> "QueryConfig":
+        """With session defaults."""
+        return replace(
+            self,
+            data_endpoints=self.data_endpoints if self.data_endpoints is not None else session_context.data_endpoints
+        )
+
+    def require_endpoints(self) -> list[str]:
+        """Require endpoints throw otherwise."""
+        if self.data_endpoints is None:
+            raise ValueError("data_endpoints is None")
+
+        return self.data_endpoints
+
 
 @dataclass
 class ImportConfig:
@@ -73,6 +101,25 @@ class ImportConfig:
 
     # import key column names
     key_names: Optional[List[str]] = None
+
+    def __post_init__(self):
+        """Post init."""
+        if self.data_endpoints is not None and len(self.data_endpoints) == 0:
+            raise ValueError("data_endpoints cannot be empty if provided")
+
+    def override_missing(self, session_context: SessionContext) -> "ImportConfig":
+        """With session defaults."""
+        return replace(
+            self,
+            data_endpoints=self.data_endpoints if self.data_endpoints is not None else session_context.data_endpoints
+        )
+
+    def require_endpoints(self) -> list[str]:
+        """Require endpoints throw otherwise."""
+        if self.data_endpoints is None:
+            raise ValueError("data_endpoints is None")
+
+        return self.data_endpoints
 
 
 @dataclass(frozen=True)
