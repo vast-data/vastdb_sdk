@@ -872,6 +872,7 @@ class TableInTransaction(ITable):
                 [_internal.PIT_ROW_ESTIMATE_FIELD.name]
             )),
             pit_predicate,
+            QueryConfig(num_sub_splits=1, num_splits=1)
         )
 
         if columns is None:
