@@ -39,7 +39,7 @@ def elysium_session(session: Session) -> Session:
             pytest.skip("Skipped because this test requires version 5.3.5 with Elysium")
 
 
-def test_tables(session, clean_bucket_name):
+def test_tables(session: Session, clean_bucket_name):
     columns = pa.schema([
         ('a', pa.int64()),
         ('b', pa.float32()),

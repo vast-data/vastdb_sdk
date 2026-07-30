@@ -65,7 +65,7 @@ class Transaction:
 
         try:
             self._adbc_conn = AdbcConnection(
-                self._rpc._context.data_endpoints[0],
+                self._rpc._context.endpoint,
                 self._rpc.access,
                 self._rpc.secret,
                 self.txid,

@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pyarrow as pa
 
+from vastdb.session import Session
 from vastdb.table import QueryConfig
 
 logger = logging.getLogger(__name__)
@@ -34,7 +35,7 @@ def test_concurrent_query(session, test_bucket_name, schema_name, table_name):
     logger.info(f"finished running {amount_of_queries_in_parallel} queries")
 
 
-def test_table_stats(session, test_bucket_name, schema_name, table_name):
+def test_table_stats(session: Session, test_bucket_name, schema_name, table_name):
     """
     Testing stats integrity while altering table
     """

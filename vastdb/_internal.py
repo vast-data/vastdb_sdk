@@ -105,7 +105,6 @@ import vastdb.vast_flatbuf.tabular.CreateSchemaRequest as tabular_create_schema
 import vastdb.vast_flatbuf.tabular.ImportDataRequest as tabular_import_data
 import vastdb.vast_flatbuf.tabular.KeyName as import_key_name
 import vastdb.vast_flatbuf.tabular.S3File as tabular_s3_file
-from vastdb._session_context import SessionContext
 from vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.Deref import Deref
 from vastdb.vast_flatbuf.org.apache.arrow.computeir.flatbuf.ExpressionImpl import (
     ExpressionImpl,
@@ -888,6 +887,7 @@ class TableStats:
     sorting_score: int
     write_amplification: int
     acummulative_row_inserition_count: int
+    vips: list[str]
     is_external_rowid_alloc: bool = False
     sorting_key_enabled: bool = False
     sorting_done: bool = False
@@ -1028,7 +1028,7 @@ class VastdbApi:
 
     def __init__(self, access_key: str, secret_key: str,
                  *,
-                 session_context: SessionContext,
+                 endpoints: list[str],
                  max_entities_per_page: int,
                  ssl_verify: Union[bool, str] = True,
                  timeout=None,
@@ -1042,7 +1042,7 @@ class VastdbApi:
 
         self._ssl_verify: Union[bool, str] = ssl_verify
 
-        self._endpoints: list[Url] = [parse_url(endpoint) for endpoint in session_context.data_endpoints]
+        self._endpoints: list[Url] = [parse_url(endpoint) for endpoint in endpoints]
         self._sessions: dict[str, requests.Session] = {}
 
         self.access_key = access_key
@@ -1108,7 +1108,7 @@ class VastdbApi:
         """Open a new session for targeting a specific endpoint."""
         return VastdbApi(access_key=self.access_key,
                          secret_key=self.secret_key,
-                         session_context=SessionContext(data_endpoints=endpoints),
+                         endpoints=endpoints,
                          max_entities_per_page=self._max_entities_per_page,
                          ssl_verify=self._ssl_verify,
                          timeout=self.timeout,
@@ -1497,6 +1497,19 @@ class VastdbApi:
 
         return [index for _, index in field_and_indices]
 
+    def _parse_table_stats_vips(self, stats) -> list[str]:
+        vips = []
+        for i in range(stats.VipsLength()):
+            vip = stats.Vips(i)
+            start_addr: str = vip.StartAddress().decode()
+            addr_count: int = vip.AddressCount()
+
+            prefix, start_octet = start_addr.rsplit('.', maxsplit=1)
+
+            vips.extend([f"{prefix}.{int(start_octet) + j}" for j in range(addr_count)])
+
+        return vips
+
     def get_table_stats(self, bucket, schema, name, txid=0, client_tags=[], expected_retvals=[], imports_table_stats=False) -> TableStats:
         """
         GET /mybucket/myschema/mytable?stats HTTP/1.1
@@ -1520,6 +1533,7 @@ class VastdbApi:
         sorting_score_raw = stats.SortingScore()
         write_amplification = stats.WriteAmplification()
         acummulative_row_inserition_count = stats.AcummulativeRowInseritionCount()
+        vips = self._parse_table_stats_vips(stats)
 
         sorting_score = sorting_score_raw & ((1 << 63) - 1)
         sorting_done = bool(sorting_score_raw >> 63)
@@ -1561,7 +1575,9 @@ class VastdbApi:
           sorting_done=sorting_done,
           endpoints=tuple(str(endpoint) for endpoint in self._endpoints),
           vector_index=vector_index,
-          partitioning_info=partitioning_info)
+          partitioning_info=partitioning_info,
+          vips=vips
+        )
 
     def alter_table(self, bucket: str, schema: str, name: str, txid=0, client_tags=[], table_properties="",
                     new_name: str = "", sorting_key: SortingKey = []) -> None:
@@ -1835,7 +1851,7 @@ class VastdbApi:
             method="HEAD",
             url=self._url(bucket=bucket_name))
 
-    def begin_transaction(self, client_tags=[], expected_retvals=[]):
+    def begin_transaction(self, client_tags=[], expected_retvals=[]) -> requests.Response:
         """
         POST /?transaction HTTP/1.1
         tabular-client-tag: ClientTag

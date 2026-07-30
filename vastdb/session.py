@@ -33,26 +33,19 @@ class Session:
                  backoff_config: Optional["BackoffConfig"] = None,
                  adbc_driver_path: Optional[str] = None,
                  end_user: Optional[str] = None,
-                 config: SessionConfig | None = None
+                 config: SessionConfig = SessionConfig()
     ):
         """Connect to a VAST Database endpoint, using specified credentials."""
         from . import _internal, features
 
         env_endpoint = os.environ.get('AWS_S3_ENDPOINT_URL')
         effective_endpoint: str
-        if endpoint is None and env_endpoint is None:
-            raise ValueError("One of endpoint and AWS_S3_ENDPOINT_URL env is required")
+        if endpoint is not None:
+            effective_endpoint = endpoint
         elif env_endpoint is not None:
             effective_endpoint = env_endpoint
-        elif endpoint is not None:
-            effective_endpoint = endpoint
-
-        self._context = SessionContext(
-            data_endpoints=(
-                config.data_endpoints
-                if config is not None and config.data_endpoints is not None
-                else [effective_endpoint])
-        )
+        else:
+            raise ValueError("One of endpoint and AWS_S3_ENDPOINT_URL env is required")
 
         if access is None:
             access = os.environ['AWS_ACCESS_KEY_ID']
@@ -65,12 +58,19 @@ class Session:
         self.api = _internal.VastdbApi(
             access_key=self.access,
             secret_key=self.secret,
-            session_context=self._context,
+            endpoints=[effective_endpoint],
             max_entities_per_page=max_entities_per_page,
             ssl_verify=ssl_verify,
             timeout=timeout,
             backoff_config=backoff_config)
-        self.features = features.Features(self.api.vast_version)
+
+        self._context = SessionContext(
+            api=self.api,
+            endpoint=effective_endpoint,
+            config=config
+        )
+
+        self.features: features.Features = features.Features(self.api.vast_version)
         self.adbc_driver_path: Optional[str] = adbc_driver_path
         self._end_user = end_user
 

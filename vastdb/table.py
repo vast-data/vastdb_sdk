@@ -11,6 +11,7 @@ import queue
 import sys
 import typing
 import warnings
+from collections import defaultdict
 from dataclasses import dataclass
 from enum import Enum
 from math import ceil
@@ -28,8 +29,9 @@ from typing import (
 import ibis
 import pyarrow as pa
 import urllib3
+from more_itertools import roundrobin
 
-from vastdb._session_context import SessionContext
+from vastdb._session_context import Endpoint, SessionContext
 from vastdb._table_interface import IbisPredicate, ITable, ReadOnlyTable
 from vastdb.table_metadata import (
     PartitionsMetadata,
@@ -270,6 +272,14 @@ class TableInTransaction(ITable):
         self._tx = tx
         self._session_context = session_context
 
+    def _discover_endpoints(self):
+        if self._metadata.stats is None:
+            self._metadata.load_stats(self._tx)
+
+        assert self._metadata.stats is not None
+
+        self._session_context.discover_cnodes(self._metadata.stats.vips)
+
     @property
     def ref(self) -> TableRef:
         """Table Reference."""
@@ -454,17 +464,34 @@ class TableInTransaction(ITable):
 
         self._execute_import(source_files, config)
 
+    def _group_endpoints_by_cnodes(self, endpoints: list[Endpoint]) -> list[list[Endpoint]]:
+        cnode_to_endpoints: defaultdict[str | None, list[Endpoint]] = defaultdict(list)
+        for ep in endpoints:
+            cnode_to_endpoints[ep.cnode].append(ep)
+
+        return list(cnode_to_endpoints.values())
+
     def _execute_import(self,
                         source_files: dict[tuple[str, str], bytes],
                         config: Optional[ImportConfig]):
-        effective_config = (config or ImportConfig()).override_missing(self._session_context)
-        data_endpoints = effective_config.require_endpoints()
+        config = config or ImportConfig()
+        if config.data_endpoints is not None:
+            data_endpoints = [Endpoint(url=ep) for ep in config.data_endpoints]
+        else:
+            self._discover_endpoints()
+            data_endpoints = self._session_context.require_data_endpoints()
+
+        endpoints_by_cnode = self._group_endpoints_by_cnodes(data_endpoints)
+        num_cnodes = len(endpoints_by_cnode)
+        import_concurrency = config.import_concurrency or (num_cnodes * 2)
+
+        roundrobin_endpoints = itertools.cycle(roundrobin(*endpoints_by_cnode))
 
         max_batch_size = 10  # Enforced in server side.
 
         files_queue: Queue = Queue()
 
-        key_names = effective_config.key_names or []
+        key_names = config.key_names or []
         if key_names:
             self._tx._rpc.features.check_zip_import()
 
@@ -473,7 +500,7 @@ class TableInTransaction(ITable):
 
         stop_event = Event()
         num_files_in_batch = min(
-            ceil(len(source_files) / len(data_endpoints)), max_batch_size)
+            ceil(len(source_files) / import_concurrency), max_batch_size)
         log.info("Setting batch size to %s files", num_files_in_batch)
 
         def import_worker(q, endpoint: str):
@@ -503,11 +530,11 @@ class TableInTransaction(ITable):
 
         futures = []
         with concurrent.futures.ThreadPoolExecutor(
-                max_workers=effective_config.import_concurrency, thread_name_prefix='import_thread') as pool:
+                max_workers=import_concurrency, thread_name_prefix='import_thread') as pool:
             try:
-                for endpoint in data_endpoints:
+                for endpoint in itertools.islice(roundrobin_endpoints, import_concurrency):
                     futures.append(pool.submit(
-                        import_worker, files_queue, endpoint))
+                        import_worker, files_queue, endpoint.url))
 
                 log.debug("Waiting for import workers to finish")
                 for future in concurrent.futures.as_completed(futures):
@@ -588,8 +615,11 @@ class TableInTransaction(ITable):
             internal_row_id: bool = False,
             limit_rows: Optional[int] = None
     ) -> tuple[SplitWorkerConfig, _internal.QueryDataRequest, tuple[str, ...]]:
-        effective_config = config.override_missing(self._session_context)
-        data_endpoints = effective_config.require_endpoints()
+        if config.data_endpoints is not None:
+            data_endpoints = config.data_endpoints
+        else:
+            self._discover_endpoints()
+            data_endpoints = [ep.url for ep in self._session_context.require_data_endpoints()]
 
         log.debug("endpoints: %s", data_endpoints)
 
@@ -611,15 +641,15 @@ class TableInTransaction(ITable):
             # may raise if the predicate is invalid (e.g. wrong types / missing column)
             predicate = predicate.resolve(self._metadata.ibis_table)
 
-        num_splits = self._get_split_estimation(effective_config,
+        num_splits = self._get_split_estimation(config,
                                                 query_schema,
                                                 select_columns,
                                                 predicate,
                                                 row_count_estimate)
 
-        log.debug("config: %s", effective_config)
+        log.debug("config: %s", config)
 
-        if effective_config.semi_sorted_projection_name:
+        if config.semi_sorted_projection_name:
             self._tx._rpc.features.check_enforce_semisorted_projection()
 
         query_data_request = _internal.build_query_data_request(
@@ -632,12 +662,12 @@ class TableInTransaction(ITable):
 
         split_config = SplitWorkerConfig(
             num_splits=num_splits,
-            num_sub_splits=effective_config.num_sub_splits,
-            num_row_groups_per_sub_split=effective_config.num_row_groups_per_sub_split,
-            limit_rows_per_sub_split=limit_rows or effective_config.limit_rows_per_sub_split,
-            use_semi_sorted_projections=effective_config.use_semi_sorted_projections,
-            queue_priority=effective_config.queue_priority,
-            semi_sorted_projection_name=effective_config.semi_sorted_projection_name)
+            num_sub_splits=config.num_sub_splits,
+            num_row_groups_per_sub_split=config.num_row_groups_per_sub_split,
+            limit_rows_per_sub_split=limit_rows or config.limit_rows_per_sub_split,
+            use_semi_sorted_projections=config.use_semi_sorted_projections,
+            queue_priority=config.queue_priority,
+            semi_sorted_projection_name=config.semi_sorted_projection_name)
 
         return split_config, query_data_request, tuple(data_endpoints)
 
@@ -1407,8 +1437,12 @@ class Projection:
 
 def _parse_projection_info(projection_info, table_metadata: "TableMetadata", tx: "Transaction"):
     log.info("Projection info %s", str(projection_info))
-    stats = TableStats(num_rows=projection_info.num_rows, size_in_bytes=projection_info.size_in_bytes,
-                       sorting_score=0, write_amplification=0, acummulative_row_inserition_count=0)
+    stats = TableStats(num_rows=projection_info.num_rows,
+                       size_in_bytes=projection_info.size_in_bytes,
+                       sorting_score=0,
+                       write_amplification=0,
+                       acummulative_row_inserition_count=0,
+                       vips=[])
     return Projection(name=projection_info.name,
                       table_metadata=table_metadata,
                       stats=stats,

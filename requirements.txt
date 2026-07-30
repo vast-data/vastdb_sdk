@@ -13,3 +13,4 @@ adbc_driver_manager
 protobuf
 pyiceberg[pyiceberg-core]>=0.10.0,<=0.20.0
 pydantic
+more_itertools
