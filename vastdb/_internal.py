@@ -1064,8 +1064,11 @@ class VastdbApi:
 
         if version_check:
             # probe the cluster for its version
-            res: requests.Response = self._request(method="GET", url=self._url(command="transaction"), skip_status_check=True)  # used only for the response headers
-
+            res: requests.Response = self._request(
+                method="GET",
+                url=self._url(command="transaction"),
+                headers={"tabular-get-vast-version": "true"},
+            )
             _logger.debug("headers=%s code=%s content=%s", res.headers, res.status_code, res.content)
             server_header = res.headers.get("Server")
             if server_header is None:
@@ -1148,7 +1151,7 @@ class VastdbApi:
 
         return session
 
-    def _single_request(self, *, method, url: Url, skip_status_check=False, **kwargs) -> requests.Response:
+    def _single_request(self, *, method, url: Url, **kwargs) -> requests.Response:
         _logger.debug("Sending request: %s %s %s timeout=%s", method, url, kwargs, self.timeout)
         try:
             session = self._session_get_or_create(url)
@@ -1158,10 +1161,10 @@ class VastdbApi:
             may_retry = (method in {"HEAD", "GET"})
             raise errors.ConnectionError(cause=err, may_retry=may_retry) from err
 
-        if not skip_status_check:
-            if exc := errors.from_response(res):
-                raise exc  # application-level error
-        return res  # successful response
+        if exc := errors.from_response(res):
+            raise exc
+
+        return res
 
     def _url(self, bucket="", schema="", table="", command="", url_params: dict | None = None) -> Url:
         url_params = url_params or {}

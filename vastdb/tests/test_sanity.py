@@ -1,6 +1,7 @@
 import contextlib
 import logging
 import threading
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from itertools import cycle
 
@@ -20,10 +21,8 @@ def test_hello_world(session: Session):
 
 
 def test_bad_credentials(session: Session):
-    bad_session = vastdb.connect(access='BAD', secret='BAD', endpoint=str(session.api.next_endpoint()))
     with pytest.raises(vastdb.errors.Forbidden):
-        with bad_session.transaction():
-            pass
+        vastdb.connect(access='BAD', secret='BAD', endpoint=str(session.api.next_endpoint()))
 
 
 def test_bad_endpoint(session: Session):
@@ -52,12 +51,17 @@ def test_version_extraction():
         def __init__(self, *args) -> None:
             super().__init__(*args)
 
-        def do_OPTIONS(self):
-            self.send_response(204)
+        def do_GET(self):
+            if urllib.parse.urlparse(self.path).query != "transaction":
+                self.send_error(404)
+                return
+
+            self._server_header = next(self.versions_iterator)[0]
+            self.send_response(200)
             self.end_headers()
 
         def version_string(self):
-            return next(self.versions_iterator)[0]
+            return self._server_header
 
         def log_message(self, format, *args):
             log.debug(format, *args)
