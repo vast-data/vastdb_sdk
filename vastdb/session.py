@@ -62,17 +62,18 @@ class Session:
             max_entities_per_page=max_entities_per_page,
             ssl_verify=ssl_verify,
             timeout=timeout,
-            backoff_config=backoff_config)
+            backoff_config=backoff_config,
+            end_user=end_user)
 
         self._context = SessionContext(
             api=self.api,
             endpoint=effective_endpoint,
-            config=config
+            config=config,
+            end_user=end_user,
         )
 
         self.features: features.Features = features.Features(self.api.vast_version)
         self.adbc_driver_path: Optional[str] = adbc_driver_path
-        self._end_user = end_user
 
     def __repr__(self):
         """Don't show the secret key."""
@@ -89,7 +90,6 @@ class Session:
         from . import transaction
         return transaction.Transaction(_rpc=self,
                                        _adbc_driver_path=self.adbc_driver_path,
-                                       _end_user=self._end_user,
                                        _session_context=self._context)
 
     def buffered_inserter(

@@ -56,7 +56,6 @@ class Transaction:
     txid: Optional[int] = None
     _adbc_driver_path: Optional[str] = None
     _adbc_conn: Optional[AdbcConnection] = None
-    _end_user: Optional[str] = None
 
     def __enter__(self):
         """Create a transaction and store its ID."""
@@ -69,7 +68,7 @@ class Transaction:
                 self._rpc.access,
                 self._rpc.secret,
                 self.txid,
-                self._end_user,
+                self._session_context.end_user,
                 adbc_driver_path=self._adbc_driver_path
             )
         except AdbcDriverVastdbNotInstalledException:

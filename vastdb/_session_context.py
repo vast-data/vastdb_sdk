@@ -140,9 +140,11 @@ class SessionContext:
     def __init__(self,
                  api: VastdbApi,
                  endpoint: str,
-                 config: SessionConfig):
+                 config: SessionConfig,
+                 end_user: str | None = None):
         self._api = api
         self.endpoint = endpoint
+        self._end_user = end_user
         self._url_template = _UrlTemplate.from_base_endpoint(endpoint)
 
         self._data_endpoints: _DataEndpoints | _DiscoveredEndpoints = (
@@ -166,3 +168,7 @@ class SessionContext:
 
     def require_data_endpoints(self) -> list[Endpoint]:
         return self._data_endpoints.require_endpoints()
+
+    @property
+    def end_user(self) -> str | None:
+        return self._end_user

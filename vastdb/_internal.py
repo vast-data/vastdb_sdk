@@ -1023,6 +1023,7 @@ def build_alter_blob_expansion_request(
 
 class VastdbApi:
     VAST_SERVER_PREFIX = 'vast'
+    END_USER_HEADER = "end-user"
     # we expect the vast version to be <major>.<minor>.<patch>.<protocol>
     VAST_VERSION_REGEX = re.compile(r'^vast (\d+\.\d+\.\d+\.\d+)$')
 
@@ -1033,7 +1034,8 @@ class VastdbApi:
                  ssl_verify: Union[bool, str] = True,
                  timeout=None,
                  backoff_config: Optional[BackoffConfig] = None,
-                 version_check: bool = True):
+                 version_check: bool = True,
+                 end_user: str | None = None):
         if max_entities_per_page <= 0:
             raise ValueError("Max entities per page should be positive")
 
@@ -1047,6 +1049,7 @@ class VastdbApi:
 
         self.access_key = access_key
         self.secret_key = secret_key
+        self._end_user = end_user
 
         self.timeout = timeout
         self._max_entities_per_page = max_entities_per_page
@@ -1113,7 +1116,8 @@ class VastdbApi:
                          ssl_verify=self._ssl_verify,
                          timeout=self.timeout,
                          backoff_config=self.backoff_config,
-                         version_check=False)
+                         version_check=False,
+                         end_user=self._end_user)
 
     def next_endpoint(self) -> Url:
         return random.choice(self._endpoints)
@@ -1201,6 +1205,9 @@ class VastdbApi:
             'tabular-api-version-id': str(version_id),
             'tabular-client-name': 'tabular-api'
         } | {f"tabular-sorted-column-{i}": str(k) for i, k in enumerate(sorting_key)}
+
+        if self._end_user is not None:
+            common_headers[self.END_USER_HEADER] = self._end_user
 
         return common_headers | {f'tabular-client-tags-{index}': tag for index, tag in enumerate(client_tags)}
 
