@@ -1,6 +1,5 @@
 aws-requests-auth
-ibis-framework~=10.1
-sqlglot>=23.4,<28.7
+ibis-framework>=12.0.0
 pyarrow>=18.0,<=23.0.1
 pyarrow-hotfix==0.7
 flatbuffers
