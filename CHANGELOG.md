@@ -5,11 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
+## [2.2.0] (2026-08-12)
+[2.2.0]: https://github.com/vast-data/vastdb_sdk/compare/v2.1.0...v2.2.0
+
+### Added
+- end-user impersonation for all Tabular RPCs via `Session` / `connect`
+
 ## [2.1.0] (2026-07-27)
 [2.1.0]: https://github.com/vast-data/vastdb_sdk/compare/v2.0.14...v2.1.0
 
 ### Added
-- end-user impersonation for all Tabular RPCs via `Session` / `connect`
 - Support for creating a partitioned table using a `PartitionSpec`
 - Support for querying the partitions using the `partitions()` method of `ITable`
 - Support for deleting partitions usinng the `delete_partitions()` method of `ITable`
