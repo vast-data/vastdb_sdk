@@ -233,7 +233,7 @@ def create_table_with_data(session, bucket_name, schema_name, table_name, schema
         return t
 
 
-def attempt_import(session, bucket_name, schema_name, table_name, files, key_names, expected_error=None):
+def attempt_import(session: Session, bucket_name, schema_name, table_name, files, key_names, expected_error=None):
     """Attempts to import files into a table and handles expected errors."""
     with session.transaction() as tx:
         t = tx.bucket(bucket_name).schema(schema_name).table(table_name)
@@ -437,7 +437,7 @@ def test_zip_imports_missing_columns(zip_import_session, clean_bucket_name, s3):
     )
 
 
-def test_zip_imports_missing_key_values(zip_import_session, clean_bucket_name, s3):
+def test_zip_imports_missing_key_values(zip_import_session: Session, clean_bucket_name, s3):
     """Verify that importing Parquet data with extra key values fails as expected
     and that importing a subset of key values fails as expected."""
     schema = pa.schema([
@@ -473,7 +473,11 @@ def test_zip_imports_missing_key_values(zip_import_session, clean_bucket_name, s
         't1',
         [file_path],
         key_names=['id', 'symbol'],
-        expected_error="Failed to get row_ids to update on table"
+        expected_error=(
+            "Failed to find column name=feature"
+            if zip_import_session.features.vast_version >= (5, 6)
+            else "Failed to get row_ids to update on table"
+        )
     )
 
     # Step 4: Create and upload Parquet data with fewer rows but all key values present in the table
