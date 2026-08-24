@@ -101,7 +101,7 @@ def iter_schemas(schema: Schema) -> Iterable[Schema]:
 
 
 @pytest.fixture(scope="function")
-def clean_bucket_name(request: pytest.FixtureRequest, test_bucket_name: str, session
+def clean_bucket_name(request: pytest.FixtureRequest, test_bucket_name: str, session: Session) -> str:
     with session.transaction() as tx:
         b = tx.bucket(test_bucket_name)
         for top_schema in b.schemas():
