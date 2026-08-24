@@ -84,11 +84,14 @@ upload_to_artifactory:
   image: $PYSDK_BUILDER_IMAGE
   tags:
     - vast-dev-builder
+  needs:
+    - build
 
   variables:
     PYSDK_IMAGE: ${PYSDK_IMAGE_PREFIX}-3.13 # use latest Python image for deployment
   rules:
     - if: $CI
+      when: manual
   script:
   - echo "Publishing artifacts from $PYSDK_IMAGE..."
   - docker run
@@ -107,11 +110,14 @@ upload_to_pypi:
   image: $PYSDK_BUILDER_IMAGE
   tags:
     - code-builder-small-shell-azure
+  needs:
+    - build
   variables:
     GIT_DEPTH: 0
     PYSDK_IMAGE: ${PYSDK_IMAGE_PREFIX}-3.13 # use latest Python image for deployment
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/'
+      when: manual
   script:
     - scripts/upload-to-pypi-and-open-source.sh
 
@@ -123,6 +129,8 @@ keep_latest_dev:
   image: $PYSDK_BUILDER_IMAGE
   tags:
     - vast-dev-builder
+  needs:
+    - build
 
   variables:
     PYSDK_IMAGE: ${PYSDK_IMAGE_PREFIX}-${PYTHON_VERSION}
@@ -130,6 +138,7 @@ keep_latest_dev:
 
   rules:
     - if: $CI_COMMIT_BRANCH == "dev"
+      when: manual
 
   script:
   - echo "Keeping PySDK image $PYSDK_IMAGE at $TARGET_IMAGE..."
@@ -150,6 +159,8 @@ keep_latest_release:
   image: $PYSDK_BUILDER_IMAGE
   tags:
     - vast-dev-builder
+  needs:
+    - build
 
   variables:
     PYSDK_IMAGE: ${PYSDK_IMAGE_PREFIX}-${PYTHON_VERSION}
@@ -157,6 +168,7 @@ keep_latest_release:
 
   rules:
     - if: $CI_COMMIT_TAG
+      when: manual
 
   script:
   - echo "Keeping PySDK image $PYSDK_IMAGE at $TARGET_IMAGE..."
