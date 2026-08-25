@@ -17,6 +17,8 @@ in pkgs.mkShellNoCC {
     basedpyright
     ruff
 
+    protobuf_27
+
     python312
     python312Packages.autopep8
     python312Packages.pip
