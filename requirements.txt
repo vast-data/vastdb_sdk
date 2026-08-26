@@ -10,7 +10,7 @@ requests
 xmltodict
 backoff==2.2.1
 adbc_driver_manager
-protobuf
+protobuf>=4.25.0,<5.0.0
 pyiceberg[pyiceberg-core]>=0.10.0,<=0.20.0
 pydantic
 more_itertools
