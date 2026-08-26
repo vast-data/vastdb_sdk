@@ -2,7 +2,7 @@
 /* Copyright (C) Vast Data Ltd. */
 syntax = "proto3";
 
-package vast_protobuf.tabular;
+package vast_protobuf.tabular.pysdk;
 
 message CreateBlobExpansionRequest {
   // URL: POST /#BUCKET/#SCHEMA/#TABLE?query-data=CreateBlobExpansion HTTP/1.1
