@@ -133,7 +133,7 @@ from vastdb.vast_flatbuf.tabular.ListTablesResponse import (
 from vastdb.vast_flatbuf.tabular.VectorIndexMetadata import VectorIndexMetadata
 
 # Blob expansion protobuf messages
-from vastdb.vast_protobuf.tabular.blob_expansion_pb2 import (  # type: ignore[attr-defined]
+from vastdb.vast_protobuf.tabular.pysdk_blob_expansion_pb2 import (  # type: ignore[attr-defined]
     AlterBlobExpansionRequest,
     CreateBlobExpansionRequest,
     GetBlobExpansionResponse,
