@@ -6,8 +6,9 @@ import re
 import struct
 import time
 import urllib.parse
+import warnings
 from collections import defaultdict, namedtuple
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import (
     TYPE_CHECKING,
@@ -25,6 +26,7 @@ import backoff
 import flatbuffers
 import ibis
 import pyarrow as pa
+import pydantic
 import requests
 import xmltodict
 from aws_requests_auth.aws_auth import AWSRequestsAuth
@@ -130,7 +132,7 @@ from vastdb.vast_flatbuf.tabular.ListSchemasResponse import (
 from vastdb.vast_flatbuf.tabular.ListTablesResponse import (
     ListTablesResponse as list_tables,
 )
-from vastdb.vast_flatbuf.tabular.VectorIndexMetadata import VectorIndexMetadata
+from vastdb.vast_flatbuf.tabular.VectorIndexMetadata import VectorIndexMetadata as _VectorIndexMetadata
 
 # Blob expansion protobuf messages
 from vastdb.vast_protobuf.tabular.pysdk_blob_expansion_pb2 import (  # type: ignore[attr-defined]
@@ -166,6 +168,7 @@ VAST_BUCKET_PARTITION_TRANSFORM_NAME = "bucket"
 VAST_TRUNCATE_PARTITION_TRANSFORM_NAME = "truncate"
 
 TABLE_METADATA_PARTITION_SPEC_PROPERTY = b"VAST:partition_spec"
+TABLE_METADATA_VECTOR_INDEX_PROPERTY = b"VAST:vector_index_spec"
 COLUMN_METADATA_SORT_TYPE_PROPERTY = b"VAST:sort_type"
 COLUMN_METADATA_SORTED = b"Sorted"
 COLUMN_METADATA_SORT_INDEX_PROPERTY = b"VAST:sort_index"
@@ -848,6 +851,7 @@ class VectorIndexSpec:
        distance_metric: "l2sq" or "ip".
        cluster_quantization: one of "scalar_8bit", "rabitq_1bit", "rabitq_2bit", "rabitq_4bit", "rabitq_8bit", "none"
        search_quantization: one of "scalar_8bit", "rabitq_1bit", "rabitq_2bit", "rabitq_4bit", "rabitq_8bit", "none"
+       secondary_indices: optional list of column names used as secondary indices for the vector index.
 
     If cluster/search quantization is not provided, server defaults are used.
     Some quantization combinations may be rejected by the server
@@ -857,6 +861,7 @@ class VectorIndexSpec:
     distance_metric: str
     cluster_quantization: str | DefaultQuantization = DefaultQuantization()
     search_quantization: str | DefaultQuantization = DefaultQuantization()
+    secondary_indices: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -866,12 +871,53 @@ class VectorIndex:
     sql_distance_function: str
     cluster_quantization: str
     search_quantization: str
+    secondary_indices: list[str] = field(default_factory=list)
 
     def to_vector_index_spec(self) -> VectorIndexSpec:
         return VectorIndexSpec(self.column,
                                self.distance_metric,
                                self.cluster_quantization,
-                               self.search_quantization)
+                               self.search_quantization,
+                               secondary_indices=list(self.secondary_indices))
+
+
+class VectorIndexMetadata(pydantic.BaseModel):
+    column_name: str
+    distance_metric: str
+    sql_function_name: str | None = None
+    cluster_quantization: str | None = None
+    search_quantization: str | None = None
+    secondary_index_columns: list[str] = pydantic.Field(default_factory=list)
+
+    def to_vector_index(self) -> VectorIndex:
+        if self.cluster_quantization is None or self.search_quantization is None or self.sql_function_name is None:
+            raise RuntimeError("This method should be used for 'get' and therefore at this point quantization and sql function name fields should have been set by the server")
+
+        return VectorIndex(
+            column=self.column_name,
+            distance_metric=self.distance_metric,
+            sql_distance_function=self.sql_function_name,
+            cluster_quantization=self.cluster_quantization,
+            search_quantization=self.search_quantization,
+            secondary_indices=list(self.secondary_index_columns),
+        )
+
+    @classmethod
+    def from_vector_index_spec(cls, vector_index: VectorIndexSpec) -> "VectorIndexMetadata":
+        return cls(
+            column_name=vector_index.column,
+            distance_metric=vector_index.distance_metric,
+            sql_function_name="sql_name",
+            cluster_quantization=(
+                None if isinstance(vector_index.cluster_quantization, DefaultQuantization)
+                else vector_index.cluster_quantization
+            ),
+            search_quantization=(
+                None if isinstance(vector_index.search_quantization, DefaultQuantization)
+                else vector_index.search_quantization
+            ),
+            secondary_index_columns=list(vector_index.secondary_indices),
+        )
 
 
 @dataclass
@@ -895,6 +941,15 @@ class TableStats:
     endpoints: Tuple[str, ...] = ()
     vector_index: Optional[VectorIndex] = None
     partitioning_info: Optional[PartitioningInfo] = None
+
+    def __getattribute__(self, name: str):
+        if name == "vector_index":
+            warnings.warn(
+                "'vector_index' via table stats is deprecated; use vector index property on Table.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        return object.__getattribute__(self, name)
 
 
 _RETRIABLE_EXCEPTIONS = (
@@ -1468,20 +1523,13 @@ class VastdbApi:
             }
             metadata_dict.update(partition_metadata)
 
-        arrow_schema = arrow_schema.with_metadata(metadata_dict)
-        serialized_schema = arrow_schema.serialize()
-        headers['Content-Length'] = str(len(serialized_schema))
-
         if use_external_row_ids_allocation:
             headers['use-external-row-ids-alloc'] = str(use_external_row_ids_allocation)
 
         if vector_index is not None:
-            headers['tabular-vector-index-column'] = vector_index.column
-            headers['tabular-vector-index-distance-metric'] = vector_index.distance_metric
-            if not isinstance(vector_index.cluster_quantization, DefaultQuantization):
-                headers['tabular-vector-index-cluster-quantization'] = vector_index.cluster_quantization
-            if not isinstance(vector_index.search_quantization, DefaultQuantization):
-                headers['tabular-vector-index-search-quantization'] = vector_index.search_quantization
+            metadata_dict[TABLE_METADATA_VECTOR_INDEX_PROPERTY.decode()] = (
+                VectorIndexMetadata.from_vector_index_spec(vector_index).model_dump_json(exclude_none=True)
+            )
 
         url_params = {'topic_partitions': str(topic_partitions)} if topic_partitions else {}
         if create_imports_table:
@@ -1489,6 +1537,10 @@ class VastdbApi:
 
         if table_props is not None:
             url_params['table-props'] = table_props
+
+        arrow_schema = arrow_schema.with_metadata(metadata_dict)
+        serialized_schema = arrow_schema.serialize()
+        headers['Content-Length'] = str(len(serialized_schema))
 
         self._request(
             method="POST",
@@ -1547,7 +1599,7 @@ class VastdbApi:
         sorting_done = bool(sorting_score_raw >> 63)
 
         partitioning_info = PartitioningInfo(num_partitions=stats.NumPartitions()) if stats.PartitioningKeyEnabled() else None
-        vector_index_metadata: Optional[VectorIndexMetadata] = stats.VectorIndexMetadata()
+        vector_index_metadata: Optional[_VectorIndexMetadata] = stats.VectorIndexMetadata()
 
         if vector_index_metadata is not None:
             column_name = vector_index_metadata.ColumnName()

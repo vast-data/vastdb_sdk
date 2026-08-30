@@ -218,7 +218,6 @@ class _Partitions:
             session_context
         )
         self._pit.reload_schema()
-        self._pit.reload_stats()
         self._pit._metadata.arrow_schema = pa.schema(
             f for f in self._pit.arrow_schema if f.name != _internal.PIT_SORTING_SCORE_FIELD.name
         )
@@ -874,6 +873,9 @@ class TableInTransaction(ITable):
         Query-execution configuration options can be specified via the optional `config` argument.
         """
         if self._metadata.table_type not in {TableType.Partitioned, TableType.SortedPartitions}:
+            if (config is None or config.num_splits is None) and self.stats is None:
+                self.reload_stats()
+
             row_count_estimate = None if self.stats is None else self.stats.num_rows
             schema, batches = self._select_single_table(
                 self.arrow_schema,

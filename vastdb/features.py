@@ -58,6 +58,10 @@ class Features:
         # listing column names only requires 5.5+ VAST release
         self.list_only_column_names = vast_version >= (5, 5)
 
+        self.check_vector_secondary_indices = self._check(
+            "Creating vector secondary indices require 5.5.3+ VAST release",
+            vast_version >= (5, 5, 3))
+
         self.use_new_query_method = vast_version >= (5, 6)
 
     def _check(self, msg, supported):

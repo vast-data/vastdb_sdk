@@ -2,7 +2,7 @@
 
 import itertools
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 import pyarrow as pa
 import pytest
@@ -147,7 +147,11 @@ def test_create_table_with_malformed_vector_index_quantization(session: Session,
     """Test that malformed quantization values are rejected with an informative error"""
     pytest_skip_if_vector_index_not_supported(session)
 
-    vector_index = VectorIndexSpec("embedding", "l2sq", **{quantization_field: bad_quantization})
+    if session.features.vast_version > (5, 5):
+        pytest.skip("Bug - ORION-415272")
+
+    quantization_params: dict[str, Any] = {quantization_field: bad_quantization}
+    vector_index = VectorIndexSpec("embedding", "l2sq", **quantization_params)
     expected_error = (rf"invalid vector index {quantization_error_name}"
                       rf".*{bad_quantization}.*supported values:")
     schema_name = f"malformed_{quantization_field}_{bad_quantization or 'empty'}"
@@ -231,3 +235,70 @@ def test_vector_index_quantization_values(session: Session, clean_bucket_name: s
 
     _run_vector_index_test(session, clean_bucket_name, schema_name,
                            input_spec, not is_invalid, expected_spec)
+
+
+@pytest.mark.parametrize(
+    "secondary_indices,expected_error",
+    [
+        (["id", "missing"], "vector secondary index column=missing not found"),
+        (["id", "id"], "duplicate vector secondary index column=id"),
+    ],
+    ids=["missing_column", "duplicate_column"],
+)
+def test_create_table_rejects_invalid_secondary_index_columns(
+    session: Session,
+    clean_bucket_name: str,
+    secondary_indices: list[str],
+    expected_error: str,
+):
+    if session.features.vast_version != (5, 5, 3, 0):
+        pytest.skip("Vector index secondary indices are supported only in 5.5.3 for now")
+
+    with session.transaction() as tx:
+        schema = tx.bucket(clean_bucket_name).create_schema("schema_invalid_secondary")
+        vec_type = pa.list_(pa.field('', pa.float32(), False), 8)
+        arrow_schema = pa.schema([('id', pa.int64()), ('embedding', vec_type)])
+
+        with pytest.raises(errors.BadRequest, match=expected_error):
+            schema.create_table(
+                table_name="vec_table",
+                columns=arrow_schema,
+                vector_index=VectorIndexSpec(
+                    "embedding",
+                    "l2sq",
+                    secondary_indices=secondary_indices,
+                ),
+            )
+
+
+def test_create_table_with_secondary_indices(session: Session, clean_bucket_name: str):
+    if session.features.vast_version != (5, 5, 3, 0):
+        pytest.skip("Vector index secondary indices are supported only in 5.5.3 for now")
+
+    with session.transaction() as tx:
+        schema = tx.bucket(clean_bucket_name).create_schema("schema_secondary_indices")
+        vec_type = pa.list_(pa.field('', pa.float32(), False), 8)
+        arrow_schema = pa.schema([
+            ('id', pa.int64()),
+            ('category', pa.string()),
+            ('embedding', vec_type),
+            ('payload', pa.string()),
+        ])
+        input_spec = VectorIndexSpec(
+            "embedding",
+            "l2sq",
+            secondary_indices=["id", "category"],
+        )
+
+        table = schema.create_table(
+            table_name="vec_table",
+            columns=arrow_schema,
+            vector_index=input_spec,
+        )
+        table.reload_schema()
+
+        assert table.vector_index is not None
+        assert table.vector_index.column == "embedding"
+        assert table.vector_index.secondary_indices == ["id", "category"]
+        assert table.vector_index.to_vector_index_spec().secondary_indices == ["id", "category"]
+        assert table._metadata.non_updatable_column_names() == {"embedding", "id", "category"}

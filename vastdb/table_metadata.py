@@ -16,6 +16,7 @@ from pyiceberg.transforms import Transform, parse_transform
 from vastdb import errors
 from vastdb._ibis_support import validate_ibis_support_schema
 from vastdb._internal import TableStats, VectorIndex
+from vastdb._internal import VectorIndexMetadata as _VectorIndexMetadata
 from vastdb.partitioning import PartitionKey, PartitionSpec
 
 from . import _internal
@@ -154,7 +155,7 @@ class TableMetadata:
         if self.is_imports_table:
             return
 
-        self._vector_index = self._load_vector_index(tx)
+        self._vector_index = self._load_vector_index(self.arrow_schema)
 
         if self._vector_index is not None:
             tx._rpc.features.check_vector()
@@ -174,22 +175,21 @@ class TableMetadata:
             case (_, _):
                 self._table_type = TableType.SortedPartitions
 
-    def _load_vector_index(self, tx: "Transaction") -> Optional[VectorIndex]:
-        self._stats = tx._rpc.api.get_table_stats(
-            bucket=self.ref.bucket,
-            schema=self.ref.schema,
-            name=self.ref.table,
-            txid=tx.active_txid,
-            imports_table_stats=self.is_imports_table,
-        )
-        vector_index_is_set = self._vector_index is not None
+    def _load_vector_index(self, schema: pa.Schema) -> VectorIndex | None:
+        if schema.metadata is None:
+            return None
 
-        if vector_index_is_set and self._stats.vector_index != self._vector_index:
+        if (vector_index_json := schema.metadata.get(_internal.TABLE_METADATA_VECTOR_INDEX_PROPERTY)) is None:
+            return None
+
+        vector_index = _VectorIndexMetadata.model_validate_json(vector_index_json).to_vector_index()
+
+        if self._vector_index is not None and self._vector_index != vector_index:
             raise ValueError(
-                f"Table has index {self._stats.vector_index}, but was initialized as {self._vector_index}"
-                )
+                f"Table has vector index {vector_index} according to server, but was initialized with {self._vector_index}"
+            )
 
-        return self._stats.vector_index
+        return vector_index
 
     def _load_sorted_columns(self, schema: pa.Schema, tx: "Transaction") -> Optional[list[pa.Field]]:
         if tx._rpc.features.vast_version >= (5, 5):
@@ -321,7 +321,10 @@ class TableMetadata:
         partition_column_names = (set() if self._partitions_metadata is None
                                   else set(key.column for key in self._partitions_metadata.spec.partition_keys))
         vector_column_names = set() if self._vector_index is None else {self._vector_index.column}
-        return sorted_column_names | partition_column_names | vector_column_names
+        secondary_index_column_names = (
+            set() if self._vector_index is None else set(self._vector_index.secondary_indices)
+        )
+        return sorted_column_names | partition_column_names | vector_column_names | secondary_index_column_names
 
     @property
     def sorted_columns(self) -> list[pa.Field]:

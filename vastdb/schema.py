@@ -116,6 +116,9 @@ class Schema:
         if use_external_row_ids_allocation:
             self.tx._rpc.features.check_external_row_ids_allocation()
 
+        if vector_index is not None and len(vector_index.secondary_indices) > 0:
+            self.tx._rpc.features.check_vector_secondary_indices()
+
         validate_ibis_support_schema(columns)
         self.tx._rpc.api.create_table(self.bucket.name, self.name, table_name, columns, txid=self.tx.txid,
                                       use_external_row_ids_allocation=use_external_row_ids_allocation,
