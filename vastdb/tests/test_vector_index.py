@@ -78,10 +78,14 @@ def test_create_table_with_vector_index_basic_metadata(session: Session,
 
 
 @pytest.mark.parametrize("table_name,vector_index,expected_error", [
-    # Test 1: Invalid column name (column doesn't exist in schema)
-    ("table_invalid_column", VectorIndexSpec("nonexistent_column", "l2sq"), "invalid vector indexed column name nonexistent_column"),
-    # Test 2: Invalid distance metric
-    ("table_invalid_metric", VectorIndexSpec("embedding", "invalid_metric"), "invalid vector index distance metric invalid_metric, supported metrics: 'l2sq', 'ip'"),
+    pytest.param("table_non_existent_column",
+                 VectorIndexSpec("nonexistent_column", "l2sq"),
+                 "invalid vector indexed column name nonexistent_column",
+                 id="nonexistent_column"),
+    pytest.param("table_invalid_metric",
+                 VectorIndexSpec("embedding", "invalid_metric"),
+                 "invalid vector index distance metric invalid_metric, supported metrics: 'l2sq', 'ip'",
+                 id="invalid_distance_metric"),
 ])
 def test_create_table_with_invalid_vector_index(session: Session,
                                                 clean_bucket_name: str,
@@ -122,6 +126,41 @@ def test_create_table_with_invalid_vector_index(session: Session,
             f"Expected error message to contain '{expected_error}', got '{str(exc_info.value)}'"
 
         log.info(f"✓ Test passed for invalid table '{table_name}'")
+
+
+_MALFORMED_QUANTIZATION_VALUES = [
+    pytest.param("blabla", id="invalid_option"),
+    pytest.param("scalar_", id="incomplete_type"),
+]
+
+
+@pytest.mark.parametrize("quantization_field,quantization_error_name", [
+    ("cluster_quantization", "cluster quantization"),
+    ("search_quantization", "search quantization"),
+])
+@pytest.mark.parametrize("bad_quantization", _MALFORMED_QUANTIZATION_VALUES)
+def test_create_table_with_malformed_vector_index_quantization(session: Session,
+                                                               clean_bucket_name: str,
+                                                               quantization_field: str,
+                                                               quantization_error_name: str,
+                                                               bad_quantization: str):
+    """Test that malformed quantization values are rejected with an informative error"""
+    pytest_skip_if_vector_index_not_supported(session)
+
+    vector_index = VectorIndexSpec("embedding", "l2sq", **{quantization_field: bad_quantization})
+    expected_error = (rf"invalid vector index {quantization_error_name}"
+                      rf".*{bad_quantization}.*supported values:")
+    schema_name = f"malformed_{quantization_field}_{bad_quantization or 'empty'}"
+
+    with session.transaction() as tx:
+        bucket = tx.bucket(clean_bucket_name)
+        schema = bucket.create_schema(schema_name)
+
+        vec_type = pa.list_(pa.field('', pa.float32(), False), 128)
+        arrow_schema = pa.schema([('id', pa.int64()), ('embedding', vec_type)])
+
+        with pytest.raises(errors.BadRequest, match=expected_error):
+            schema.create_table(table_name="vec_table", columns=arrow_schema, vector_index=vector_index)
 
 
 def test_vector_index_metadata_from_stats(session: Session, clean_bucket_name: str):

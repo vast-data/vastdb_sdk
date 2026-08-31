@@ -846,12 +846,12 @@ class VectorIndexSpec:
     Supported values:
     -----------------
        distance_metric: "l2sq" or "ip".
-       cluster_quantization: "scalar_8bit" or "none"
-       search_quantization: "scalar_8bit" or "none"
+       cluster_quantization: one of "scalar_8bit", "rabitq_1bit", "rabitq_2bit", "rabitq_4bit", "rabitq_8bit", "none"
+       search_quantization: one of "scalar_8bit", "rabitq_1bit", "rabitq_2bit", "rabitq_4bit", "rabitq_8bit", "none"
 
     If cluster/search quantization is not provided, server defaults are used.
     Some quantization combinations may be rejected by the server
-       (for example: cluster="scalar_8bit", search="none").
+       (for example: cluster="scalar_8bit" or "rabitq_4bit", search="none").
     """
     column: str
     distance_metric: str
