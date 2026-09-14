@@ -172,7 +172,6 @@ TABLE_METADATA_VECTOR_INDEX_PROPERTY = b"VAST:vector_index_spec"
 COLUMN_METADATA_SORT_TYPE_PROPERTY = b"VAST:sort_type"
 COLUMN_METADATA_SORTED = b"Sorted"
 COLUMN_METADATA_SORT_INDEX_PROPERTY = b"VAST:sort_index"
-KAFKA_TOPICS_SCHEMA_NAME = 'kafka_topics'
 
 PIT_SORTING_SCORE_FIELD = pa.field("sorting_score", pa.int64())
 PIT_ROW_ESTIMATE_FIELD = pa.field("est_row_count", pa.int64())
@@ -1699,12 +1698,6 @@ class VastdbApi:
             method="PUT",
             url=self._url(bucket=bucket, schema=schema, table=name, command="table", url_params=url_params),
             data=alter_table_req, headers=headers)
-
-    # @drop_topic is for internal use only for now, until a design is decided. for VMS use Only, DONT make it visible to clients yet.
-    # todo ->  NOT for reveling to the users yet, because the api can change
-    def drop_topic(self, bucket, name, expected_retvals=[]):
-        self.drop_table(bucket=bucket, schema=KAFKA_TOPICS_SCHEMA_NAME, name=name,
-                        expected_retvals=expected_retvals)
 
     def drop_table(self, bucket, schema, name, txid=0, client_tags=[], expected_retvals=[], remove_imports_table=False):
         """
