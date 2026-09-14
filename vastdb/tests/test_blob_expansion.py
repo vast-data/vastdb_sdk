@@ -25,6 +25,15 @@ SOURCE_COLUMN = 'data'
 SOURCE_SCHEMA = pa.schema([('id', pa.int64()), (SOURCE_COLUMN, pa.string())])
 COPY_SOURCE_COLUMN = f'blob_expansion_{SOURCE_COLUMN}'
 
+KAFKA_TOPIC_PARTITIONS = 4
+ERRORS_TOPIC_SUFFIX = "_blob_expansion_errors"
+TOPIC_NAME = 'src_topic'
+TOPIC_TARGET_TABLE = f'{TOPIC_NAME}_expanded'
+TOPIC_SOURCE_COLUMN = 'value'
+TOPIC_SCHEMA = pa.schema([(TOPIC_SOURCE_COLUMN, pa.string())])
+ERRORS_TOPIC_NAME = TOPIC_NAME + ERRORS_TOPIC_SUFFIX
+RETENTION_MS = 86_400_000
+
 
 def _skip_unless_blob_expansion(session: Session) -> None:
     try:
@@ -135,6 +144,43 @@ def _create_expansion(
         config=config if config is not None else BlobExpansionConfig(expansion_format=ExpansionFormat.JSON),
     )
     return t, be
+
+
+def _create_topic_or_skip(tx, bucket_name: str, schema_name: str, topic_name: str, columns: pa.Schema) -> None:
+    """Create a Kafka topic via the internal API, skipping if the bucket is not Kafka-enabled."""
+    try:
+        tx._rpc.api._create_table_internal(
+            bucket=bucket_name,
+            schema=schema_name,
+            name=topic_name,
+            arrow_schema=columns,
+            txid=tx.txid,
+            topic_partitions=KAFKA_TOPIC_PARTITIONS,
+        )
+    except (errors.HttpError, errors.NotSupported) as e:
+        pytest.skip(f"cannot create a Kafka topic in bucket {bucket_name}: {e}")
+
+
+def _create_topic_source(tx, bucket_name: str, expansion_schema: pa.Schema) -> tuple[Schema, Table]:
+    """Create a Kafka topic source plus its expansion target table; return (schema, topic_table)."""
+    s = tx.bucket(bucket_name).create_schema(SCHEMA_NAME)
+    _create_topic_or_skip(tx, bucket_name, s.name, TOPIC_NAME, TOPIC_SCHEMA)
+    s.create_table(TOPIC_TARGET_TABLE, expansion_schema)
+    t = s.table(TOPIC_NAME)
+    assert t is not None
+    return s, t
+
+
+def _create_topic_expansion(tx, bucket_name: str, expansion_schema: pa.Schema, **config_kwargs):
+    """Create a Kafka topic source and an expansion on it; return (schema, topic_table, expansion)."""
+    s, t = _create_topic_source(tx, bucket_name, expansion_schema)
+    be = t.create_blob_expansion(
+        source_column_name=TOPIC_SOURCE_COLUMN,
+        expansion_schema=expansion_schema,
+        target_table_name=TOPIC_TARGET_TABLE,
+        config=BlobExpansionConfig(expansion_format=ExpansionFormat.JSON, **config_kwargs),
+    )
+    return s, t, be
 
 
 def test_mark_mandatory_fields_nested_two_layers():
@@ -509,6 +555,106 @@ def test_negative_remove_copy_source_column_when_never_enabled(session: Session,
 
         retrieved = t.blob_expansion(SOURCE_COLUMN)
         assert retrieved.config.copy_source_column is False
+        be.drop()
+
+
+@pytest.mark.skip(
+    reason=(
+        "PANIC when create_errors_topic is used with non-Kafka tables; blocked by "
+        "https://vastdata.atlassian.net/browse/ORION-411726"
+    )
+)
+def test_blob_expansion_with_errors_topic(session: Session, clean_bucket_name: str):
+    """Create an errors topic on a regular table and verify the config roundtrip via get."""
+    _skip_unless_mandatory_fields(session)
+
+    expansion_schema = pa.schema([('field1', pa.string()), ('field2', pa.int32())])
+    with session.transaction() as tx:
+        t, be = _create_expansion(
+            tx, clean_bucket_name, expansion_schema,
+            config=BlobExpansionConfig(
+                expansion_format=ExpansionFormat.JSON,
+                create_errors_topic=True,
+                errors_topic_retention_ms=RETENTION_MS,
+            ),
+        )
+        assert be.config.create_errors_topic is True
+        assert be.config.errors_topic_retention_ms == RETENTION_MS
+
+        retrieved = t.blob_expansion(SOURCE_COLUMN)
+        assert retrieved.config.create_errors_topic is True
+        assert retrieved.config.errors_topic_retention_ms == RETENTION_MS
+
+        be.drop()
+        with pytest.raises(errors.MissingBlobExpansion):
+            t.blob_expansion(SOURCE_COLUMN)
+
+
+@pytest.mark.skip(reason="PySDK does not support Kafka topic creation")
+def test_blob_expansion_errors_topic_on_kafka_topic(session: Session, clean_bucket_name: str):
+    """Create an errors topic on a Kafka topic source; dropping the expansion keeps the topic."""
+    _skip_unless_blob_expansion(session)
+
+    with session.transaction() as tx:
+        s, t, be = _create_topic_expansion(
+            tx, clean_bucket_name, pa.schema([('field1', pa.string()), ('field2', pa.int32())]),
+            create_errors_topic=True,
+            errors_topic_retention_ms=RETENTION_MS,
+        )
+        assert be.config.create_errors_topic is True
+        assert be.config.errors_topic_retention_ms == RETENTION_MS
+        assert s.table(ERRORS_TOPIC_NAME, fail_if_missing=False) is not None
+
+        retrieved = t.blob_expansion(TOPIC_SOURCE_COLUMN)
+        assert retrieved.config.create_errors_topic is True
+        assert retrieved.config.errors_topic_retention_ms == RETENTION_MS
+
+        be.drop()
+        with pytest.raises(errors.MissingBlobExpansion):
+            t.blob_expansion(TOPIC_SOURCE_COLUMN)
+
+        # FRD: dropping blob expansion must not delete the errors topic.
+        errors_topic = s.table(ERRORS_TOPIC_NAME, fail_if_missing=False)
+        assert errors_topic is not None
+        errors_topic.drop()
+
+
+@pytest.mark.skip(reason="PySDK does not support Kafka topic creation")
+def test_negative_create_errors_topic_when_errors_topic_exists(session: Session, clean_bucket_name: str):
+    """Create with create_errors_topic must fail if the errors topic already exists."""
+    _skip_unless_blob_expansion(session)
+
+    expansion_schema = pa.schema([('field1', pa.string())])
+    with session.transaction() as tx:
+        s, t = _create_topic_source(tx, clean_bucket_name, expansion_schema)
+        _create_topic_or_skip(tx, clean_bucket_name, s.name, ERRORS_TOPIC_NAME, TOPIC_SCHEMA)
+
+        with pytest.raises(errors.Conflict):
+            t.create_blob_expansion(
+                source_column_name=TOPIC_SOURCE_COLUMN,
+                expansion_schema=expansion_schema,
+                target_table_name=TOPIC_TARGET_TABLE,
+                config=BlobExpansionConfig(
+                    expansion_format=ExpansionFormat.JSON,
+                    create_errors_topic=True,
+                ),
+            )
+
+
+@pytest.mark.skip(reason="PySDK does not support Kafka topic creation")
+def test_negative_delete_errors_topic_while_expansion_exists(session: Session, clean_bucket_name: str):
+    """FRD: the errors topic cannot be deleted while the blob expansion exists."""
+    _skip_unless_blob_expansion(session)
+
+    with session.transaction() as tx:
+        s, _, be = _create_topic_expansion(
+            tx, clean_bucket_name, pa.schema([('field1', pa.string())]),
+            create_errors_topic=True,
+        )
+        errors_topic = s.table(ERRORS_TOPIC_NAME, fail_if_missing=False)
+        assert errors_topic is not None
+        with pytest.raises(errors.Conflict):
+            errors_topic.drop()
         be.drop()
 
 
