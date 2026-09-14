@@ -18,6 +18,7 @@ EXAMPLE_SCRIPTS = sorted(
 )
 REQUIRES_PARTITIONED = {"table_types.py"}
 REQUIRES_VECTOR = {"vector_search.py"}
+REQUIRES_BLOB_EXPANSION = {"blob_expansion.py"}
 
 
 @pytest.mark.parametrize("script", EXAMPLE_SCRIPTS, ids=lambda p: p.name)
@@ -43,6 +44,12 @@ def test_example_script(
         except ImportError:
             if not os.environ.get("VASTDB_ADBC_DRIVER_PATH"):
                 pytest.skip("ADBC driver not available for vector_search example")
+
+    if script.name in REQUIRES_BLOB_EXPANSION:
+        try:
+            session.features.check_blob_expansion()
+        except errors.NotSupportedVersion:
+            pytest.skip("Blob expansion requires VAST 5.5+")
 
     env = os.environ.copy()
     env["AWS_ACCESS_KEY_ID"] = session_kwargs["access"]

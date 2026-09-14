@@ -90,14 +90,15 @@ Supported data types: [docs/types.md](docs/types.md).
 See [docs/predicate.md](docs/predicate.md) for constructing predicates with Ibis.
 
 ## runnable examples with more features:
-| Feature / Workflow | Example File | What it Covers |
-| :--- | :--- | :--- |
+| Feature / Workflow | Example File | What it Covers                                                                                            |
+| :--- | :--- |:----------------------------------------------------------------------------------------------------------|
 | **The Basics** | [`examples/quickstart.py`](examples/quickstart.py) | Connecting via environment variables, basic schemas/tables, simple inserts, and querying with predicates. |
-| **Direct S3 Ingest** | [`examples/import_parquet.py`](examples/import_parquet.py) | Creating tables directly from existing Parquet files on VAST without client-side copying. |
-| **Advanced Querying** | [`examples/query_processing.py`](examples/query_processing.py) | Parallelizing queries via `QueryConfig`, VAST Catalog querying, and DuckDB post-processing. |
-| **Performance Tuning** | [`examples/table_types.py`](examples/table_types.py) | Creating partitioned tables (for filter pruning) and sorted tables (for range scans). |
-| **Architecture Features** | [`examples/advanced_features.py`](examples/advanced_features.py) | Managing semi-sorted projections, reading from snapshots, and audit logging. |
-| **AI / Machine Learning** | [`examples/vector_search.py`](examples/vector_search.py) | Nearest-neighbor searches over a vector-indexed column (requires ADBC). |
+| **Direct S3 Ingest** | [`examples/import_parquet.py`](examples/import_parquet.py) | Creating tables directly from existing Parquet files on VAST without client-side copying.                 |
+| **Advanced Querying** | [`examples/query_processing.py`](examples/query_processing.py) | Parallelizing queries via `QueryConfig`, VAST Catalog querying, and DuckDB post-processing.               |
+| **Performance Tuning** | [`examples/table_types.py`](examples/table_types.py) | Creating partitioned tables (for filter pruning) and sorted tables (for range scans).                     |
+| **Architecture Features** | [`examples/advanced_features.py`](examples/advanced_features.py) | Managing semi-sorted projections, reading from snapshots, and audit logging.                              |
+| **Blob Expansion** | [`examples/blob_expansion.py`](examples/blob_expansion.py) | Expand a blob column into a target table; create, add/drop columns, mandatory fields, and drop. |
+| **AI / Machine Learning** | [`examples/vector_search.py`](examples/vector_search.py) | Nearest-neighbor searches over a vector-indexed column (requires ADBC).                                   |
 
 ## More Information
 
