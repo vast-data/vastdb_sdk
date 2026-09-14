@@ -1030,6 +1030,9 @@ def build_create_blob_expansion_request(
         req.target_table_schema = target_table_schema
     req.add_missing_values_output = config.add_missing_values_output
     req.add_excessive_values_output = config.add_excessive_values_output
+    req.create_errors_topic = config.create_errors_topic
+    if config.errors_topic_retention_ms is not None:
+        req.errors_topic_retention_ms = config.errors_topic_retention_ms
     return req.SerializeToString()
 
 
@@ -2399,6 +2402,10 @@ class VastdbApi:
             Whether to add the missing values output column (default: True).
         add_excessive_values_output : bool, optional
             Whether to add the excessive values output column (default: True).
+        create_errors_topic : bool, optional
+            Whether to create an errors topic for parse failures (default: False).
+        errors_topic_retention_ms : int, optional
+            Retention for the errors topic in milliseconds.
         """
         create_blob_expansion_req = build_create_blob_expansion_request(
             expansion_schema=expansion_schema,
@@ -2600,7 +2607,7 @@ class VastdbApi:
         txid: int = 0,
         client_tags: list = [],
         expected_retvals: list = [],
-    ) -> tuple[str, str, str, pa.Schema, bool, bool, bool]:
+    ) -> tuple[str, str, str, pa.Schema, bool, bool, bool, bool, Optional[int]]:
         """
         Show a blob expansion by showing the target table
         GET /bucket/schema/table?blob-expansion HTTP/1.1
@@ -2616,7 +2623,8 @@ class VastdbApi:
         -------
         tuple
             (source_column_name, target_table_name, expansion_format, schema, copy_source_column,
-            add_missing_values_output, add_excessive_values_output)
+            add_missing_values_output, add_excessive_values_output, create_errors_topic,
+            errors_topic_retention_ms)
             where schema is the expansion Arrow schema as returned by the server
 
         Raises
@@ -2643,13 +2651,18 @@ class VastdbApi:
         else:
             expansion_schema = pa.schema([])
 
+        errors_topic_retention_ms = (
+            rsp.errors_topic_retention_ms if rsp.HasField('errors_topic_retention_ms') else None)
+
         result = (rsp.source_column_name, rsp.target_table_name, rsp.expansion_format, expansion_schema,
-                  rsp.copy_source_column, rsp.add_missing_values_output, rsp.add_excessive_values_output)
+                  rsp.copy_source_column, rsp.add_missing_values_output, rsp.add_excessive_values_output,
+                  rsp.create_errors_topic, errors_topic_retention_ms)
 
         if not result:
             raise errors.MissingBlobExpansion(table_ref, source_column_name)
 
-        for item in result:
+        # errors_topic_retention_ms is optional and may be None
+        for item in result[:-1]:
             if item is None:
                 raise errors.MissingBlobExpansion(table_ref, source_column_name)
 

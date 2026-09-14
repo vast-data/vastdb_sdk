@@ -67,7 +67,9 @@ SORTING_SCORE_BITS = 63
 _NUM_ROWS_IN_ROW_GROUP = 2**16
 _ELYSIUM_SPLIT_ESTIMATION_SPLIT_ID = 0xffffffff - 3
 
-MANDATORY_FIELD_METADATA = {b"VAST:mandatory": b"true"}
+BLOB_EXPANSION_MANDATORY_FIELD_METADATA = {b"VAST:mandatory": b"true"}
+MANDATORY_FIELD_METADATA_KEY = b"VAST:mandatory"
+MANDATORY_FIELD_METADATA_VALUE = b"true"
 
 
 class ExpansionFormat(Enum):
@@ -87,6 +89,8 @@ class BlobExpansionConfig:
     flatten_delimiter: str = "__"
     add_missing_values_output: bool = True
     add_excessive_values_output: bool = True
+    create_errors_topic: bool = False
+    errors_topic_retention_ms: Optional[int] = None
 
 
 class _EmptyResultException(Exception):
@@ -410,7 +414,8 @@ class TableInTransaction(ITable):
         self._tx._rpc.features.check_blob_expansion()
 
         source_column, target_table_name, expansion_format_str, expansion_schema, copy_source_column, \
-            add_missing_values_output, add_excessive_values_output = \
+            add_missing_values_output, add_excessive_values_output, create_errors_topic, \
+            errors_topic_retention_ms = \
             self._tx._rpc.api.get_blob_expansion(
                 self.ref, source_column_name, txid=self._tx.active_txid)
 
@@ -424,7 +429,9 @@ class TableInTransaction(ITable):
             expansion_format=expansion_format,
             copy_source_column=copy_source_column,
             add_missing_values_output=add_missing_values_output,
-            add_excessive_values_output=add_excessive_values_output)
+            add_excessive_values_output=add_excessive_values_output,
+            create_errors_topic=create_errors_topic,
+            errors_topic_retention_ms=errors_topic_retention_ms)
 
         return BlobExpansion(
             source_column_name=source_column,
@@ -1369,7 +1376,7 @@ class Table(TableInTransaction):
         self._assert_not_imports_table()
         self._tx._rpc.features.check_blob_expansion()
         if _schema_has_mandatory_fields(expansion_schema):
-            self._tx._rpc.features.check_mandatory_fields()
+            self._tx._rpc.features.check_blob_expansion_mandatory_fields_error_topic()
 
         if config is None:
             config = BlobExpansionConfig()
@@ -1469,10 +1476,7 @@ def _schema_has_mandatory_fields(schema: Optional[pa.Schema]) -> bool:
     stack = list(schema)
     while stack:
         field = stack.pop()
-        if field.metadata and all(
-            field.metadata.get(key) == value
-            for key, value in MANDATORY_FIELD_METADATA.items()
-        ):
+        if field.metadata and field.metadata.get(MANDATORY_FIELD_METADATA_KEY) == MANDATORY_FIELD_METADATA_VALUE:
             return True
 
         t = field.type
@@ -1486,26 +1490,99 @@ def _schema_has_mandatory_fields(schema: Optional[pa.Schema]) -> bool:
     return False
 
 
-@dataclass
 class BlobExpansion:
     """VAST blob expansion."""
 
-    source_column_name: str
-    target_table_name: str
-    schema: pa.Schema
-    config: BlobExpansionConfig
-    _table_metadata: TableMetadata
-    _tx: "Transaction"
+    def __init__(
+        self,
+        source_column_name: str,
+        target_table_name: str,
+        schema: pa.Schema,
+        config: BlobExpansionConfig,
+        _table_metadata: TableMetadata,
+        _tx: "Transaction",
+    ) -> None:
+        """VAST blob expansion."""
+        self._source_column_name = source_column_name
+        self._target_table_name = target_table_name
+        self.schema = schema
+        self.config = config
+        self._table_metadata = _table_metadata
+        self._tx = _tx
+
+    @property
+    def source_column_name(self) -> str:
+        """Blob source column this expansion is bound to."""
+        return self._source_column_name
+
+    @property
+    def target_table_name(self) -> str:
+        """Target table that receives expanded columns."""
+        return self._target_table_name
 
     @property
     def table_metadata(self) -> TableMetadata:
-        """Metadata of the target table."""
+        """Metadata of the source table."""
         return self._table_metadata
 
     @property
     def tx(self) -> "Transaction":
         """Transaction used for self."""
         return self._tx
+
+    @staticmethod
+    def mark_mandatory_fields(
+        schema: pa.Schema,
+        mandatory_fields: Sequence[str],
+    ) -> pa.Schema:
+        """Return a copy of ``schema`` with the named fields marked mandatory.
+
+        Names may be top-level (``field``) or dotted paths (``outer.inner.leaf``).
+        Nested struct, list, and map fields are walked the same way as mandatory detection.
+        """
+        mandatory = set(mandatory_fields)
+        found: set[str] = set()
+
+        def mark(field: pa.Field, path: str) -> pa.Field:
+            found.add(field.name)
+            found.add(path)
+
+            t = field.type
+            if pa.types.is_struct(t):
+                field = field.with_type(pa.struct([
+                    mark(child := t.field(i), f"{path}.{child.name}") for i in range(t.num_fields)
+                ]))
+            elif pa.types.is_list(t):
+                v = t.value_field
+                field = field.with_type(pa.list_(mark(v, f"{path}.{v.name}")))
+            elif pa.types.is_large_list(t):
+                v = t.value_field
+                field = field.with_type(pa.large_list(mark(v, f"{path}.{v.name}")))
+            elif pa.types.is_fixed_size_list(t):
+                v = t.value_field
+                field = field.with_type(pa.list_(mark(v, f"{path}.{v.name}"), t.list_size))
+            elif pa.types.is_map(t):
+                k, v = t.key_field, t.item_field
+                field = field.with_type(pa.map_(
+                    mark(k, f"{path}.{k.name}"),
+                    mark(v, f"{path}.{v.name}"),
+                ))
+
+            if field.name in mandatory or path in mandatory:
+                field = field.with_metadata(
+                    (field.metadata or {}) | BLOB_EXPANSION_MANDATORY_FIELD_METADATA
+                )
+            return field
+
+        new_schema = pa.schema(
+            [mark(field, field.name) for field in schema],
+            metadata=schema.metadata,
+        )
+
+        if missing := mandatory - found:
+            raise errors.InvalidArgument(f"mandatory fields not found in schema: {sorted(missing)}")
+
+        return new_schema
 
     def add_columns(
         self,
@@ -1516,7 +1593,7 @@ class BlobExpansion:
     ) -> None:
         """Add columns to this blob expansion."""
         if _schema_has_mandatory_fields(columns_to_add):
-            self._tx._rpc.features.check_mandatory_fields()
+            self._tx._rpc.features.check_blob_expansion_mandatory_fields_error_topic()
 
         self._tx._rpc.api.alter_blob_expansion_add_columns(
             self._table_metadata.ref,
