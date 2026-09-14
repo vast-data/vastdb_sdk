@@ -816,6 +816,16 @@ class ValidateInList:
 TableInfo = namedtuple('TableInfo', 'name properties handle num_rows size_in_bytes num_partitions sorting_key_enabled sorting_score write_amplification acummulative_row_insertion_count sorting_done, partition_key_enabled')
 
 
+def _parse_raw_sorting_score(raw_sorting_score: int) -> tuple[int, bool]:
+    """Server packs sorting score as follows:
+    - lower 63 bits for actual sorting score
+    - bit 64 is a sorting_done flag
+    """
+    sorting_score = raw_sorting_score & ((1 << 63) - 1)
+    sorting_done = bool(raw_sorting_score >> 63)
+    return sorting_score, sorting_done
+
+
 def _parse_table_info(obj) -> TableInfo:
     name = obj.Name().decode()
     properties = obj.Properties().decode()
@@ -829,8 +839,7 @@ def _parse_table_info(obj) -> TableInfo:
     write_amplification = obj.WriteAmplification()
     acummulative_row_insertion_count = obj.AcummulativeRowInseritionCount()
 
-    sorting_score = sorting_score_raw & ((1 << 63) - 1)
-    sorting_done = bool(sorting_score_raw >> 63)
+    sorting_score, sorting_done = _parse_raw_sorting_score(sorting_score_raw)
     return TableInfo(name, properties, handle, num_rows, used_bytes, num_partitions, sorting_key_enabled,
                      sorting_score, write_amplification, acummulative_row_insertion_count, sorting_done,
                      partition_key_enabled)
@@ -941,6 +950,8 @@ class TableStats:
     endpoints: Tuple[str, ...] = ()
     vector_index: Optional[VectorIndex] = None
     partitioning_info: Optional[PartitioningInfo] = None
+    vector_secondary_index_sorting_score: int = 0
+    vector_secondary_index_sorting_done: bool = False
 
     def __getattribute__(self, name: str):
         if name == "vector_index":
@@ -1595,11 +1606,13 @@ class VastdbApi:
         acummulative_row_inserition_count = stats.AcummulativeRowInseritionCount()
         vips = self._parse_table_stats_vips(stats)
 
-        sorting_score = sorting_score_raw & ((1 << 63) - 1)
-        sorting_done = bool(sorting_score_raw >> 63)
+        sorting_score, sorting_done = _parse_raw_sorting_score(sorting_score_raw)
 
         partitioning_info = PartitioningInfo(num_partitions=stats.NumPartitions()) if stats.PartitioningKeyEnabled() else None
         vector_index_metadata: Optional[_VectorIndexMetadata] = stats.VectorIndexMetadata()
+        vector_secondary_index_sorting_score, vector_secondary_index_sorting_done = _parse_raw_sorting_score(
+            stats.VectorSecondaryIndexSortingScore()
+        )
 
         if vector_index_metadata is not None:
             column_name = vector_index_metadata.ColumnName()
@@ -1622,6 +1635,9 @@ class VastdbApi:
                 search_quantization=search_quantization.decode('utf-8'),
             )
         else:
+            if stats.VectorSecondaryIndexSortingScore() != 0:
+                raise ValueError("Server returned non 0 secondary index sorting score without a vector index")
+
             vector_index = None
 
         return TableStats(
@@ -1635,6 +1651,8 @@ class VastdbApi:
           sorting_done=sorting_done,
           endpoints=tuple(str(endpoint) for endpoint in self._endpoints),
           vector_index=vector_index,
+          vector_secondary_index_sorting_score=vector_secondary_index_sorting_score,
+          vector_secondary_index_sorting_done=vector_secondary_index_sorting_done,
           partitioning_info=partitioning_info,
           vips=vips
         )

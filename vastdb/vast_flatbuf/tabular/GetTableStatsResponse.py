@@ -130,7 +130,39 @@ class GetTableStatsResponse(object):
             return self._tab.Get(flatbuffers.number_types.Uint64Flags, o + self._tab.Pos)
         return 0
 
-def Start(builder): builder.StartObject(12)
+    # GetTableStatsResponse
+    def VectorIndicesMetadata(self, j):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(28))
+        if o != 0:
+            x = self._tab.Vector(o)
+            x += flatbuffers.number_types.UOffsetTFlags.py_type(j) * 4
+            x = self._tab.Indirect(x)
+            from vast_flatbuf.tabular.VectorIndexMetadata import VectorIndexMetadata
+            obj = VectorIndexMetadata()
+            obj.Init(self._tab.Bytes, x)
+            return obj
+        return None
+
+    # GetTableStatsResponse
+    def VectorIndicesMetadataLength(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(28))
+        if o != 0:
+            return self._tab.VectorLen(o)
+        return 0
+
+    # GetTableStatsResponse
+    def VectorIndicesMetadataIsNone(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(28))
+        return o == 0
+
+    # GetTableStatsResponse
+    def VectorSecondaryIndexSortingScore(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(30))
+        if o != 0:
+            return self._tab.Get(flatbuffers.number_types.Int64Flags, o + self._tab.Pos)
+        return 0
+
+def Start(builder): builder.StartObject(14)
 def GetTableStatsResponseStart(builder):
     """This method is deprecated. Please switch to Start."""
     return Start(builder)
@@ -174,7 +206,7 @@ def AddAcummulativeRowInseritionCount(builder, acummulativeRowInseritionCount): 
 def GetTableStatsResponseAddAcummulativeRowInseritionCount(builder, acummulativeRowInseritionCount):
     """This method is deprecated. Please switch to AddAcummulativeRowInseritionCount."""
     return AddAcummulativeRowInseritionCount(builder, acummulativeRowInseritionCount)
-def AddVectorIndexMetadata(builder, vectorIndexMetadata): builder.PrependUOffsetTRelativeSlot(9, flatbuffers.number_types.UOffsetTFlags.py_type(vectorIndexMetadata), 0)
+def AddVectorIndexMetadata(builder, vectorIndexMetadata): builder.PrependUOffsetTRelativeSlot(9, flatbuffers.number_types.UOffsetTFlags.py_type(vectorIndexMetadata), 0)  # deprecated: use AddVectorIndicesMetadata
 def GetTableStatsResponseAddVectorIndexMetadata(builder, vectorIndexMetadata):
     """This method is deprecated. Please switch to AddVectorIndexMetadata."""
     return AddVectorIndexMetadata(builder, vectorIndexMetadata)
@@ -186,7 +218,15 @@ def AddNumPartitions(builder, numPartitions): builder.PrependUint64Slot(11, numP
 def GetTableStatsResponseAddNumPartitions(builder, numPartitions):
     """This method is deprecated. Please switch to AddNumPartitions."""
     return AddNumPartitions(builder, numPartitions)
+def AddVectorIndicesMetadata(builder, vectorIndicesMetadata): builder.PrependUOffsetTRelativeSlot(12, flatbuffers.number_types.UOffsetTFlags.py_type(vectorIndicesMetadata), 0)
+def GetTableStatsResponseAddVectorIndicesMetadata(builder, vectorIndicesMetadata):
+    """This method is deprecated. Please switch to AddVectorIndicesMetadata."""
+    return AddVectorIndicesMetadata(builder, vectorIndicesMetadata)
+def StartVectorIndicesMetadataVector(builder, numElems): return builder.StartVector(4, numElems, 4)
+def AddVectorSecondaryIndexSortingScore(builder, vectorSecondaryIndexSortingScore): builder.PrependInt64Slot(13, vectorSecondaryIndexSortingScore, 0)
+def GetTableStatsResponseAddVectorSecondaryIndexSortingScore(builder, vectorSecondaryIndexSortingScore):
+    """This method is deprecated. Please switch to AddVectorSecondaryIndexSortingScore."""
+    return AddVectorSecondaryIndexSortingScore(builder, vectorSecondaryIndexSortingScore)
 def End(builder): return builder.EndObject()
 def GetTableStatsResponseEnd(builder):
     """This method is deprecated. Please switch to End."""
-    return End(builder)

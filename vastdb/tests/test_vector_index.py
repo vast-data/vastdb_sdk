@@ -296,9 +296,12 @@ def test_create_table_with_secondary_indices(session: Session, clean_bucket_name
             vector_index=input_spec,
         )
         table.reload_schema()
+        table.reload_stats()
 
         assert table.vector_index is not None
         assert table.vector_index.column == "embedding"
         assert table.vector_index.secondary_indices == ["id", "category"]
         assert table.vector_index.to_vector_index_spec().secondary_indices == ["id", "category"]
         assert table._metadata.non_updatable_column_names() == {"embedding", "id", "category"}
+        assert isinstance(table.stats.vector_secondary_index_sorting_score, int)
+        assert isinstance(table.stats.vector_secondary_index_sorting_done, bool)
