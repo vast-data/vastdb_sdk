@@ -67,6 +67,8 @@ SORTING_SCORE_BITS = 63
 _NUM_ROWS_IN_ROW_GROUP = 2**16
 _ELYSIUM_SPLIT_ESTIMATION_SPLIT_ID = 0xffffffff - 3
 
+MANDATORY_FIELD_METADATA = {b"VAST:mandatory": b"true"}
+
 
 class ExpansionFormat(Enum):
     """Format for blob expansion data parsing."""
@@ -407,7 +409,7 @@ class TableInTransaction(ITable):
         self._assert_not_imports_table()
         self._tx._rpc.features.check_blob_expansion()
 
-        source_column, target_table_name, expansion_format_str, columns, copy_source_column, \
+        source_column, target_table_name, expansion_format_str, expansion_schema, copy_source_column, \
             add_missing_values_output, add_excessive_values_output = \
             self._tx._rpc.api.get_blob_expansion(
                 self.ref, source_column_name, txid=self._tx.active_txid)
@@ -427,7 +429,7 @@ class TableInTransaction(ITable):
         return BlobExpansion(
             source_column_name=source_column,
             target_table_name=target_table_name,
-            columns=columns,
+            schema=expansion_schema,
             config=config,
             _table_metadata=self._metadata,
             _tx=self._tx)
@@ -1366,6 +1368,8 @@ class Table(TableInTransaction):
         """Create a blob expansion for the given source column."""
         self._assert_not_imports_table()
         self._tx._rpc.features.check_blob_expansion()
+        if _schema_has_mandatory_fields(expansion_schema):
+            self._tx._rpc.features.check_mandatory_fields()
 
         if config is None:
             config = BlobExpansionConfig()
@@ -1458,13 +1462,37 @@ def _parse_projection_info(projection_info, table_metadata: "TableMetadata", tx:
                       tx=tx)
 
 
+def _schema_has_mandatory_fields(schema: Optional[pa.Schema]) -> bool:
+    """Return True if any field (including nested) has VAST:mandatory=true."""
+    if schema is None:
+        return False
+    stack = list(schema)
+    while stack:
+        field = stack.pop()
+        if field.metadata and all(
+            field.metadata.get(key) == value
+            for key, value in MANDATORY_FIELD_METADATA.items()
+        ):
+            return True
+
+        t = field.type
+        if pa.types.is_struct(t):
+            stack.extend(t.field(i) for i in range(t.num_fields))
+        elif pa.types.is_list(t) or pa.types.is_large_list(t) or pa.types.is_fixed_size_list(t):
+            stack.append(t.value_field)
+        elif pa.types.is_map(t):
+            stack.extend([t.key_field, t.item_field])
+
+    return False
+
+
 @dataclass
 class BlobExpansion:
     """VAST blob expansion."""
 
     source_column_name: str
     target_table_name: str
-    columns: list[tuple[str, pa.DataType, dict]]
+    schema: pa.Schema
     config: BlobExpansionConfig
     _table_metadata: TableMetadata
     _tx: "Transaction"
@@ -1487,6 +1515,9 @@ class BlobExpansion:
         add_excessive_values_output: bool = False,
     ) -> None:
         """Add columns to this blob expansion."""
+        if _schema_has_mandatory_fields(columns_to_add):
+            self._tx._rpc.features.check_mandatory_fields()
+
         self._tx._rpc.api.alter_blob_expansion_add_columns(
             self._table_metadata.ref,
             self.source_column_name,

@@ -2600,7 +2600,7 @@ class VastdbApi:
         txid: int = 0,
         client_tags: list = [],
         expected_retvals: list = [],
-    ) -> tuple[str, str, str, list, bool, bool, bool]:
+    ) -> tuple[str, str, str, pa.Schema, bool, bool, bool]:
         """
         Show a blob expansion by showing the target table
         GET /bucket/schema/table?blob-expansion HTTP/1.1
@@ -2615,9 +2615,9 @@ class VastdbApi:
         Returns
         -------
         tuple
-            (source_column_name, target_table_name, expansion_format, columns, copy_source_column,
+            (source_column_name, target_table_name, expansion_format, schema, copy_source_column,
             add_missing_values_output, add_excessive_values_output)
-            where columns is a list of [column_name, column_type, column_metadata] tuples
+            where schema is the expansion Arrow schema as returned by the server
 
         Raises
         ------
@@ -2638,14 +2638,13 @@ class VastdbApi:
         rsp = GetBlobExpansionResponse()
         rsp.ParseFromString(res.content)
 
-        columns = []
         if rsp.arrow_schema:
-            arrow_schema = pa.ipc.read_schema(pa.py_buffer(rsp.arrow_schema))
-            for field in arrow_schema:
-                columns.append([field.name, field.type, field.metadata])
+            expansion_schema = pa.ipc.read_schema(pa.py_buffer(rsp.arrow_schema))
+        else:
+            expansion_schema = pa.schema([])
 
-        result = (rsp.source_column_name, rsp.target_table_name, rsp.expansion_format, columns, rsp.copy_source_column,
-                  rsp.add_missing_values_output, rsp.add_excessive_values_output)
+        result = (rsp.source_column_name, rsp.target_table_name, rsp.expansion_format, expansion_schema,
+                  rsp.copy_source_column, rsp.add_missing_values_output, rsp.add_excessive_values_output)
 
         if not result:
             raise errors.MissingBlobExpansion(table_ref, source_column_name)
