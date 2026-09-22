@@ -96,7 +96,7 @@ with session.transaction() as tx:
     print(f"source column: {blob_expansion.source_column_name}")
     print(f"target table:  {blob_expansion.target_table_name}")
     print(f"schema:        {blob_expansion.schema}")
-    print(f"errors topic:  {blob_expansion.config.create_errors_topic}")
+    print(f"errors topic name: {blob_expansion.config.errors_topic_name}")
 
     print("Get blob expansion".center(80, "="))
     retrieved = source.blob_expansion(SOURCE_COLUMN)

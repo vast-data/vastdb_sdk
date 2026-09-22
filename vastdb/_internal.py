@@ -2600,7 +2600,7 @@ class VastdbApi:
         txid: int = 0,
         client_tags: list = [],
         expected_retvals: list = [],
-    ) -> tuple[str, str, str, pa.Schema, bool, bool, bool, bool, Optional[int]]:
+    ) -> tuple[str, str, str, pa.Schema, bool, bool, bool, Optional[str]]:
         """
         Show a blob expansion by showing the target table
         GET /bucket/schema/table?blob-expansion HTTP/1.1
@@ -2616,10 +2616,8 @@ class VastdbApi:
         -------
         tuple
             (source_column_name, target_table_name, expansion_format, schema, copy_source_column,
-            add_missing_values_output, add_excessive_values_output, create_errors_topic,
-            errors_topic_retention_ms)
+            add_missing_values_output, add_excessive_values_output, errors_topic_name)
             where schema is the expansion Arrow schema as returned by the server
-
         Raises
         ------
         errors.MissingBlobExpansion
@@ -2644,17 +2642,15 @@ class VastdbApi:
         else:
             expansion_schema = pa.schema([])
 
-        errors_topic_retention_ms = (
-            rsp.errors_topic_retention_ms if rsp.HasField('errors_topic_retention_ms') else None)
+        errors_topic_name = (
+            rsp.errors_topic_name if rsp.HasField('errors_topic_name') else None)
 
         result = (rsp.source_column_name, rsp.target_table_name, rsp.expansion_format, expansion_schema,
-                  rsp.copy_source_column, rsp.add_missing_values_output, rsp.add_excessive_values_output,
-                  rsp.create_errors_topic, errors_topic_retention_ms)
+                  rsp.copy_source_column, rsp.add_missing_values_output, rsp.add_excessive_values_output, errors_topic_name)
 
         if not result:
             raise errors.MissingBlobExpansion(table_ref, source_column_name)
 
-        # errors_topic_retention_ms is optional and may be None
         for item in result[:-1]:
             if item is None:
                 raise errors.MissingBlobExpansion(table_ref, source_column_name)

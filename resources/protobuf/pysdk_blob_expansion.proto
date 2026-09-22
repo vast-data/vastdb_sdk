@@ -23,9 +23,9 @@ message CreateBlobExpansionRequest {
   optional bool add_missing_values_output = 8;
   /// Whether to add the excessive values output column (default: true)
   optional bool add_excessive_values_output = 9;
-  /// Whether to create an errors topic for parse failures
+  /// Whether to create a companion Kafka errors topic (default: false)
   optional bool create_errors_topic = 10;
-  /// Retention for the errors topic in milliseconds (optional)
+  /// Retention for the errors topic in milliseconds (optional; cluster default if unset)
   optional int64 errors_topic_retention_ms = 11;
 }
 
@@ -58,8 +58,6 @@ message GetBlobExpansionResponse {
   bool add_missing_values_output = 6;
   /// Whether the excessive values output column exists in the target table
   bool add_excessive_values_output = 7;
-  /// Whether an errors topic is associated with this blob expansion
-  bool create_errors_topic = 8;
-  /// Retention for the errors topic in milliseconds (optional)
-  optional int64 errors_topic_retention_ms = 9;
+  /// Name of the companion errors Kafka topic, if configured
+  optional string errors_topic_name = 8;
 }

@@ -91,6 +91,7 @@ class BlobExpansionConfig:
     add_excessive_values_output: bool = True
     create_errors_topic: bool = False
     errors_topic_retention_ms: Optional[int] = None
+    errors_topic_name: Optional[str] = None
 
 
 class _EmptyResultException(Exception):
@@ -414,8 +415,7 @@ class TableInTransaction(ITable):
         self._tx._rpc.features.check_blob_expansion()
 
         source_column, target_table_name, expansion_format_str, expansion_schema, copy_source_column, \
-            add_missing_values_output, add_excessive_values_output, create_errors_topic, \
-            errors_topic_retention_ms = \
+            add_missing_values_output, add_excessive_values_output, errors_topic_name = \
             self._tx._rpc.api.get_blob_expansion(
                 self.ref, source_column_name, txid=self._tx.active_txid)
 
@@ -430,8 +430,7 @@ class TableInTransaction(ITable):
             copy_source_column=copy_source_column,
             add_missing_values_output=add_missing_values_output,
             add_excessive_values_output=add_excessive_values_output,
-            create_errors_topic=create_errors_topic,
-            errors_topic_retention_ms=errors_topic_retention_ms)
+            errors_topic_name=errors_topic_name)
 
         return BlobExpansion(
             source_column_name=source_column,

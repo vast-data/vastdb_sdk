@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 [2.3.0]: https://github.com/vast-data/vastdb_sdk/compare/v2.2.0...v2.3.0
 
 ### Added
+- Blob expansion supports mandatory fields and error topics.
 - Vector index secondary indices via `VectorIndexSpec.secondary_indices`
 - Vector index secondary indices sorting score via `TableStats`
 

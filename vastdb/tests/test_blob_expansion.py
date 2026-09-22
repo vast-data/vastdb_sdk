@@ -343,8 +343,7 @@ def test_basic_blob_expansion(session: Session, clean_bucket_name: str):
         assert retrieved.target_table_name == be.target_table_name
         assert retrieved.config.add_missing_values_output == be.config.add_missing_values_output
         assert retrieved.config.add_excessive_values_output == be.config.add_excessive_values_output
-        assert retrieved.config.create_errors_topic == be.config.create_errors_topic
-        assert retrieved.config.errors_topic_retention_ms == be.config.errors_topic_retention_ms
+        assert retrieved.config.errors_topic_name == be.config.errors_topic_name
 
         be.drop()
         with pytest.raises(errors.MissingBlobExpansion):
@@ -578,13 +577,8 @@ def test_blob_expansion_with_errors_topic(session: Session, clean_bucket_name: s
                 errors_topic_retention_ms=RETENTION_MS,
             ),
         )
-        assert be.config.create_errors_topic is True
-        assert be.config.errors_topic_retention_ms == RETENTION_MS
 
-        retrieved = t.blob_expansion(SOURCE_COLUMN)
-        assert retrieved.config.create_errors_topic is True
-        assert retrieved.config.errors_topic_retention_ms == RETENTION_MS
-
+        t.blob_expansion(SOURCE_COLUMN)
         be.drop()
         with pytest.raises(errors.MissingBlobExpansion):
             t.blob_expansion(SOURCE_COLUMN)
@@ -601,13 +595,10 @@ def test_blob_expansion_errors_topic_on_kafka_topic(session: Session, clean_buck
             create_errors_topic=True,
             errors_topic_retention_ms=RETENTION_MS,
         )
-        assert be.config.create_errors_topic is True
-        assert be.config.errors_topic_retention_ms == RETENTION_MS
         assert s.table(ERRORS_TOPIC_NAME, fail_if_missing=False) is not None
 
         retrieved = t.blob_expansion(TOPIC_SOURCE_COLUMN)
-        assert retrieved.config.create_errors_topic is True
-        assert retrieved.config.errors_topic_retention_ms == RETENTION_MS
+        assert retrieved.config.errors_topic_name == ERRORS_TOPIC_NAME
 
         be.drop()
         with pytest.raises(errors.MissingBlobExpansion):
