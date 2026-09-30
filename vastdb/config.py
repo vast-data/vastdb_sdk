@@ -101,7 +101,8 @@ class ImportConfig:
 class BufferedInsertConfig:
     """Flush configuration for a by partition buffered inserter."""
 
-    # Max size in bytes of the data the buffer can hold at a give time
+    # Max size in bytes of data the buffer can hold at a given time
+    # Actual memory usage might be up to 2 times of that capacity due to in flight jobs
     capacity_in_bytes: int = 10 * 1024 * 1024
 
     # Time interval after which data will be flushed to server, regardless of anything else

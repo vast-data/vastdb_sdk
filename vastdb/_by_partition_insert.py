@@ -1,6 +1,6 @@
 import threading
 from collections.abc import Callable, Iterable
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 
 import numpy as np
 import pyarrow as pa
@@ -147,9 +147,31 @@ class ByPartitionBufferedInserter:
         self._timer = None if flush_config.timeout is None else util.Timer(self._flush_all, flush_config.timeout)
         self._results: list[Future] = []
         self._is_finished = False
+        self._in_flight_condition_variable = threading.Condition()
+        self._in_flight_bytes = 0
 
     def _flush_batch(self, table: pa.Table) -> None:
-        self._results.append(self._executor.submit(self._send_batch_to_server, table))
+        with self._in_flight_condition_variable:
+            while (
+                self._in_flight_bytes > 0 and
+                self._in_flight_bytes + table.nbytes > self._by_partition_buffer.capacity_in_bytes
+            ):
+                self._removed_completed_jobs_and_check_for_error()
+                self._in_flight_condition_variable.wait()
+
+            self._removed_completed_jobs_and_check_for_error()
+            self._in_flight_bytes += table.nbytes
+            self._results.append(self._executor.submit(
+                self._send_batch_to_server_and_update_in_flight_bytes,
+                table,
+            ))
+
+    def _removed_completed_jobs_and_check_for_error(self) -> None:
+        done, not_done = wait(self._results, timeout=0)
+        self._results = list(not_done)
+
+        for future in done:
+            future.result()
 
     def _flush_all(self) -> None:
         for table in self._by_partition_buffer.flush_all():
@@ -177,10 +199,15 @@ class ByPartitionBufferedInserter:
         if self._timer is not None:
             self._timer.stop()
 
-        self._flush_all()
+        try:
+            self._flush_all()
+        finally:
+            with self._in_flight_condition_variable:
+                results = self._results
+                self._results = []
 
-        for result in self._results:
-            result.result()
+            for future in results:
+                future.result()
 
     def __enter__(self) -> "ByPartitionBufferedInserter":
         self._assert_not_finished()
@@ -188,6 +215,14 @@ class ByPartitionBufferedInserter:
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         self.finish()
+
+    def _send_batch_to_server_and_update_in_flight_bytes(self, table: pa.Table) -> None:
+        try:
+            self._send_batch_to_server(table)
+        finally:
+            with self._in_flight_condition_variable:
+                self._in_flight_bytes -= table.nbytes
+                self._in_flight_condition_variable.notify_all()
 
     def _send_batch_to_server(self, table: pa.Table) -> None:
         tx, should_close_tx = (self._transaction_creator(), True) if self._tx is None else (self._tx, False)
