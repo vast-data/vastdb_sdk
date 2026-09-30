@@ -1224,11 +1224,14 @@ class VastdbApi:
 
         return session
 
-    def _single_request(self, *, method, url: Url, **kwargs) -> requests.Response:
-        _logger.debug("Sending request: %s %s %s timeout=%s", method, url, kwargs, self.timeout)
+    def _single_request(self, *, method, url: Url, headers: dict[str, str] | None = None, **kwargs) -> requests.Response:
+        if self._end_user is not None:
+            headers = (headers or {}) | {self.END_USER_HEADER: self._end_user}
+
+        _logger.debug("Sending request: %s %s headers=%s %s timeout=%s", method, url, headers, kwargs, self.timeout)
         try:
             session = self._session_get_or_create(url)
-            res = session.request(method=method, url=str(url), timeout=self.timeout, **kwargs)
+            res = session.request(method=method, url=str(url), timeout=self.timeout, headers=headers, **kwargs)
         except requests.exceptions.ConnectionError as err:
             # low-level connection issue, it is safe to retry only read-only requests
             may_retry = (method in {"HEAD", "GET"})
@@ -1274,9 +1277,6 @@ class VastdbApi:
             'tabular-api-version-id': str(version_id),
             'tabular-client-name': 'tabular-api'
         } | {f"tabular-sorted-column-{i}": str(k) for i, k in enumerate(sorting_key)}
-
-        if self._end_user is not None:
-            common_headers[self.END_USER_HEADER] = self._end_user
 
         return common_headers | {f'tabular-client-tags-{index}': tag for index, tag in enumerate(client_tags)}
 

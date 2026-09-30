@@ -1,6 +1,8 @@
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
+import requests
+from urllib3.util import parse_url
 
 from vastdb._internal import VastdbApi
 from vastdb.session import Session
@@ -17,15 +19,29 @@ def _make_api(end_user: str | None = None) -> VastdbApi:
     )
 
 
-@pytest.mark.parametrize("end_user", ["mock-end-user", None])
-def test_fill_common_headers_includes_end_user(end_user: str | None):
-    api = _make_api(end_user)
-    headers = api._fill_common_headers()
-
+def _assert_end_user_header(headers: dict, end_user: str | None) -> None:
     if end_user is None:
         assert VastdbApi.END_USER_HEADER not in headers
     else:
         assert headers[VastdbApi.END_USER_HEADER] == end_user
+
+
+@pytest.mark.parametrize("end_user", ["mock-end-user", None])
+@pytest.mark.parametrize("headers", [None, {"tabular-txid": "0"}])
+def test_single_request_sends_end_user(end_user: str | None, headers: dict[str, str] | None):
+    api = _make_api(end_user)
+    response = requests.Response()
+    response.status_code = 200
+    session = MagicMock()
+    session.request.return_value = response
+
+    with patch.object(api, "_session_get_or_create", return_value=session):
+        api._single_request(method="HEAD", url=parse_url("http://blabla:1234/my-bucket"), headers=headers)
+
+    sent_headers = session.request.call_args.kwargs.get("headers") or {}
+    if headers is not None:
+        assert sent_headers["tabular-txid"] == "0"
+    _assert_end_user_header(sent_headers, end_user)
 
 
 @pytest.mark.parametrize("end_user", ["mock-end-user", None])
@@ -51,8 +67,3 @@ def test_with_endpoints_preserves_end_user(end_user: str | None):
     cloned = api.with_endpoints(["http://blabla:4321"])
 
     assert cloned._end_user == end_user
-    headers = cloned._fill_common_headers()
-    if end_user is None:
-        assert VastdbApi.END_USER_HEADER not in headers
-    else:
-        assert headers[VastdbApi.END_USER_HEADER] == end_user
