@@ -86,7 +86,7 @@ def test_create_table_with_vector_index_basic_metadata(session: Session,
     *[
         pytest.param(f"table_invalid_quantization_{cluster}_{search}",
                      VectorIndexSpec("embedding", "l2sq", cluster_quantization=cluster, search_quantization=search),
-                     "invalid vector quantization combination",
+                     "invalid vector index quantization",
                      id=f"invalid_quantization_{cluster}_{search}")
         for cluster, search in _INVALID_QUANTIZATION_COMBINATIONS
     ],
