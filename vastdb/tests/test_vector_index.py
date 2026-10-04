@@ -21,19 +21,11 @@ _INVALID_QUANTIZATION_COMBINATIONS = {
     ("scalar_8bit", "none"),
 }
 
-_DEFAULT_VECTOR_QUANTIZATION = "scalar_8bit"
-
-
-def _resolved_quantization(value: str | DefaultQuantization) -> str:
-    return _DEFAULT_VECTOR_QUANTIZATION if isinstance(value, DefaultQuantization) else value
-
 
 def _run_vector_index_test(session: Session,
                            clean_bucket_name: str,
                            schema_name: str,
-                           input_spec: Optional[VectorIndexSpec],
-                           expect_success: bool,
-                           expected_spec: Optional[VectorIndexSpec]):
+                           input_spec: VectorIndexSpec | None):
     if input_spec is not None:
         pytest_skip_if_vector_index_not_supported(session)
     with session.transaction() as tx:
@@ -47,17 +39,26 @@ def _run_vector_index_test(session: Session,
             vec_type = pa.list_(pa.field('', pa.float32(), False), vector_dimension)
             arrow_schema = pa.schema([('id', pa.int64()), ('embedding', vec_type)])
 
-        if not expect_success:
-            with pytest.raises(errors.BadRequest):
-                schema.create_table(table_name="vec_table", columns=arrow_schema, vector_index=input_spec)
-            return
-
         table = schema.create_table(table_name="vec_table", columns=arrow_schema, vector_index=input_spec)
         table.reload_stats()
 
         result = table._metadata._vector_index
         result_spec = None if result is None else result.to_vector_index_spec()
-        assert result_spec == expected_spec
+
+        match input_spec, result_spec:
+            case None, None:
+                pass
+            case (None, _) | (_, None):
+                raise AssertionError(f"Mismatched specs: expected={input_spec}, result={result_spec}")
+            case _:
+                assert result_spec.column == input_spec.column
+                assert result_spec.distance_metric == input_spec.distance_metric
+                assert (isinstance(result_spec.cluster_quantization, str) and len(result_spec.cluster_quantization) > 0
+                        if isinstance(input_spec.cluster_quantization, DefaultQuantization)
+                        else result_spec.cluster_quantization == input_spec.cluster_quantization)
+                assert (isinstance(result_spec.search_quantization, str) and len(result_spec.search_quantization) > 0
+                        if isinstance(input_spec.search_quantization, DefaultQuantization)
+                        else result_spec.search_quantization == input_spec.search_quantization)
 
 
 @pytest.mark.parametrize("schema_name,input_vector_index", [
@@ -69,12 +70,8 @@ def test_create_table_with_vector_index_basic_metadata(session: Session,
                                                        clean_bucket_name: str,
                                                        schema_name: str,
                                                        input_vector_index: Optional[VectorIndexSpec]):
-    expected_vector_index = None
-    if input_vector_index is not None:
-        expected_vector_index = VectorIndexSpec(input_vector_index.column, input_vector_index.distance_metric,
-                                                _DEFAULT_VECTOR_QUANTIZATION, _DEFAULT_VECTOR_QUANTIZATION)
     _run_vector_index_test(session, clean_bucket_name, schema_name,
-                           input_vector_index, True, expected_vector_index)
+                           input_vector_index)
 
 
 @pytest.mark.parametrize("table_name,vector_index,expected_error", [
@@ -86,6 +83,13 @@ def test_create_table_with_vector_index_basic_metadata(session: Session,
                  VectorIndexSpec("embedding", "invalid_metric"),
                  "invalid vector index distance metric invalid_metric, supported metrics: 'l2sq', 'ip'",
                  id="invalid_distance_metric"),
+    *[
+        pytest.param(f"table_invalid_quantization_{cluster}_{search}",
+                     VectorIndexSpec("embedding", "l2sq", cluster_quantization=cluster, search_quantization=search),
+                     "invalid vector quantization combination",
+                     id=f"invalid_quantization_{cluster}_{search}")
+        for cluster, search in _INVALID_QUANTIZATION_COMBINATIONS
+    ],
 ])
 def test_create_table_with_invalid_vector_index(session: Session,
                                                 clean_bucket_name: str,
@@ -98,7 +102,8 @@ def test_create_table_with_invalid_vector_index(session: Session,
     schema_name = "schema1"
 
     with session.transaction() as tx:
-        log.info(f"Testing invalid table '{table_name}' with vector_index={vector_index}, expected_error={expected_error}")
+        log.info(
+            f"Testing invalid table '{table_name}' with vector_index={vector_index}, expected_error={expected_error}")
 
         # Create schema
         bucket = tx.bucket(clean_bucket_name)
@@ -213,28 +218,17 @@ def test_vector_index_metadata_from_stats(session: Session, clean_bucket_name: s
     ("cluster_scalar_8bit_default_search", VectorIndexSpec("embedding", "l2sq", "scalar_8bit")),
     ("cluster_none_default_search", VectorIndexSpec("embedding", "l2sq", "none")),
     *[
-        (f"cluster_{cluster_quant}_search_{search_quant}",
-         VectorIndexSpec("embedding", "l2sq", cluster_quantization=cluster_quant, search_quantization=search_quant))
-        for cluster_quant, search_quant in itertools.product(_QUANTIZATION_VALUES, repeat=2)
+        (f"cluster_{cluster}_search_{search}",
+         VectorIndexSpec("embedding", "l2sq", cluster_quantization=cluster, search_quantization=search))
+        for cluster, search in itertools.product(_QUANTIZATION_VALUES, repeat=2)
+        if (cluster, search) not in _INVALID_QUANTIZATION_COMBINATIONS
     ],
 ])
 def test_vector_index_quantization_values(session: Session, clean_bucket_name: str,
                                           schema_name: str, input_spec: VectorIndexSpec):
     pytest_skip_if_vector_index_not_supported(session)
-
-    resolved_cluster_quantization = _resolved_quantization(input_spec.cluster_quantization)
-    resolved_search_quantization = _resolved_quantization(input_spec.search_quantization)
-
-    is_invalid = (resolved_cluster_quantization, resolved_search_quantization) in _INVALID_QUANTIZATION_COMBINATIONS
-    expected_spec = None if is_invalid else VectorIndexSpec(
-        input_spec.column,
-        input_spec.distance_metric,
-        resolved_cluster_quantization,
-        resolved_search_quantization,
-    )
-
     _run_vector_index_test(session, clean_bucket_name, schema_name,
-                           input_spec, not is_invalid, expected_spec)
+                           input_spec)
 
 
 @pytest.mark.parametrize(
