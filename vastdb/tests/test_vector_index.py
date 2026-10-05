@@ -2,7 +2,7 @@
 
 import itertools
 import logging
-from typing import Any, Optional
+from typing import Optional
 
 import pyarrow as pa
 import pytest
@@ -74,101 +74,48 @@ def test_create_table_with_vector_index_basic_metadata(session: Session,
                            input_vector_index)
 
 
-@pytest.mark.parametrize("table_name,vector_index,expected_error", [
-    pytest.param("table_non_existent_column",
-                 VectorIndexSpec("nonexistent_column", "l2sq"),
+_MALFORMED_QUANTIZATION_VALUES = ["blabla", "scalar_"]
+
+
+@pytest.mark.parametrize("vector_index,expected_error_pattern", [
+    pytest.param(VectorIndexSpec("nonexistent_column", "l2sq"),
                  "invalid vector indexed column name nonexistent_column",
                  id="nonexistent_column"),
-    pytest.param("table_invalid_metric",
-                 VectorIndexSpec("embedding", "invalid_metric"),
+    pytest.param(VectorIndexSpec("embedding", "invalid_metric"),
                  "invalid vector index distance metric invalid_metric, supported metrics: 'l2sq', 'ip'",
                  id="invalid_distance_metric"),
     *[
-        pytest.param(f"table_invalid_quantization_{cluster}_{search}",
-                     VectorIndexSpec("embedding", "l2sq", cluster_quantization=cluster, search_quantization=search),
-                     "invalid vector index quantization",
+        pytest.param(VectorIndexSpec("embedding", "l2sq", cluster_quantization=cluster, search_quantization=search),
+                     "invalid vector quantization combination cluster=.* search=.*",
                      id=f"invalid_quantization_{cluster}_{search}")
         for cluster, search in _INVALID_QUANTIZATION_COMBINATIONS
+    ],
+    *[
+        pytest.param(VectorIndexSpec("embedding", "l2sq", cluster_quantization=bad_quantization),
+                     rf"invalid vector index cluster quantization.*{bad_quantization}.*supported values:",
+                     id=f"malformed_cluster_quantization_{bad_quantization}")
+        for bad_quantization in _MALFORMED_QUANTIZATION_VALUES
+    ],
+    *[
+        pytest.param(VectorIndexSpec("embedding", "l2sq", search_quantization=bad_quantization),
+                     rf"invalid vector index search quantization.*{bad_quantization}.*supported values:",
+                     id=f"malformed_search_quantization_{bad_quantization}")
+        for bad_quantization in _MALFORMED_QUANTIZATION_VALUES
     ],
 ])
 def test_create_table_with_invalid_vector_index(session: Session,
                                                 clean_bucket_name: str,
-                                                table_name: str,
                                                 vector_index: VectorIndexSpec,
-                                                expected_error: str):
-    """Test that table creation fails with appropriate error messages for invalid vector index parameters."""
-    if vector_index is not None:
-        pytest_skip_if_vector_index_not_supported(session)
-    schema_name = "schema1"
-
-    with session.transaction() as tx:
-        log.info(
-            f"Testing invalid table '{table_name}' with vector_index={vector_index}, expected_error={expected_error}")
-
-        # Create schema
-        bucket = tx.bucket(clean_bucket_name)
-        schema = bucket.create_schema(schema_name)
-
-        # Table with vector column
-        vector_dimension = 128  # Fixed-size vector dimension
-        vec_type = pa.list_(pa.field('', pa.float32(), False), vector_dimension)
-        arrow_schema = pa.schema([
-            ('id', pa.int64()),
-            ('embedding', vec_type)  # Fixed-size vector column
-        ])
-
-        # Attempt to create table with invalid parameters - should raise an error
-        log.info(f"Attempting to create invalid table: {table_name}")
-        with pytest.raises((errors.BadRequest)) as exc_info:
-            schema.create_table(
-                table_name=table_name,
-                columns=arrow_schema,
-                vector_index=vector_index
-            )
-
-        # Verify the error message contains the expected error text
-        assert expected_error in str(exc_info.value), \
-            f"Expected error message to contain '{expected_error}', got '{str(exc_info.value)}'"
-
-        log.info(f"✓ Test passed for invalid table '{table_name}'")
-
-
-_MALFORMED_QUANTIZATION_VALUES = [
-    pytest.param("blabla", id="invalid_option"),
-    pytest.param("scalar_", id="incomplete_type"),
-]
-
-
-@pytest.mark.parametrize("quantization_field,quantization_error_name", [
-    ("cluster_quantization", "cluster quantization"),
-    ("search_quantization", "search quantization"),
-])
-@pytest.mark.parametrize("bad_quantization", _MALFORMED_QUANTIZATION_VALUES)
-def test_create_table_with_malformed_vector_index_quantization(session: Session,
-                                                               clean_bucket_name: str,
-                                                               quantization_field: str,
-                                                               quantization_error_name: str,
-                                                               bad_quantization: str):
-    """Test that malformed quantization values are rejected with an informative error"""
+                                                expected_error_pattern: str):
+    """Test that table creation fails with BadRequest and an informative error for invalid vector index parameters."""
     pytest_skip_if_vector_index_not_supported(session)
 
-    if session.features.vast_version > (5, 5):
-        pytest.skip("Bug - ORION-415272")
-
-    quantization_params: dict[str, Any] = {quantization_field: bad_quantization}
-    vector_index = VectorIndexSpec("embedding", "l2sq", **quantization_params)
-    expected_error = (rf"invalid vector index {quantization_error_name}"
-                      rf".*{bad_quantization}.*supported values:")
-    schema_name = f"malformed_{quantization_field}_{bad_quantization or 'empty'}"
-
     with session.transaction() as tx:
-        bucket = tx.bucket(clean_bucket_name)
-        schema = bucket.create_schema(schema_name)
-
+        schema = tx.bucket(clean_bucket_name).create_schema("schema1")
         vec_type = pa.list_(pa.field('', pa.float32(), False), 128)
         arrow_schema = pa.schema([('id', pa.int64()), ('embedding', vec_type)])
 
-        with pytest.raises(errors.BadRequest, match=expected_error):
+        with pytest.raises(errors.BadRequest, match=expected_error_pattern):
             schema.create_table(table_name="vec_table", columns=arrow_schema, vector_index=vector_index)
 
 
