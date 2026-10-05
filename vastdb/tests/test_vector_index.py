@@ -77,6 +77,18 @@ def test_create_table_with_vector_index_basic_metadata(session: Session,
 _MALFORMED_QUANTIZATION_VALUES = ["blabla", "scalar_"]
 
 
+@pytest.mark.parametrize("cluster_quantization", ["", " "])
+def test_vector_index_spec_rejects_blank_cluster_quantization(cluster_quantization: str):
+    with pytest.raises(ValueError, match="invalid vector index cluster quantization"):
+        VectorIndexSpec("embedding", "l2sq", cluster_quantization=cluster_quantization)
+
+
+@pytest.mark.parametrize("search_quantization", ["", " "])
+def test_vector_index_spec_rejects_blank_search_quantization(search_quantization: str):
+    with pytest.raises(ValueError, match="invalid vector index search quantization"):
+        VectorIndexSpec("embedding", "l2sq", search_quantization=search_quantization)
+
+
 @pytest.mark.parametrize("vector_index,expected_error_pattern", [
     pytest.param(VectorIndexSpec("nonexistent_column", "l2sq"),
                  "invalid vector indexed column name nonexistent_column",

@@ -871,6 +871,12 @@ class VectorIndexSpec:
     search_quantization: str | DefaultQuantization = DefaultQuantization()
     secondary_indices: list[str] = field(default_factory=list)
 
+    def __post_init__(self) -> None:
+        if isinstance(self.cluster_quantization, str) and self.cluster_quantization.strip() == "":
+            raise ValueError("invalid vector index cluster quantization: empty value is not allowed, omit it to use default")
+        if isinstance(self.search_quantization, str) and self.search_quantization.strip() == "":
+            raise ValueError("invalid vector index search quantization: empty value is not allowed, omit it to use default")
+
 
 @dataclass
 class VectorIndex:
