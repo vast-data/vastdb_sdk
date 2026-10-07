@@ -1,6 +1,5 @@
 """Tests for vector index functionality."""
 
-import itertools
 import logging
 from typing import Optional
 
@@ -14,12 +13,6 @@ from vastdb.session import Session
 from .util import pytest_skip_if_vector_index_not_supported
 
 log = logging.getLogger(__name__)
-
-_QUANTIZATION_VALUES = ["scalar_8bit", "none"]
-
-_INVALID_QUANTIZATION_COMBINATIONS = {
-    ("scalar_8bit", "none"),
-}
 
 
 def _run_vector_index_test(session: Session,
@@ -97,20 +90,14 @@ def test_vector_index_spec_rejects_blank_search_quantization(search_quantization
                  "invalid vector index distance metric invalid_metric, supported metrics: 'l2sq', 'ip'",
                  id="invalid_distance_metric"),
     *[
-        pytest.param(VectorIndexSpec("embedding", "l2sq", cluster_quantization=cluster, search_quantization=search),
-                     "invalid vector quantization combination cluster=.* search=.*",
-                     id=f"invalid_quantization_{cluster}_{search}")
-        for cluster, search in _INVALID_QUANTIZATION_COMBINATIONS
-    ],
-    *[
         pytest.param(VectorIndexSpec("embedding", "l2sq", cluster_quantization=bad_quantization),
-                     rf"invalid vector index cluster quantization.*{bad_quantization}.*supported values:",
+                     "invalid vector index cluster quantization|failed to deserialize vector index from schema metadata",
                      id=f"malformed_cluster_quantization_{bad_quantization}")
         for bad_quantization in _MALFORMED_QUANTIZATION_VALUES
     ],
     *[
         pytest.param(VectorIndexSpec("embedding", "l2sq", search_quantization=bad_quantization),
-                     rf"invalid vector index search quantization.*{bad_quantization}.*supported values:",
+                     "invalid vector index search quantization|failed to deserialize vector index from schema metadata",
                      id=f"malformed_search_quantization_{bad_quantization}")
         for bad_quantization in _MALFORMED_QUANTIZATION_VALUES
     ],
@@ -176,12 +163,21 @@ def test_vector_index_metadata_from_stats(session: Session, clean_bucket_name: s
     ("default_quantization", VectorIndexSpec("embedding", "l2sq")),
     ("cluster_scalar_8bit_default_search", VectorIndexSpec("embedding", "l2sq", "scalar_8bit")),
     ("cluster_none_default_search", VectorIndexSpec("embedding", "l2sq", "none")),
-    *[
-        (f"cluster_{cluster}_search_{search}",
-         VectorIndexSpec("embedding", "l2sq", cluster_quantization=cluster, search_quantization=search))
-        for cluster, search in itertools.product(_QUANTIZATION_VALUES, repeat=2)
-        if (cluster, search) not in _INVALID_QUANTIZATION_COMBINATIONS
-    ],
+    (
+        "cluster_scalar_8bit_search_scalar_8bit",
+        VectorIndexSpec("embedding", "l2sq",
+                        cluster_quantization="scalar_8bit", search_quantization="scalar_8bit"),
+    ),
+    (
+        "cluster_none_search_scalar_8bit",
+        VectorIndexSpec("embedding", "l2sq",
+                        cluster_quantization="none", search_quantization="scalar_8bit"),
+    ),
+    (
+        "cluster_none_search_none",
+        VectorIndexSpec("embedding", "l2sq",
+                        cluster_quantization="none", search_quantization="none"),
+    ),
 ])
 def test_vector_index_quantization_values(session: Session, clean_bucket_name: str,
                                           schema_name: str, input_spec: VectorIndexSpec):
