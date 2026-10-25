@@ -9,7 +9,7 @@ from vastdb._internal import VectorIndex, VectorIndexSpec
 from vastdb._table_interface import IbisPredicate
 from vastdb.table_metadata import TableMetadata, TableRef, TableType
 
-from .util import pytest_skip_if_vector_index_not_supported
+from .util import require_features
 
 DEFAULT_VECTOR_COLUMN_NAME = "vector_col"
 
@@ -176,7 +176,7 @@ def test_ibis_to_query_engine_predicates(ibis_predicate: IbisPredicate, expected
 
 def test_with_predicates_get_vector_index_properties_from_server(session,
                                                                  clean_bucket_name: str):
-    pytest_skip_if_vector_index_not_supported(session)
+    require_features(session.features.check_vector)
 
     vector_column_name = 'vector_column'
     vector_index_distance_metric = 'l2sq'

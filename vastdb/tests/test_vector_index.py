@@ -10,7 +10,7 @@ from vastdb import errors
 from vastdb._internal import DefaultQuantization, VectorIndexSpec
 from vastdb.session import Session
 
-from .util import pytest_skip_if_vector_index_not_supported
+from .util import require_features
 
 log = logging.getLogger(__name__)
 
@@ -20,7 +20,7 @@ def _run_vector_index_test(session: Session,
                            schema_name: str,
                            input_spec: VectorIndexSpec | None):
     if input_spec is not None:
-        pytest_skip_if_vector_index_not_supported(session)
+        require_features(session.features.check_vector)
     with session.transaction() as tx:
         bucket = tx.bucket(clean_bucket_name)
         schema = bucket.create_schema(schema_name)
@@ -107,7 +107,7 @@ def test_create_table_with_invalid_vector_index(session: Session,
                                                 vector_index: VectorIndexSpec,
                                                 expected_error_pattern: str):
     """Test that table creation fails with BadRequest and an informative error for invalid vector index parameters."""
-    pytest_skip_if_vector_index_not_supported(session)
+    require_features(session.features.check_vector)
 
     with session.transaction() as tx:
         schema = tx.bucket(clean_bucket_name).create_schema("schema1")
@@ -120,7 +120,7 @@ def test_create_table_with_invalid_vector_index(session: Session,
 
 def test_vector_index_metadata_from_stats(session: Session, clean_bucket_name: str):
     """Test that vector index metadata is correctly retrieved from table stats."""
-    pytest_skip_if_vector_index_not_supported(session)
+    require_features(session.features.check_vector)
 
     schema_name = "schema1"
     table_name = "vector_table"
@@ -181,7 +181,7 @@ def test_vector_index_metadata_from_stats(session: Session, clean_bucket_name: s
 ])
 def test_vector_index_quantization_values(session: Session, clean_bucket_name: str,
                                           schema_name: str, input_spec: VectorIndexSpec):
-    pytest_skip_if_vector_index_not_supported(session)
+    require_features(session.features.check_vector)
     _run_vector_index_test(session, clean_bucket_name, schema_name,
                            input_spec)
 

@@ -6,6 +6,7 @@ https://kafka.apache.org/quickstart/ -> quickstart for kafka topic creation.
 point VASTDB_BLOB_EXPANSION_SCHEMA / VASTDB_BLOB_EXPANSION_TOPIC
 at it, otherwise the example is skipped.
 Requires VAST 5.5+. Mandatory field metadata and error topic requires 5.5.3+.
+Avro blob expansion requires VAST 5.6+.
 """
 from __future__ import annotations
 
@@ -16,7 +17,7 @@ import pyarrow as pa
 
 import vastdb
 from vastdb import errors
-from vastdb.table import BlobExpansionConfig, ExpansionFormat
+from vastdb.table import BlobExpansion, BlobExpansionConfig, ExpansionFormat, ParsingSchema
 
 BUCKET = os.environ.get("VASTDB_BUCKET", "vastdb")
 # The expansion source must be an existing Kafka topic.
@@ -126,5 +127,23 @@ with session.transaction() as tx:
 
     print("Drop blob expansion".center(80, "="))
     blob_expansion.drop()
+
+    # Same create/get/drop for Avro (VAST 5.6+): pass a parsing schema and refetch after add/remove.
+    try:
+        session.features.check_blob_expansion_with_parsing_schema()
+        avro = source.create_blob_expansion(
+            source_column_name=SOURCE_COLUMN,
+            expansion_schema=initial_expansion,
+            target_table_name=target.name,
+            config=BlobExpansionConfig(
+                expansion_format=ExpansionFormat.AVRO,
+                parsing_schemas=[ParsingSchema(1, b'{"type":"record","name":"User","fields":[{"name":"name","type":"string"},{"name":"score","type":"int"}]}')],
+            ),
+        )
+        print(f"avro schema_ids: {avro.schema_ids}")
+        avro.drop()
+    except errors.NotSupportedVersion as exc:
+        print(f"Avro blob expansion not available: {exc}")
+
     target.drop()  # the topic itself is left untouched
     print("dropped")

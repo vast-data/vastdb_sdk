@@ -13,21 +13,17 @@ from vastdb.errors import (
     ImportFilesError,
     InternalServerError,
     InvalidArgument,
-    NotSupportedVersion,
 )
 from vastdb.session import Session
+from vastdb.tests.util import require_features
 
 log = logging.getLogger(__name__)
 
 
 @pytest.fixture
 def zip_import_session(session):
-    with session.transaction() as tx:
-        try:
-            tx._rpc.features.check_zip_import()
-            return session
-        except NotSupportedVersion:
-            pytest.skip("Skipped because this test requires version 5.3.1")
+    require_features(session.features.check_zip_import)
+    return session
 
 
 def test_parallel_imports_with_endpoints_negative(session: Session, clean_bucket_name: str, s3):

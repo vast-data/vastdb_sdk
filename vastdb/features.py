@@ -66,6 +66,11 @@ class Features:
             "Creating vector secondary indices require 5.5.3+ VAST release",
             vast_version >= (5, 5, 3))
 
+        self.check_blob_expansion_with_parsing_schema = self._check(
+            "Blob expansion with parsing schema requires 5.6+ VAST release",
+            vast_version >= (5, 6)
+        )
+
         self.use_new_query_method = vast_version >= (5, 6)
 
     def _check(self, msg, supported):

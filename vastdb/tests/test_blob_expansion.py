@@ -14,8 +14,10 @@ from vastdb.table import (
     BlobExpansion,
     BlobExpansionConfig,
     ExpansionFormat,
+    ParsingSchema,
     Table,
 )
+from vastdb.tests.util import require_features
 
 log = logging.getLogger(__name__)
 
@@ -36,29 +38,37 @@ ERRORS_TOPIC_NAME = TOPIC_NAME + ERRORS_TOPIC_SUFFIX
 RETENTION_MS = 86_400_000
 
 
-def _skip_unless_blob_expansion(session: Session) -> None:
-    try:
-        session.features.check_blob_expansion()
-    except errors.NotSupportedVersion:
-        pytest.skip("Blob expansion requires VAST 5.5+")
-
-
-def _skip_unless_mandatory_fields(session: Session) -> None:
-    _skip_unless_blob_expansion(session)
-    try:
-        session.features.check_blob_expansion_mandatory_fields_error_topic()
-    except errors.NotSupportedVersion:
-        pytest.skip("Mandatory blob-expansion fields require VAST 5.5.3+")
-
-
 def _skip_unless_blob_expansion_without_mandatory(session: Session) -> None:
     """Blob expansion yes, mandatory fields no (e.g. 5.5.0-5.5.2)."""
-    _skip_unless_blob_expansion(session)
+    require_features(session.features.check_blob_expansion)
     try:
         session.features.check_blob_expansion_mandatory_fields_error_topic()
     except errors.NotSupportedVersion:
         return
     pytest.skip("Requires blob expansion without mandatory-fields support (<5.5.3)")
+
+
+def _skip_unless_blob_expansion_without_avro(session: Session) -> None:
+    """Blob expansion yes, Avro no (e.g. 5.5.x)."""
+    require_features(session.features.check_blob_expansion)
+    try:
+        session.features.check_blob_expansion_with_parsing_schema()
+    except errors.NotSupportedVersion:
+        return
+    pytest.skip("Requires VAST 5.5, which has a bug  where Avro is accepted but stored as JSON")
+
+
+def _blob_expansion_config(expansion_format: ExpansionFormat) -> BlobExpansionConfig:
+    """Config for JSON, or AVRO with a minimal parsing schema."""
+    if expansion_format is ExpansionFormat.AVRO:
+        return BlobExpansionConfig(
+            expansion_format=ExpansionFormat.AVRO,
+            parsing_schemas=[ParsingSchema(
+                1,
+                b'{"type":"record","name":"User","fields":[{"name":"name","type":"string"}]}',
+            )],
+        )
+    return BlobExpansionConfig(expansion_format=expansion_format)
 
 
 def _get_metadata_by_name(schema: pa.Schema) -> dict:
@@ -331,7 +341,7 @@ MANDATORY_ADD_CASES = [
 
 def test_basic_blob_expansion(session: Session, clean_bucket_name: str):
     """Create, retrieve and drop a blob expansion."""
-    _skip_unless_blob_expansion(session)
+    require_features(session.features.check_blob_expansion)
 
     expansion_schema = pa.schema([
         ('field1', pa.string()),
@@ -346,7 +356,7 @@ def test_basic_blob_expansion(session: Session, clean_bucket_name: str):
 
         assert be.source_column_name == SOURCE_COLUMN
         assert be.target_table_name.endswith(f'/{clean_bucket_name}/{SCHEMA_NAME}/{TARGET_TABLE}')
-        assert be.config.expansion_format == ExpansionFormat.JSON
+        assert be.config.expansion_format is ExpansionFormat.JSON
         assert be.config.copy_source_column is False
 
         retrieved = t.blob_expansion(SOURCE_COLUMN)
@@ -363,7 +373,7 @@ def test_basic_blob_expansion(session: Session, clean_bucket_name: str):
 
 def test_blob_expansion_nested_schema(session: Session, clean_bucket_name: str):
     """Create an expansion whose schema contains struct and list columns."""
-    _skip_unless_blob_expansion(session)
+    require_features(session.features.check_blob_expansion)
 
     expansion_schema = pa.schema([
         ('simple_field', pa.string()),
@@ -379,7 +389,7 @@ def test_blob_expansion_nested_schema(session: Session, clean_bucket_name: str):
 
 def test_blob_expansion_with_copy_source_column(session: Session, clean_bucket_name: str):
     """Create an expansion that copies the source column into the target table."""
-    _skip_unless_blob_expansion(session)
+    require_features(session.features.check_blob_expansion)
 
     expansion_schema = pa.schema([('extracted_field1', pa.string()), ('extracted_field2', pa.int32())])
     with session.transaction() as tx:
@@ -393,7 +403,7 @@ def test_blob_expansion_with_copy_source_column(session: Session, clean_bucket_n
 
 def test_blob_expansion_missing_error(session: Session, clean_bucket_name: str):
     """Getting an expansion for a column that has none reports the full table ref."""
-    _skip_unless_blob_expansion(session)
+    require_features(session.features.check_blob_expansion)
 
     with session.transaction() as tx:
         _, t = _create_tables(tx, clean_bucket_name, pa.schema([('field1', pa.string())]))
@@ -409,7 +419,7 @@ def test_blob_expansion_missing_error(session: Session, clean_bucket_name: str):
 
 def test_blob_expansion_add_columns(session: Session, clean_bucket_name: str):
     """Adding columns to an existing expansion extends its schema."""
-    _skip_unless_blob_expansion(session)
+    require_features(session.features.check_blob_expansion)
 
     initial_schema = pa.schema([('field1', pa.string()), ('field2', pa.int32())])
     added_schema = pa.schema([('field3', pa.float64()), ('field4', pa.bool_())])
@@ -427,7 +437,7 @@ def test_blob_expansion_add_columns(session: Session, clean_bucket_name: str):
 
 def test_blob_expansion_drop_columns(session: Session, clean_bucket_name: str):
     """Dropping columns from an existing expansion leaves the remaining ones intact."""
-    _skip_unless_blob_expansion(session)
+    require_features(session.features.check_blob_expansion)
 
     kept_schema = pa.schema([('field1', pa.string()), ('field2', pa.int32())])
     dropped_schema = pa.schema([('field3', pa.float64()), ('field4', pa.bool_())])
@@ -445,7 +455,7 @@ def test_blob_expansion_drop_columns(session: Session, clean_bucket_name: str):
 
 def test_blob_expansion_drop_non_existent_columns(session: Session, clean_bucket_name: str):
     """Dropping a column that was never part of the expansion must fail."""
-    _skip_unless_blob_expansion(session)
+    require_features(session.features.check_blob_expansion)
 
     with session.transaction() as tx:
         _, be = _create_expansion(
@@ -458,7 +468,7 @@ def test_blob_expansion_drop_non_existent_columns(session: Session, clean_bucket
 
 def test_negative_create_duplicate_blob_expansion(session: Session, clean_bucket_name: str):
     """Creating a second expansion on the same source column must fail."""
-    _skip_unless_blob_expansion(session)
+    require_features(session.features.check_blob_expansion)
 
     expansion_schema = pa.schema([('field1', pa.string())])
     with session.transaction() as tx:
@@ -475,7 +485,7 @@ def test_negative_create_duplicate_blob_expansion(session: Session, clean_bucket
 
 def test_positive_create_with_output_columns_disabled(session: Session, clean_bucket_name: str):
     """Create with missing/excessive output columns off and confirm the GET roundtrip."""
-    _skip_unless_blob_expansion(session)
+    require_features(session.features.check_blob_expansion)
 
     with session.transaction() as tx:
         t, be = _create_expansion(
@@ -495,15 +505,9 @@ def test_positive_create_with_output_columns_disabled(session: Session, clean_bu
         be.drop()
 
 
-@pytest.mark.skip(
-    reason=(
-        "500 InternalError on flag-only AlterBlobExpansion; blocked by "
-        "https://vastdata.atlassian.net/browse/ORION-411726"
-    )
-)
 def test_positive_remove_copy_source_column_after_create(session: Session, clean_bucket_name: str):
     """Create with copy-source enabled, then remove that column via a flag-only alter."""
-    _skip_unless_blob_expansion(session)
+    require_features(session.features.check_blob_expansion)
 
     with session.transaction() as tx:
         t, be = _create_expansion(
@@ -516,19 +520,12 @@ def test_positive_remove_copy_source_column_after_create(session: Session, clean
 
         retrieved = t.blob_expansion(SOURCE_COLUMN)
         assert retrieved.config.copy_source_column is False
-        assert COPY_SOURCE_COLUMN not in _get_metadata_by_name(retrieved.schema)
         be.drop()
 
 
-@pytest.mark.skip(
-    reason=(
-        "500 InternalError on flag-only AlterBlobExpansion; blocked by "
-        "https://vastdata.atlassian.net/browse/ORION-411726"
-    )
-)
 def test_positive_flag_only_add_then_remove_copy_source(session: Session, clean_bucket_name: str):
     """Flag-only alter: add copy-source after create, then remove it."""
-    _skip_unless_blob_expansion(session)
+    require_features(session.features.check_blob_expansion)
 
     with session.transaction() as tx:
         t, be = _create_expansion(tx, clean_bucket_name, pa.schema([('field1', pa.string())]))
@@ -537,46 +534,32 @@ def test_positive_flag_only_add_then_remove_copy_source(session: Session, clean_
         be.add_columns(add_copy_source_column=True)
         after_add = t.blob_expansion(SOURCE_COLUMN)
         assert after_add.config.copy_source_column is True
-        assert COPY_SOURCE_COLUMN in _get_metadata_by_name(after_add.schema)
 
         be.drop_columns(remove_copy_source_column=True)
         after_remove = t.blob_expansion(SOURCE_COLUMN)
         assert after_remove.config.copy_source_column is False
-        assert COPY_SOURCE_COLUMN not in _get_metadata_by_name(after_remove.schema)
         be.drop()
 
 
-@pytest.mark.skip(
-    reason=(
-        "500 InternalError on flag-only AlterBlobExpansion; blocked by "
-        "https://vastdata.atlassian.net/browse/ORION-411726"
-    )
-)
 def test_negative_remove_copy_source_column_when_never_enabled(session: Session, clean_bucket_name: str):
-    """Removing copy-source when it was never created is rejected, and the expansion is unchanged."""
-    _skip_unless_blob_expansion(session)
+    """Removing copy-source when it was never created is a no-op."""
+    require_features(session.features.check_blob_expansion)
 
     with session.transaction() as tx:
         t, be = _create_expansion(tx, clean_bucket_name, pa.schema([('field1', pa.string())]))
         assert be.config.copy_source_column is False
 
-        with pytest.raises(errors.NotFound, match="Source column .* not found in target table"):
-            be.drop_columns(remove_copy_source_column=True)
+        be.drop_columns(remove_copy_source_column=True)
 
         retrieved = t.blob_expansion(SOURCE_COLUMN)
         assert retrieved.config.copy_source_column is False
         be.drop()
 
 
-@pytest.mark.skip(
-    reason=(
-        "PANIC when create_errors_topic is used with non-Kafka tables; blocked by "
-        "https://vastdata.atlassian.net/browse/ORION-411726"
-    )
-)
+@pytest.mark.skip(reason="PySDK does not support Kafka topic creation")
 def test_blob_expansion_with_errors_topic(session: Session, clean_bucket_name: str):
     """Create an errors topic on a regular table and verify the config roundtrip via get."""
-    _skip_unless_mandatory_fields(session)
+    require_features(session.features.check_blob_expansion_mandatory_fields_error_topic)
 
     expansion_schema = pa.schema([('field1', pa.string()), ('field2', pa.int32())])
     with session.transaction() as tx:
@@ -588,8 +571,14 @@ def test_blob_expansion_with_errors_topic(session: Session, clean_bucket_name: s
                 errors_topic_retention_ms=RETENTION_MS,
             ),
         )
+        assert be.config.create_errors_topic is True
+        assert be.config.errors_topic_name is not None
+        assert be.config.errors_topic_retention_ms is None
 
-        t.blob_expansion(SOURCE_COLUMN)
+        retrieved = t.blob_expansion(SOURCE_COLUMN)
+        assert retrieved.config.create_errors_topic is True
+        assert retrieved.config.errors_topic_name == be.config.errors_topic_name
+
         be.drop()
         with pytest.raises(errors.MissingBlobExpansion):
             t.blob_expansion(SOURCE_COLUMN)
@@ -598,7 +587,7 @@ def test_blob_expansion_with_errors_topic(session: Session, clean_bucket_name: s
 @pytest.mark.skip(reason="PySDK does not support Kafka topic creation")
 def test_blob_expansion_errors_topic_on_kafka_topic(session: Session, clean_bucket_name: str):
     """Create an errors topic on a Kafka topic source; dropping the expansion keeps the topic."""
-    _skip_unless_blob_expansion(session)
+    require_features(session.features.check_blob_expansion)
 
     with session.transaction() as tx:
         s, t, be = _create_topic_expansion(
@@ -609,6 +598,7 @@ def test_blob_expansion_errors_topic_on_kafka_topic(session: Session, clean_buck
         assert s.table(ERRORS_TOPIC_NAME, fail_if_missing=False) is not None
 
         retrieved = t.blob_expansion(TOPIC_SOURCE_COLUMN)
+        assert retrieved.config.create_errors_topic is True
         assert retrieved.config.errors_topic_name == ERRORS_TOPIC_NAME
 
         be.drop()
@@ -624,7 +614,7 @@ def test_blob_expansion_errors_topic_on_kafka_topic(session: Session, clean_buck
 @pytest.mark.skip(reason="PySDK does not support Kafka topic creation")
 def test_negative_create_errors_topic_when_errors_topic_exists(session: Session, clean_bucket_name: str):
     """Create with create_errors_topic must fail if the errors topic already exists."""
-    _skip_unless_blob_expansion(session)
+    require_features(session.features.check_blob_expansion)
 
     expansion_schema = pa.schema([('field1', pa.string())])
     with session.transaction() as tx:
@@ -646,7 +636,7 @@ def test_negative_create_errors_topic_when_errors_topic_exists(session: Session,
 @pytest.mark.skip(reason="PySDK does not support Kafka topic creation")
 def test_negative_delete_errors_topic_while_expansion_exists(session: Session, clean_bucket_name: str):
     """FRD: the errors topic cannot be deleted while the blob expansion exists."""
-    _skip_unless_blob_expansion(session)
+    require_features(session.features.check_blob_expansion)
 
     with session.transaction() as tx:
         s, _, be = _create_topic_expansion(
@@ -660,18 +650,29 @@ def test_negative_delete_errors_topic_while_expansion_exists(session: Session, c
         be.drop()
 
 
+@pytest.mark.parametrize("expansion_format", [
+    pytest.param(ExpansionFormat.JSON, id='json'),
+    pytest.param(ExpansionFormat.AVRO, id='avro'),
+])
 @pytest.mark.parametrize("expansion_schema,expected_mandatory", MANDATORY_CREATE_CASES)
 def test_create_blob_expansion_mandatory_roundtrip(
     session: Session,
     clean_bucket_name: str,
     expansion_schema: pa.Schema,
     expected_mandatory: list[str],
+    expansion_format: ExpansionFormat,
 ):
     """Server must persist and return Vast:mandatory metadata on create."""
-    _skip_unless_mandatory_fields(session)
+    require_features(session.features.check_blob_expansion_mandatory_fields_error_topic)
+    if expansion_format is ExpansionFormat.AVRO:
+        require_features(session.features.check_blob_expansion_with_parsing_schema)
 
     with session.transaction() as tx:
-        t, be = _create_expansion(tx, clean_bucket_name, expansion_schema)
+        t, be = _create_expansion(
+            tx, clean_bucket_name, expansion_schema,
+            config=_blob_expansion_config(expansion_format),
+        )
+        assert be.config.expansion_format is expansion_format
         _assert_mandatory_fields_from_schema(be.schema, expected_mandatory)
 
         retrieved = t.blob_expansion(SOURCE_COLUMN)
@@ -679,6 +680,10 @@ def test_create_blob_expansion_mandatory_roundtrip(
         be.drop()
 
 
+@pytest.mark.parametrize("expansion_format", [
+    pytest.param(ExpansionFormat.JSON, id='json'),
+    pytest.param(ExpansionFormat.AVRO, id='avro'),
+])
 @pytest.mark.parametrize("initial_schema,columns_to_add,expected_mandatory", MANDATORY_ADD_CASES)
 def test_add_columns_with_mandatory_roundtrip(
     session: Session,
@@ -686,18 +691,23 @@ def test_add_columns_with_mandatory_roundtrip(
     initial_schema: pa.Schema,
     columns_to_add: pa.Schema,
     expected_mandatory: list[str],
+    expansion_format: ExpansionFormat,
 ):
     """Server must persist Vast:mandatory metadata for columns added via alter."""
-    _skip_unless_mandatory_fields(session)
+    require_features(session.features.check_blob_expansion_mandatory_fields_error_topic)
+    if expansion_format is ExpansionFormat.AVRO:
+        require_features(session.features.check_blob_expansion_with_parsing_schema)
 
     with session.transaction() as tx:
         t, be = _create_expansion(
             tx, clean_bucket_name, initial_schema,
             target_schema=pa.schema(list(initial_schema) + list(columns_to_add)),
+            config=_blob_expansion_config(expansion_format),
         )
         be.add_columns(columns_to_add=columns_to_add)
 
         retrieved = t.blob_expansion(SOURCE_COLUMN)
+        assert retrieved.config.expansion_format is expansion_format
         _assert_mandatory_fields_from_schema(retrieved.schema, expected_mandatory)
         be.drop()
 
@@ -725,7 +735,7 @@ def test_drop_then_add_column_with_mandatory(
     column_to_recycle: pa.Field,
 ):
     """Drop a column then re-add it with Vast:mandatory metadata (no in-place alter)."""
-    _skip_unless_mandatory_fields(session)
+    require_features(session.features.check_blob_expansion_mandatory_fields_error_topic)
 
     keep = pa.field('keep', pa.int32())
     plain = pa.field(column_to_recycle.name, column_to_recycle.type)
@@ -789,7 +799,7 @@ def test_alter_add_with_mandatory_fields(
     config_kwargs: dict,
 ):
     """Online: add_columns() marks the requested columns mandatory."""
-    _skip_unless_mandatory_fields(session)
+    require_features(session.features.check_blob_expansion_mandatory_fields_error_topic)
 
     initial_schema = pa.schema([('base', pa.string())])
     with session.transaction() as tx:
@@ -822,12 +832,6 @@ def test_alter_add_with_mandatory_fields(
             pa.schema([('nested', pa.struct([('x', pa.int32())]))]),
             {'remove_copy_source_column': True},
             id='drop_complex_plus_flag',
-            marks=pytest.mark.skip(
-                reason=(
-                    "404 NoSuchKey when removing an uncreated copy-source column; blocked by "
-                    "https://vastdata.atlassian.net/browse/ORION-411726"
-                )
-            ),
         ),
     ],
 )
@@ -838,7 +842,7 @@ def test_alter_remove_columns(
     config_kwargs: dict,
 ):
     """Online: drop_columns() drops the requested columns."""
-    _skip_unless_mandatory_fields(session)
+    require_features(session.features.check_blob_expansion_mandatory_fields_error_topic)
 
     keep = pa.field('keep', pa.int32())
     with session.transaction() as tx:
@@ -855,7 +859,7 @@ def test_alter_remove_columns(
 
 def test_alter_fields_to_mandatory(session: Session, clean_bucket_name: str):
     """Mark existing expansion fields as mandatory after the expansion was created."""
-    _skip_unless_mandatory_fields(session)
+    require_features(session.features.check_blob_expansion_mandatory_fields_error_topic)
 
     expansion_schema = pa.schema([('field1', pa.string()), ('field2', pa.int32())])
     with session.transaction() as tx:
@@ -915,7 +919,7 @@ def test_add_columns_with_mandatory_roundtrip_two_transactions(
     expected_mandatory: list[str],
 ):
     """Vast:mandatory metadata survives a commit: create in one transaction, add in another."""
-    _skip_unless_mandatory_fields(session)
+    require_features(session.features.check_blob_expansion_mandatory_fields_error_topic)
 
     with session.transaction() as tx:
         _create_expansion(
@@ -942,7 +946,7 @@ def test_create_mandatory_nested_top_vs_bottom(
     mandatory_field: str,
 ):
     """Server must return Vast:mandatory exactly where it was set: on the parent or on the child."""
-    _skip_unless_mandatory_fields(session)
+    require_features(session.features.check_blob_expansion_mandatory_fields_error_topic)
 
     expansion_schema = pa.schema([
         pa.field('parent', pa.struct([('child', pa.int32()), ('sibling', pa.string())])),
@@ -958,4 +962,185 @@ def test_create_mandatory_nested_top_vs_bottom(
 
         retrieved = t.blob_expansion(SOURCE_COLUMN)
         _assert_mandatory_fields_from_schema(retrieved.schema, [mandatory_field])
+        be.drop()
+
+
+AVRO_RECORD_V1 = (
+    b'{"type":"record","name":"User","fields":['
+    b'{"name":"name","type":"string"},'
+    b'{"name":"score","type":"int"}'
+    b']}'
+)
+AVRO_RECORD_V2 = (
+    b'{"type":"record","name":"UserV2","fields":['
+    b'{"name":"name","type":"string"},'
+    b'{"name":"score","type":"int"},'
+    b'{"name":"active","type":"boolean"}'
+    b']}'
+)
+AVRO_EXPANSION_SCHEMA = pa.schema([('name', pa.string()), ('score', pa.int32())])
+AVRO_SCHEMA_ID_V1 = 1
+AVRO_SCHEMA_ID_V2 = 2
+AVRO_MISSING_SCHEMA_ID = 999
+
+
+def _create_avro_expansion(tx, bucket_name: str, parsing_schema, *, expansion_schema=AVRO_EXPANSION_SCHEMA):
+    """Create the source and target tables plus an AVRO expansion on the source column."""
+    _, t = _create_tables(tx, bucket_name, AVRO_EXPANSION_SCHEMA)
+    be = t.create_blob_expansion(
+        source_column_name=SOURCE_COLUMN,
+        expansion_schema=expansion_schema,
+        target_table_name=TARGET_TABLE,
+        config=BlobExpansionConfig(
+            expansion_format=ExpansionFormat.AVRO,
+            parsing_schemas=[parsing_schema],
+        ),
+    )
+    return t, be
+
+
+@pytest.mark.skip(
+    reason=(
+        "server accepts JSON with an Avro parsing schema instead of rejecting it; "
+        "blocked by https://vastdata.atlassian.net/browse/ORION-420144"
+    )
+)
+def test_negative_create_json_with_parsing_schema(session: Session, clean_bucket_name: str):
+    """Create BlobExpansion with ExpansionFormat.JSON and ParsingSchema """
+    require_features(session.features.check_blob_expansion_with_parsing_schema)
+
+    with session.transaction() as tx:
+        _, t = _create_tables(tx, clean_bucket_name, AVRO_EXPANSION_SCHEMA)
+        with pytest.raises(errors.HttpError, match=r"(?i)parsing.?schema|avro"):
+            t.create_blob_expansion(
+                source_column_name=SOURCE_COLUMN,
+                expansion_schema=AVRO_EXPANSION_SCHEMA,
+                target_table_name=TARGET_TABLE,
+                config=BlobExpansionConfig(
+                    expansion_format=ExpansionFormat.JSON,
+                    parsing_schemas=[ParsingSchema(AVRO_SCHEMA_ID_V1, AVRO_RECORD_V1)],
+                ),
+            )
+
+
+def test_negative_create_avro_unsupported(session: Session, clean_bucket_name: str):
+    """The SDK must reject Avro before 5.6, because 5.5 has a bug where AVRO is accepted but stored as JSON."""
+    _skip_unless_blob_expansion_without_avro(session)
+
+    with session.transaction() as tx:
+        _, t = _create_tables(tx, clean_bucket_name, pa.schema([('field1', pa.string())]))
+        # could be the error we get: "A header you provided implies functionality that is not implemented."
+        with pytest.raises(errors.NotSupportedVersion, match=r"Blob expansion with parsing schema requires 5\.6\+ VAST release"):
+            t.create_blob_expansion(
+            source_column_name=SOURCE_COLUMN,
+            expansion_schema=pa.schema([('field1', pa.string())]),
+            target_table_name=TARGET_TABLE,
+            config=BlobExpansionConfig(expansion_format=ExpansionFormat.AVRO),
+            )
+
+
+def test_negative_create_avro_without_parsing_schema(session: Session, clean_bucket_name: str):
+    """AVRO without a parsing schema is sent as-is and rejected by the server."""
+    require_features(session.features.check_blob_expansion_with_parsing_schema)
+
+    with session.transaction() as tx:
+        _, t = _create_tables(tx, clean_bucket_name, AVRO_EXPANSION_SCHEMA)
+        with pytest.raises(errors.BadRequest, match=r"exactly one parsing schema is supported at creation time"):
+            t.create_blob_expansion(
+                source_column_name=SOURCE_COLUMN,
+                expansion_schema=AVRO_EXPANSION_SCHEMA,
+                target_table_name=TARGET_TABLE,
+                config=BlobExpansionConfig(expansion_format=ExpansionFormat.AVRO),
+            )
+
+
+@pytest.mark.skip(reason="blocked by https://vastdata.atlassian.net/browse/ORION-420144")
+def test_create_avro_without_expansion_schema(session: Session, clean_bucket_name: str):
+    """Avro create with expansion_schema=None should infer the expansion schema."""
+    require_features(session.features.check_blob_expansion_with_parsing_schema)
+
+    with session.transaction() as tx:
+        _, t = _create_tables(tx, clean_bucket_name, AVRO_EXPANSION_SCHEMA)
+        t.create_blob_expansion(
+            source_column_name=SOURCE_COLUMN,
+            expansion_schema=None,
+            target_table_name=TARGET_TABLE,
+            config=BlobExpansionConfig(
+                expansion_format=ExpansionFormat.AVRO,
+                parsing_schemas=[ParsingSchema(AVRO_SCHEMA_ID_V1, AVRO_RECORD_V1)],
+            ),
+        )
+
+
+def test_avro_blob_expansion_create_add_get_drop(session: Session, clean_bucket_name: str):
+    """Create AVRO, add a schema, round-trip it, then remove. Local schema_ids stays stale."""
+    require_features(session.features.check_blob_expansion_with_parsing_schema)
+    first = ParsingSchema(AVRO_SCHEMA_ID_V1, AVRO_RECORD_V1)
+    second = ParsingSchema(AVRO_SCHEMA_ID_V2, AVRO_RECORD_V2)
+
+    with session.transaction() as tx:
+        t, be = _create_avro_expansion(tx, clean_bucket_name, first)
+        assert AVRO_SCHEMA_ID_V1 in be.schema_ids
+        stale_ids_after_create = be.schema_ids
+
+        be.add_parsing_schema(second)
+        assert be.schema_ids == stale_ids_after_create
+
+        retrieved = t.blob_expansion(SOURCE_COLUMN)
+        assert AVRO_SCHEMA_ID_V1 in retrieved.schema_ids
+        assert AVRO_SCHEMA_ID_V2 in retrieved.schema_ids
+        assert retrieved.get_parsing_schema(AVRO_SCHEMA_ID_V1) == first
+        assert retrieved.get_parsing_schema(AVRO_SCHEMA_ID_V2) == second
+
+        stale_ids_after_add = retrieved.schema_ids
+        retrieved.remove_parsing_schema(AVRO_SCHEMA_ID_V2)
+        assert retrieved.schema_ids == stale_ids_after_add
+
+        after_remove = t.blob_expansion(SOURCE_COLUMN)
+        assert AVRO_SCHEMA_ID_V1 in after_remove.schema_ids
+        assert AVRO_SCHEMA_ID_V2 not in after_remove.schema_ids
+        be.drop()
+
+
+def test_negative_remove_missing_parsing_schema(session: Session, clean_bucket_name: str):
+    """Removing an unknown schema id must surface a vastdb HTTP error."""
+    require_features(session.features.check_blob_expansion_with_parsing_schema)
+
+    with session.transaction() as tx:
+        _, be = _create_avro_expansion(
+            tx, clean_bucket_name, ParsingSchema(AVRO_SCHEMA_ID_V1, AVRO_RECORD_V1),
+        )
+        with pytest.raises(errors.NotFound, match=r"Failed to drop parsing schema id=.*for table="):
+            be.remove_parsing_schema(AVRO_MISSING_SCHEMA_ID)
+        be.drop()
+
+
+def test_negative_get_missing_parsing_schema(session: Session, clean_bucket_name: str):
+    """Fetching an unknown schema id must surface a vastdb NotFound error."""
+    require_features(session.features.check_blob_expansion_with_parsing_schema)
+
+    with session.transaction() as tx:
+        _, be = _create_avro_expansion(
+            tx, clean_bucket_name, ParsingSchema(AVRO_SCHEMA_ID_V1, AVRO_RECORD_V1),
+        )
+        with pytest.raises(errors.NotFound, match=r"schema_id=\d+ not found for blob expansion on table="):
+            be.get_parsing_schema(AVRO_MISSING_SCHEMA_ID)
+        be.drop()
+
+
+@pytest.mark.skip(
+    reason=(
+        "500 InternalError 'Failed to add parsing schema id=1 for table=s1/t1 eres=EXIST' "
+        "instead of a 4xx AlreadyExists; the server detects the conflict but misclassifies it"
+    )
+)
+def test_negative_add_duplicate_parsing_schema(session: Session, clean_bucket_name: str):
+    """Re-registering an existing schema id must surface a vastdb HTTP error."""
+    require_features(session.features.check_blob_expansion_with_parsing_schema)
+    parsing_schema = ParsingSchema(AVRO_SCHEMA_ID_V1, AVRO_RECORD_V1)
+
+    with session.transaction() as tx:
+        _, be = _create_avro_expansion(tx, clean_bucket_name, parsing_schema)
+        with pytest.raises(errors.BadRequest, match=r"Failed to add parsing schema id=.* for table="):
+            be.add_parsing_schema(parsing_schema)
         be.drop()

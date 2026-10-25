@@ -139,6 +139,7 @@ from vastdb.vast_protobuf.tabular.pysdk_blob_expansion_pb2 import (  # type: ign
     AlterBlobExpansionRequest,
     CreateBlobExpansionRequest,
     GetBlobExpansionResponse,
+    GetBlobExpansionSchemaResponse,
 )
 
 from . import errors, util
@@ -146,7 +147,7 @@ from .config import BackoffConfig
 from .partitioning import PartitionKey, PartitionSpec
 
 if TYPE_CHECKING:
-    from .table import BlobExpansionConfig
+    from .table import BlobExpansionConfig, ParsingSchema
     from .table_metadata import TableRef
 
 UINT64_MAX = 18446744073709551615
@@ -1058,11 +1059,27 @@ def _mark_blob_expansion_mandatory_fields(
     return marked_schema
 
 
+@dataclass(frozen=True)
+class BlobExpansionGetResult:
+    """Parsed GetBlobExpansion response."""
+
+    source_column_name: str
+    target_table_name: str
+    expansion_format: str
+    expansion_schema: pa.Schema
+    copy_source_column: bool
+    add_missing_values_output: bool
+    add_excessive_values_output: bool
+    create_errors_topic: bool
+    errors_topic_name: str | None
+    schema_ids: tuple[int, ...]
+
+
 def build_create_blob_expansion_request(
-    expansion_schema: pa.Schema,
-    target_table_name: Optional[str] = None,
-    config: Optional["BlobExpansionConfig"] = None,
-    target_table_schema: Optional[str] = None,
+    expansion_schema: pa.Schema | None,
+    target_table_name: str | None = None,
+    config: "BlobExpansionConfig | None" = None,
+    target_table_schema: str | None = None,
 ) -> bytes:
     """Build a CreateBlobExpansionRequest protobuf message.
 
@@ -1092,7 +1109,8 @@ def build_create_blob_expansion_request(
     if target_table_name:
         req.target_table_name = target_table_name
     req.expansion_format = config.expansion_format.value
-    req.arrow_schema = bytes(expansion_schema.serialize())
+    if expansion_schema is not None:
+        req.arrow_schema = expansion_schema.serialize().to_pybytes()
     req.copy_source_column = config.copy_source_column
     req.flatten_path = config.flatten_path
     req.flatten_delimiter = config.flatten_delimiter
@@ -1103,11 +1121,13 @@ def build_create_blob_expansion_request(
     req.create_errors_topic = config.create_errors_topic
     if config.errors_topic_retention_ms is not None:
         req.errors_topic_retention_ms = config.errors_topic_retention_ms
+    for parsing_schema in config.parsing_schemas:
+        req.parsing_schemas.add(schema_id=parsing_schema.schema_id, schema=parsing_schema.schema)
     return req.SerializeToString()
 
 
 def build_alter_blob_expansion_request(
-    expansion_schema: Optional[pa.Schema] = None,
+    expansion_schema: pa.Schema | None = None,
     remove: bool = False,
     add_copy_source_column: bool = False,
     remove_copy_source_column: bool = False,
@@ -1115,6 +1135,8 @@ def build_alter_blob_expansion_request(
     remove_missing_values_output: bool = False,
     add_excessive_values_output: bool = False,
     remove_excessive_values_output: bool = False,
+    add_parsing_schema: "ParsingSchema | None" = None,
+    remove_parsing_schema_id: int | None = None,
 ) -> bytes:
     """Build an AlterBlobExpansionRequest protobuf message.
 
@@ -1136,6 +1158,11 @@ def build_alter_blob_expansion_request(
         If True, add the excessive values output column.
     remove_excessive_values_output : bool
         If True, remove the excessive values output column.
+    add_parsing_schema : ParsingSchema, optional
+        Avro parsing schema to register.
+    remove_parsing_schema_id : int, optional
+        Id of the Avro parsing schema to unregister. Forces ``remove`` to True,
+        which the server requires for any removal operation.
 
     Returns
     -------
@@ -1144,7 +1171,7 @@ def build_alter_blob_expansion_request(
     """
     req = AlterBlobExpansionRequest()
     if expansion_schema is not None:
-        req.arrow_schema = bytes(expansion_schema.serialize())
+        req.arrow_schema = expansion_schema.serialize().to_pybytes()
     req.remove = remove
     if add_copy_source_column:
         req.add_copy_source_column = add_copy_source_column
@@ -1158,6 +1185,13 @@ def build_alter_blob_expansion_request(
         req.add_excessive_values_output = add_excessive_values_output
     if remove_excessive_values_output:
         req.remove_excessive_values_output = remove_excessive_values_output
+    if add_parsing_schema is not None:
+        op = req.operations.add()
+        op.add_parsing_schema.schema_id = add_parsing_schema.schema_id
+        op.add_parsing_schema.schema = add_parsing_schema.schema
+    if remove_parsing_schema_id is not None:
+        req.remove = True
+        req.operations.add().drop_parsing_schema.schema_id = remove_parsing_schema_id
     return req.SerializeToString()
 
 
@@ -2429,11 +2463,11 @@ class VastdbApi:
     def create_blob_expansion(
         self,
         table_ref: "TableRef",
-        expansion_schema: pa.Schema,
+        expansion_schema: pa.Schema | None,
         target_table_name: str,
         source_column_name: str = "value",
-        config: Optional["BlobExpansionConfig"] = None,
-        target_table_schema: Optional[str] = None,
+        config: "BlobExpansionConfig | None" = None,
+        target_table_schema: str | None = None,
         txid: int = 0,
         client_tags: list = [],
         expected_retvals: list = [],
@@ -2491,7 +2525,7 @@ class VastdbApi:
         self,
         table_ref: "TableRef",
         source_column_name: str = "value",
-        expansion_schema: Optional[pa.Schema] = None,
+        expansion_schema: pa.Schema | None = None,
         remove: bool = False,
         add_copy_source_column: bool = False,
         remove_copy_source_column: bool = False,
@@ -2499,6 +2533,8 @@ class VastdbApi:
         remove_missing_values_output: bool = False,
         add_excessive_values_output: bool = False,
         remove_excessive_values_output: bool = False,
+        add_parsing_schema: "ParsingSchema | None" = None,
+        remove_parsing_schema_id: int | None = None,
         txid: int = 0,
         client_tags: list = [],
         expected_retvals: list = [],
@@ -2542,7 +2578,9 @@ class VastdbApi:
             add_missing_values_output=add_missing_values_output,
             remove_missing_values_output=remove_missing_values_output,
             add_excessive_values_output=add_excessive_values_output,
-            remove_excessive_values_output=remove_excessive_values_output)
+            remove_excessive_values_output=remove_excessive_values_output,
+            add_parsing_schema=add_parsing_schema,
+            remove_parsing_schema_id=remove_parsing_schema_id)
 
         headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
         headers['Content-Length'] = str(len(alter_blob_expansion_req))
@@ -2558,7 +2596,7 @@ class VastdbApi:
         self,
         table_ref: "TableRef",
         source_column_name: str = "value",
-        columns_to_add: Optional[pa.Schema] = None,
+        columns_to_add: pa.Schema | None = None,
         add_copy_source_column: bool = False,
         add_missing_values_output: bool = False,
         add_excessive_values_output: bool = False,
@@ -2599,7 +2637,7 @@ class VastdbApi:
         self,
         table_ref: "TableRef",
         source_column_name: str = "value",
-        columns_to_remove: Optional[pa.Schema] = None,
+        columns_to_remove: pa.Schema | None = None,
         remove_copy_source_column: bool = False,
         remove_missing_values_output: bool = False,
         remove_excessive_values_output: bool = False,
@@ -2671,7 +2709,7 @@ class VastdbApi:
         txid: int = 0,
         client_tags: list = [],
         expected_retvals: list = [],
-    ) -> tuple[str, str, str, pa.Schema, bool, bool, bool, Optional[str]]:
+    ) -> BlobExpansionGetResult:
         """
         Show a blob expansion by showing the target table
         GET /bucket/schema/table?blob-expansion HTTP/1.1
@@ -2685,14 +2723,17 @@ class VastdbApi:
 
         Returns
         -------
-        tuple
-            (source_column_name, target_table_name, expansion_format, schema, copy_source_column,
-            add_missing_values_output, add_excessive_values_output, errors_topic_name)
-            where schema is the expansion Arrow schema as returned by the server
+        BlobExpansionGetResult
+            Parsed expansion metadata. GET reports the errors topic by name, so
+            ``create_errors_topic`` is derived from whether ``errors_topic_name``
+            is set. ``schema_ids`` is empty when no parsing schemas are registered.
+
         Raises
         ------
         errors.MissingBlobExpansion
-            If the blob expansion does not exist or the response is invalid.
+            If the blob expansion does not exist.
+        errors.ApiResponseError
+            If the response is missing the source column, target table, expansion format or expansion schema.
         """
         headers = self._fill_common_headers(txid=txid, client_tags=client_tags)
         url_params = {'source-column-name': source_column_name}
@@ -2708,25 +2749,74 @@ class VastdbApi:
         rsp = GetBlobExpansionResponse()
         rsp.ParseFromString(res.content)
 
-        if rsp.arrow_schema:
-            expansion_schema = pa.ipc.read_schema(pa.py_buffer(rsp.arrow_schema))
-        else:
-            expansion_schema = pa.schema([])
+        if not rsp.arrow_schema:
+            raise errors.ApiResponseError("GetBlobExpansion response is missing the expansion schema")
+        expansion_schema = pa.ipc.read_schema(pa.py_buffer(rsp.arrow_schema))
 
         errors_topic_name = (
             rsp.errors_topic_name if rsp.HasField('errors_topic_name') else None)
+        schema_ids = tuple(rsp.schema_ids)
 
-        result = (rsp.source_column_name, rsp.target_table_name, rsp.expansion_format, expansion_schema,
-                  rsp.copy_source_column, rsp.add_missing_values_output, rsp.add_excessive_values_output, errors_topic_name)
+        result = BlobExpansionGetResult(
+            source_column_name=rsp.source_column_name,
+            target_table_name=rsp.target_table_name,
+            expansion_format=rsp.expansion_format,
+            expansion_schema=expansion_schema,
+            copy_source_column=rsp.copy_source_column,
+            add_missing_values_output=rsp.add_missing_values_output,
+            add_excessive_values_output=rsp.add_excessive_values_output,
+            create_errors_topic=errors_topic_name is not None,
+            errors_topic_name=errors_topic_name,
+            schema_ids=schema_ids,
+        )
 
-        if not result:
-            raise errors.MissingBlobExpansion(table_ref, source_column_name)
-
-        for item in result[:-1]:
-            if item is None:
-                raise errors.MissingBlobExpansion(table_ref, source_column_name)
+        required = (
+            result.source_column_name,
+            result.target_table_name,
+            result.expansion_format,
+            result.expansion_schema,
+        )
+        if any(item is None for item in required):
+            raise errors.ApiResponseError(
+                "GetBlobExpansion response is missing source column, target table, or expansion format")
 
         return result
+
+    def get_parsing_schema(
+        self,
+        table_ref: "TableRef",
+        source_column_name: str,
+        schema_id: int,
+        txid: int,
+    ) -> "ParsingSchema":
+        """
+        Fetch one registered parsing schema by id.
+        GET /bucket/schema/table?blob-expansion-schema&source-column-name=...&schema-id=... HTTP/1.1
+
+        GetBlobExpansion only reports the registered ids, so the schema content
+        needs this separate request. Used by `BlobExpansion.get_parsing_schema`.
+        """
+        from .table import ParsingSchema
+
+        headers = self._fill_common_headers(txid=txid)
+        url_params = {
+            'source-column-name': source_column_name,
+            'schema-id': str(schema_id),
+        }
+        res = self._request(
+            method="GET",
+            url=self._url(
+                table_ref.bucket,
+                table_ref.schema,
+                table_ref.table,
+                command="blob-expansion-schema",
+                url_params=url_params,
+            ),
+            headers=headers)
+
+        rsp = GetBlobExpansionSchemaResponse()
+        rsp.ParseFromString(res.content)
+        return ParsingSchema(schema_id, rsp.schema_content)
 
     def list_projections(self, bucket: str, schema: str, table: str, txid: int = 0, client_tags=[], max_keys: Optional[int] = None,
                          next_key: int = 0, name_prefix: str = "", exact_match: bool = False,

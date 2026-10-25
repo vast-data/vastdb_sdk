@@ -17,12 +17,12 @@ from pyiceberg.transforms import (
     YearTransform,
 )
 
-from vastdb import errors
 from vastdb._by_partition_insert import ByPartitionBuffer, ByPartitionBufferedInserter
 from vastdb.config import BufferedInsertConfig
 from vastdb.partitioning import PartitionKey, PartitionSpec
 from vastdb.session import Session
 from vastdb.table_metadata import TableRef
+from vastdb.tests.util import require_features
 
 _ARROW_SCHEMA = pa.schema(
     [
@@ -721,10 +721,7 @@ UserCommand = AddCommand | IdleCommand
     ),
 )
 def test_partitioned_insert(session: Session, clean_bucket_name: str, commands: list[UserCommand]):
-    try:
-        session.features.check_partitioned()
-    except errors.NotSupportedVersion:
-        pytest.skip("Test requires hydra to run")
+    require_features(session.features.check_partitioned)
 
     ref = _create_partitioned_table(session, clean_bucket_name)
     executor = ThreadPoolExecutor(max_workers=3)
@@ -780,10 +777,7 @@ def _insert_batches(inserter: ByPartitionBufferedInserter, commands: list[UserCo
 
 
 def test_partitioned_insert_explicit_tx(session: Session, clean_bucket_name: str):
-    try:
-        session.features.check_partitioned()
-    except errors.NotSupportedVersion:
-        pytest.skip("Test requires hydra to run")
+    require_features(session.features.check_partitioned)
 
     ref = _create_partitioned_table(session, clean_bucket_name)
     executor = ThreadPoolExecutor(max_workers=3)

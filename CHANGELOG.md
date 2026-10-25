@@ -4,14 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased]
+## [2.4.0] (2026-10-11)
+
+### Added
+- Blob expansion
+  - now supports Avro expansion Format.
+  - alter supports adding and removing parsing schemas.
+
 ## [2.3.0] (2026-05-11)
 [2.3.0]: https://github.com/vast-data/vastdb_sdk/compare/v2.1.0...v2.3.0
 
 ### Added
-- end-user impersonation for all Tabular RPCs via `Session` / `connect`
-- Blob expansion supports mandatory fields and error topics.
-- Vector index secondary indices via `VectorIndexSpec.secondary_indices`
-- Vector index secondary indices sorting score via `TableStats`
+- Blob expansion
+  - supports mandatory fields and error topics.
+- Vector index
+  - secondary indices via `VectorIndexSpec.secondary_indices`
+  - secondary indices sorting score via `TableStats`
 
 ## [2.1.0] (2026-07-27)
 [2.1.0]: https://github.com/vast-data/vastdb_sdk/compare/v2.0.14...v2.1.0

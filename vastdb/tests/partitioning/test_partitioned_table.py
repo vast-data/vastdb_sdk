@@ -22,6 +22,7 @@ from vastdb import _internal, errors, table
 from vastdb.partitioning import PartitionKey, PartitionSpec
 from vastdb.session import Session
 from vastdb.table_metadata import PartitionsMetadata, TableMetadata, TableRef
+from vastdb.tests.util import require_features
 
 _ARROW_SCHEMA = pa.schema(
     [
@@ -134,11 +135,8 @@ def _updated_values_for_field(field: pa.Field, num_rows: int) -> pa.Array | pa.C
 
 @pytest.fixture
 def hydra_session(session: Session) -> Session:
-    try:
-        session.features.check_partitioned()
-        return session
-    except errors.NotSupportedVersion:
-        pytest.skip("Test requires hydra to run")
+    require_features(session.features.check_partitioned)
+    return session
 
 
 @pytest.mark.parametrize("column_name, transform", _TRANSFORMS)

@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from vastdb import errors
 from vastdb.session import Session
+from vastdb.tests.util import require_features
 
 EXAMPLES_DIR = Path(__file__).resolve().parents[2] / "examples"
 EXAMPLE_SCRIPTS = sorted(
@@ -29,16 +29,10 @@ def test_example_script(
     test_bucket_name: str,
 ) -> None:
     if script.name in REQUIRES_PARTITIONED:
-        try:
-            session.features.check_partitioned()
-        except errors.NotSupportedVersion:
-            pytest.skip("Partitioned tables require Hydra (VAST 5.5+)")
+        require_features(session.features.check_partitioned)
 
     if script.name in REQUIRES_VECTOR:
-        try:
-            session.features.check_vector()
-        except errors.NotSupportedVersion:
-            pytest.skip("Vector tables require VAST 5.5+")
+        require_features(session.features.check_vector)
         try:
             import adbc_driver_vastdb  # noqa: F401
         except ImportError:
@@ -46,10 +40,7 @@ def test_example_script(
                 pytest.skip("ADBC driver not available for vector_search example")
 
     if script.name in REQUIRES_BLOB_EXPANSION:
-        try:
-            session.features.check_blob_expansion()
-        except errors.NotSupportedVersion:
-            pytest.skip("Blob expansion requires VAST 5.5+")
+        require_features(session.features.check_blob_expansion)
 
     env = os.environ.copy()
     env["AWS_ACCESS_KEY_ID"] = session_kwargs["access"]

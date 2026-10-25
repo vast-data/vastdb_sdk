@@ -4,6 +4,15 @@ syntax = "proto3";
 
 package vast_protobuf.tabular.pysdk;
 
+
+message ParsingSchema {
+  /// Schema ID — must be a positive integer, unique within the expansion, assigned by user
+  int32 schema_id = 1;
+  /// For example, raw .avsc schema bytes
+  bytes schema = 2;
+}
+
+
 message CreateBlobExpansionRequest {
   // URL: POST /#BUCKET/#SCHEMA/#TABLE?query-data=CreateBlobExpansion HTTP/1.1
 
@@ -27,6 +36,21 @@ message CreateBlobExpansionRequest {
   optional bool create_errors_topic = 10;
   /// Retention for the errors topic in milliseconds (optional; cluster default if unset)
   optional int64 errors_topic_retention_ms = 11;
+  /// A collection of initial parsing schemas (e.g., Avro .avsc) to register
+  repeated ParsingSchema parsing_schemas = 12;
+}
+
+
+/// Remove a previously registered parsing schema by ID.
+message DropParsingSchema {
+  int32 schema_id = 1;
+}
+
+message BlobExpansionAlterOperation {
+  oneof operation {
+    DropParsingSchema drop_parsing_schema = 1;
+    ParsingSchema add_parsing_schema = 2;
+  }
 }
 
 message AlterBlobExpansionRequest {
@@ -42,6 +66,7 @@ message AlterBlobExpansionRequest {
   optional bool remove_missing_values_output = 6;
   optional bool add_excessive_values_output = 7;
   optional bool remove_excessive_values_output = 8;
+  repeated BlobExpansionAlterOperation operations = 9;
 }
 
 message GetBlobExpansionResponse {
@@ -60,4 +85,13 @@ message GetBlobExpansionResponse {
   bool add_excessive_values_output = 7;
   /// Name of the companion errors Kafka topic, if configured
   optional string errors_topic_name = 8;
+  /// collection of parsing schemas ids.
+  repeated int32 schema_ids = 9;
+}
+
+message GetBlobExpansionSchemaResponse {
+  // URL: GET /#BUCKET/#SCHEMA/#TABLE?query-data=GetBlobExpansionSchema HTTP/1.1
+
+  /// Raw schema bytes (.avsc for avro, .proto for protobuf)
+  bytes schema_content = 1;
 }

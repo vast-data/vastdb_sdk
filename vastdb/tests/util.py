@@ -1,6 +1,6 @@
 import logging
 from contextlib import contextmanager
-from typing import Any, Iterator, List, cast
+from typing import Any, Callable, Iterator, List, cast
 
 import numpy as np
 import pandas as pd
@@ -17,11 +17,13 @@ from vastdb.transaction import Transaction
 log = logging.getLogger(__name__)
 
 
-def pytest_skip_if_vector_index_not_supported(session: Session) -> None:
-    try:
-        session.features.check_vector()
-    except errors.NotSupportedVersion:
-        pytest.skip("Vector index is not supported on this vast server version")
+def require_features(*checks: Callable[[], None]) -> None:
+    """Skip the test unless every feature check passes."""
+    for check in checks:
+        try:
+            check()
+        except errors.NotSupportedVersion as exc:
+            pytest.skip(exc.err_msg)
 
 
 def assert_row_ids_ascending_on_first_insertion_to_table(row_ids, expected_num_rows, sorted_table):

@@ -77,6 +77,16 @@ class ExpansionFormat(Enum):
 
     JSON = "json"
     """Parse blob data as JSON."""
+    AVRO = "avro"
+    """Parse blob data as AVRO."""
+
+
+@dataclass(frozen=True)
+class ParsingSchema:
+    """An Avro parsing schema: a user-assigned ID and the raw .avsc bytes."""
+
+    schema_id: int
+    schema: bytes
 
 
 @dataclass
@@ -90,8 +100,9 @@ class BlobExpansionConfig:
     add_missing_values_output: bool = True
     add_excessive_values_output: bool = True
     create_errors_topic: bool = False
-    errors_topic_retention_ms: Optional[int] = None
-    errors_topic_name: Optional[str] = None
+    errors_topic_retention_ms: int | None = None
+    errors_topic_name: str | None = None
+    parsing_schemas: Sequence[ParsingSchema] = ()
 
 
 class _EmptyResultException(Exception):
@@ -414,31 +425,31 @@ class TableInTransaction(ITable):
         self._assert_not_imports_table()
         self._tx._rpc.features.check_blob_expansion()
 
-        source_column, target_table_name, expansion_format_str, expansion_schema, copy_source_column, \
-            add_missing_values_output, add_excessive_values_output, errors_topic_name = \
-            self._tx._rpc.api.get_blob_expansion(
-                self.ref, source_column_name, txid=self._tx.active_txid)
+        got = self._tx._rpc.api.get_blob_expansion(
+            self.ref, source_column_name, txid=self._tx.active_txid)
 
-        # Convert string format to enum
         try:
-            expansion_format = ExpansionFormat(expansion_format_str)
+            expansion_format = ExpansionFormat(got.expansion_format)
         except ValueError:
-            expansion_format = ExpansionFormat.JSON  # Default fallback
+            raise errors.ApiResponseError(f"Got unknown expansion format {got.expansion_format!r}, You might need to update the sdk to support it")
 
         config = BlobExpansionConfig(
             expansion_format=expansion_format,
-            copy_source_column=copy_source_column,
-            add_missing_values_output=add_missing_values_output,
-            add_excessive_values_output=add_excessive_values_output,
-            errors_topic_name=errors_topic_name)
+            copy_source_column=got.copy_source_column,
+            add_missing_values_output=got.add_missing_values_output,
+            add_excessive_values_output=got.add_excessive_values_output,
+            create_errors_topic=got.create_errors_topic,
+            errors_topic_retention_ms=None,
+            errors_topic_name=got.errors_topic_name)
 
         return BlobExpansion(
-            source_column_name=source_column,
-            target_table_name=target_table_name,
-            schema=expansion_schema,
+            source_column_name=got.source_column_name,
+            target_table_name=got.target_table_name,
+            schema=got.expansion_schema,
             config=config,
-            _table_metadata=self._metadata,
-            _tx=self._tx)
+            table_metadata=self._metadata,
+            tx=self._tx,
+            schema_ids=got.schema_ids)
 
     def import_files(self,
                      files_to_import: Iterable[str],
@@ -1365,11 +1376,11 @@ class Table(TableInTransaction):
 
     def create_blob_expansion(
         self,
-        expansion_schema: pa.Schema,
+        expansion_schema: pa.Schema | None,
         target_table_name: str,
         source_column_name: str = "value",
-        config: Optional[BlobExpansionConfig] = None,
-        target_table_schema: Optional[str] = None,
+        config: BlobExpansionConfig | None = None,
+        target_table_schema: str | None = None,
         mandatory_fields: set[str] | None = None,
     ) -> "BlobExpansion":
         """Create a blob expansion for the given source column.
@@ -1388,6 +1399,9 @@ class Table(TableInTransaction):
 
         if config is None:
             config = BlobExpansionConfig()
+
+        if config.expansion_format is ExpansionFormat.AVRO:
+            self._tx._rpc.features.check_blob_expansion_with_parsing_schema()
 
         self._tx._rpc.api.create_blob_expansion(
             self.ref,
@@ -1477,7 +1491,7 @@ def _parse_projection_info(projection_info, table_metadata: "TableMetadata", tx:
                       tx=tx)
 
 
-def _schema_has_mandatory_fields(schema: Optional[pa.Schema]) -> bool:
+def _schema_has_mandatory_fields(schema: pa.Schema | None) -> bool:
     """Return True if any field (including nested) has VAST:mandatory=true."""
     if schema is None:
         return False
@@ -1507,16 +1521,18 @@ class BlobExpansion:
         target_table_name: str,
         schema: pa.Schema,
         config: BlobExpansionConfig,
-        _table_metadata: TableMetadata,
-        _tx: "Transaction",
+        table_metadata: TableMetadata,
+        tx: "Transaction",
+        schema_ids: tuple[int, ...] = (),
     ) -> None:
         """VAST blob expansion."""
         self._source_column_name = source_column_name
         self._target_table_name = target_table_name
         self.schema = schema
         self.config = config
-        self._table_metadata = _table_metadata
-        self._tx = _tx
+        self._table_metadata = table_metadata
+        self._tx = tx
+        self._schema_ids = schema_ids
 
     @property
     def source_column_name(self) -> str:
@@ -1538,9 +1554,45 @@ class BlobExpansion:
         """Transaction used for self."""
         return self._tx
 
+    @property
+    def schema_ids(self) -> tuple[int, ...]:
+        """Tuple of Parsing-schema ids."""
+        return self._schema_ids
+
+    def add_parsing_schema(self, parsing_schema: ParsingSchema) -> None:
+        """Register an additional Avro parsing schema. Does not update ``schema_ids``."""
+        self._tx._rpc.features.check_blob_expansion_with_parsing_schema()
+        self._tx._rpc.api.alter_blob_expansion(
+            self._table_metadata.ref,
+            self.source_column_name,
+            add_parsing_schema=parsing_schema,
+            txid=self._tx.active_txid)
+        log.info("Added parsing schema %s to blob expansion: %s",
+                 parsing_schema.schema_id, self.source_column_name)
+
+    def remove_parsing_schema(self, schema_id: int) -> None:
+        """Remove a registered Avro parsing schema by id. Does not update ``schema_ids``."""
+        self._tx._rpc.features.check_blob_expansion_with_parsing_schema()
+        self._tx._rpc.api.alter_blob_expansion(
+            self._table_metadata.ref,
+            self.source_column_name,
+            remove_parsing_schema_id=schema_id,
+            txid=self._tx.active_txid)
+        log.info("Removed parsing schema %s from blob expansion: %s",
+                 schema_id, self.source_column_name)
+
+    def get_parsing_schema(self, schema_id: int) -> ParsingSchema:
+        """Fetch a registered parsing schema by id."""
+        self._tx._rpc.features.check_blob_expansion_with_parsing_schema()
+        return self._tx._rpc.api.get_parsing_schema(
+            self._table_metadata.ref,
+            self.source_column_name,
+            schema_id,
+            txid=self._tx.active_txid)
+
     def add_columns(
         self,
-        columns_to_add: Optional[pa.Schema] = None,
+        columns_to_add: pa.Schema | None = None,
         add_copy_source_column: bool = False,
         add_missing_values_output: bool = False,
         add_excessive_values_output: bool = False,
@@ -1570,7 +1622,7 @@ class BlobExpansion:
 
     def drop_columns(
         self,
-        columns_to_remove: Optional[pa.Schema] = None,
+        columns_to_remove: pa.Schema | None = None,
         remove_copy_source_column: bool = False,
         remove_missing_values_output: bool = False,
         remove_excessive_values_output: bool = False,
@@ -1619,6 +1671,7 @@ def _combine_chunks(col):
 
 
 __all__ = [
+    "ParsingSchema",
     "BlobExpansion",
     "BlobExpansionConfig",
     "ExpansionFormat",

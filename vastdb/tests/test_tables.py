@@ -24,19 +24,15 @@ from vastdb.session import Session
 from vastdb.table import INTERNAL_ROW_ID, MAX_COLUMN_IN_BATCH, QueryConfig
 
 from ..table_metadata import TableMetadata, TableRef
-from .util import assert_row_ids_ascending_on_first_insertion_to_table, prepare_data
+from .util import assert_row_ids_ascending_on_first_insertion_to_table, prepare_data, require_features
 
 log = logging.getLogger(__name__)
 
 
 @pytest.fixture
 def elysium_session(session: Session) -> Session:
-    with session.transaction() as tx:
-        try:
-            tx._rpc.features.check_elysium()
-            return session
-        except errors.NotSupportedVersion:
-            pytest.skip("Skipped because this test requires version 5.3.5 with Elysium")
+    require_features(session.features.check_elysium)
+    return session
 
 
 def test_tables(session: Session, clean_bucket_name):

@@ -6,7 +6,7 @@ from . import session
 from ._internal import DefaultQuantization, VectorIndexSpec
 from .config import BackoffConfig, BufferedInsertConfig, ImportConfig, QueryConfig
 from .partitioning import PartitionKey, PartitionSpec
-from .table import BlobExpansionConfig, ExpansionFormat
+from .table import BlobExpansionConfig, ExpansionFormat, ParsingSchema
 from .table_metadata import TableRef, TableType
 
 
@@ -36,6 +36,7 @@ __all__ = [
     "BufferedInsertConfig",
     "BackoffConfig",
     "BlobExpansionConfig",
+    "ParsingSchema",
     "ExpansionFormat",
     "TableRef",
     "TableType",
