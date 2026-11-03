@@ -11,6 +11,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Blob expansion
   - now supports Avro expansion Format.
   - alter supports adding and removing parsing schemas.
+- `Table.vector_search` accepts optional `search_options: dict[str, str]` for per-search ADBC connection options
+  - Options omitted on a later search (that were set on an earlier search on the same connection) are reset to default by sending an empty string
+
+### Changed
+- ADBC connection on `Transaction` is opened lazily on first `adbc_conn` access (instead of at transaction enter)
+- Each `vector_search` uses its own ADBC statement/cursor; the statement is kept alive for the lifetime of the returned `RecordBatchReader`
 
 ## [2.3.0] (2026-05-11)
 [2.3.0]: https://github.com/vast-data/vastdb_sdk/compare/v2.1.0...v2.3.0

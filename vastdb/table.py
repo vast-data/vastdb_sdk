@@ -1214,9 +1214,35 @@ class TableInTransaction(ITable):
         vec: list[float],
         columns: list[str],
         limit: int,
-        predicate: Optional[IbisPredicate] = None,
+        predicate: IbisPredicate | None = None,
+        search_options: dict[str, str] | None = None,
     ) -> pa.RecordBatchReader:
-        """Vector Search over vector indexed columns."""
+        """Vector Search over vector indexed columns.
+
+        Requires an ADBC driver (see ``Session`` / ``connect`` ``adbc_driver_path``).
+        The transaction's ADBC connection is opened lazily on first use. Each search
+        runs on its own ADBC statement; the returned ``RecordBatchReader`` keeps that
+        statement alive for as long as the reader is referenced.
+
+        Parameters
+        ----------
+        vec:
+            Query vector.
+        columns:
+            Column names to return (in addition to the distance alias).
+        limit:
+            Maximum number of nearest neighbors to return.
+        predicate:
+            Optional Ibis predicate for pushdown filtering.
+        search_options:
+            Optional ADBC connection options for this search only.
+            Keys set on a previous search on the same connection but omitted here
+            are reset to the server default (by sending an empty string), because
+            ADBC ``set_options`` is additive.
+            For full list of options see Vast's ADBC driver documentation on session
+            options, together with Vast's QE documentation for the available options
+
+        """
         assert self.vector_index is not None, "Table is either not vector indexed. (maybe try reloading the TableMetadata)"
 
         return self._tx.adbc_conn.vector_search(
@@ -1226,6 +1252,7 @@ class TableInTransaction(ITable):
             columns,
             limit,
             predicate=predicate,
+            search_options=search_options,
         )
 
 

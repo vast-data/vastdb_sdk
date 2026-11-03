@@ -60,6 +60,8 @@ with session.transaction() as tx:
     print(f"inserted {rows.num_rows} vector rows")
 
 # reload schema, then nearest-neighbor search
+# in the example there are also optional search options that can be passed
+# for full list of options see Vast's ADBC driver documentation on session options, together with Vast's QE for the available options
 with session.transaction() as tx:
     table = tx.bucket(BUCKET).schema("vector_schema").table("vector_table")
     table.reload_schema()
@@ -68,5 +70,9 @@ with session.transaction() as tx:
         columns=["id", "vector_column"],
         limit=2,
         predicate=table["id"] > 15,
+        # search_options={
+        #     "vast.db.setting.vector_search_min_prob": "30,30,4,4",
+        #     "vast.db.setting.vector_search_max_prob": "3000,200,30,8",
+        # },
     ).read_all()
     print(f"vector_search (limit=2, id>15) ->\n{result}")

@@ -1,4 +1,5 @@
 import logging
+import weakref
 from typing import Optional
 
 import pyarrow as pa
@@ -124,8 +125,8 @@ class AdbcConnection:
 
         assert isinstance(adbc_driver_path, str)
         self._adbc_conn = _get_adbc_connection(adbc_driver_path, endpoint, access_key, secret_key, txid, end_user)
-
         self._cursor = self._adbc_conn.cursor()
+        self._search_options_set_so_far: set[str] = set()
 
     @property
     def cursor(self) -> Cursor:
@@ -135,6 +136,16 @@ class AdbcConnection:
         self._cursor.close()
         self._adbc_conn.close()
 
+    def _apply_search_options(self, search_options: dict[str, str] | None) -> None:
+        search_options = search_options or {}
+        to_apply = {k: "" for k in self._search_options_set_so_far}
+        to_apply.update(search_options)
+
+        if to_apply:
+            self._adbc_conn.adbc_connection.set_options(**to_apply)
+
+        self._search_options_set_so_far.update(search_options)
+
     def vector_search(
         self,
         query_vector: list[float],
@@ -142,9 +153,11 @@ class AdbcConnection:
         table_ref: TableRef,
         columns: list[str],
         limit: int,
-        predicate: Optional[IbisPredicate] = None,
+        predicate: IbisPredicate | None = None,
+        search_options: dict[str, str] | None = None,
     ) -> pa.RecordBatchReader:
         """Top-n on vector-column."""
+        self._apply_search_options(search_options)
         sql = _vector_search_sql(
             query_vector=query_vector,
             vector_index=vector_index,
@@ -154,5 +167,15 @@ class AdbcConnection:
             predicate=predicate,
         )
 
-        self._cursor.execute(sql)
-        return self._cursor.fetch_record_batch()
+        cursor = self._adbc_conn.cursor()
+
+        try:
+            cursor.execute(sql)
+            reader = cursor.fetch_record_batch()
+        except Exception:
+            cursor.close()
+            raise
+
+        # Keep the cursor alive for as long as the reader is alive
+        weakref.finalize(reader, cursor.close)
+        return reader

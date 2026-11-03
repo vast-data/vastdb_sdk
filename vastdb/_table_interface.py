@@ -191,6 +191,7 @@ class ITable(ABC):
                       vec: list[float],
                       columns: list[str],
                       limit: int,
-                      predicate: Optional[IbisPredicate] = None) -> pa.RecordBatchReader:
+                      predicate: IbisPredicate | None = None,
+                      search_options: dict[str, str] | None = None) -> pa.RecordBatchReader:
         """Top-n on vector-column."""
         pass

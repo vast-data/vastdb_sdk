@@ -1,13 +1,13 @@
 from typing import Optional
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pyarrow as pa
 import pytest
 
-from vastdb._adbc import END_USER_PROPERTY
+from vastdb._adbc import END_USER_PROPERTY, AdbcConnection
 from vastdb.session import Session
 from vastdb.table_metadata import TableRef
-from vastdb.transaction import NoAdbcConnectionError
+from vastdb.transaction import TransactionNotActiveError
 
 
 def test_sanity(session, clean_bucket_name: str):
@@ -54,8 +54,15 @@ def test_adbc_conn_unreachable_tx_close(session):
         assert tx.adbc_conn is not None
 
     # adbc conn should not be reachable after tx close
-    with pytest.raises(NoAdbcConnectionError):
+    with pytest.raises(TransactionNotActiveError):
         tx.adbc_conn
+
+
+def test_adbc_conn_not_opened_until_accessed(session):
+    with session.transaction() as tx:
+        assert tx._adbc_conn is None
+        assert tx.adbc_conn is not None
+        assert tx._adbc_conn is not None
 
 
 def test_two_simulatnious_txs_with_adbc(session, clean_bucket_name: str):
@@ -107,12 +114,60 @@ def test_end_user_passed_to_adbc_connect(end_user: Optional[str]):
             adbc_driver_path="/mock/driver/path"
         )
 
-        with session.transaction():
-            # The ADBC connection is established when the transaction starts
-            pass
+        with session.transaction() as tx:
+            # ADBC connection is established lazily on first access
+            mock_connect.assert_not_called()
+            _ = tx.adbc_conn
 
         mock_connect.assert_called_once()
         call_kwargs = mock_connect.call_args.kwargs
         conn_kwargs = call_kwargs.get("conn_kwargs", {})
         assert (end_user is None) ^ (END_USER_PROPERTY in conn_kwargs)
         assert (end_user is None) ^ (conn_kwargs.get(END_USER_PROPERTY) == end_user)
+
+
+def test_search_options_reset_omitted_keys_to_empty_string():
+    mock_dbapi_conn = MagicMock()
+    mock_adbc_connection = MagicMock()
+    mock_dbapi_conn.adbc_connection = mock_adbc_connection
+
+    with patch("vastdb._adbc._get_adbc_connection", return_value=mock_dbapi_conn):
+        conn = AdbcConnection(
+            endpoint="http://localhost:9090",
+            access_key="ak",
+            secret_key="sk",
+            txid=1,
+            adbc_driver_path="/mock/driver/path",
+        )
+
+    conn._apply_search_options({"opt_a": "1", "opt_b": "2"})
+    mock_adbc_connection.set_options.assert_called_with(opt_a="1", opt_b="2")
+
+    mock_adbc_connection.set_options.reset_mock()
+    conn._apply_search_options({"opt_a": "3"})
+    mock_adbc_connection.set_options.assert_called_once()
+    applied = mock_adbc_connection.set_options.call_args.kwargs
+    assert applied == {"opt_a": "3", "opt_b": ""}
+
+    mock_adbc_connection.set_options.reset_mock()
+    conn._apply_search_options(None)
+    applied = mock_adbc_connection.set_options.call_args.kwargs
+    assert applied == {"opt_a": "", "opt_b": ""}
+
+
+def test_search_options_noop_when_nothing_to_apply():
+    mock_dbapi_conn = MagicMock()
+    mock_adbc_connection = MagicMock()
+    mock_dbapi_conn.adbc_connection = mock_adbc_connection
+
+    with patch("vastdb._adbc._get_adbc_connection", return_value=mock_dbapi_conn):
+        conn = AdbcConnection(
+            endpoint="http://localhost:9090",
+            access_key="ak",
+            secret_key="sk",
+            txid=1,
+            adbc_driver_path="/mock/driver/path",
+        )
+
+    conn._apply_search_options(None)
+    mock_adbc_connection.set_options.assert_not_called()

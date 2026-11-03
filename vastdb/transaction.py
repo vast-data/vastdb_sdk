@@ -61,19 +61,6 @@ class Transaction:
         """Create a transaction and store its ID."""
         response = self._rpc.api.begin_transaction()
         self.txid = int(response.headers['tabular-txid'])
-
-        try:
-            self._adbc_conn = AdbcConnection(
-                self._rpc._context.endpoint,
-                self._rpc.access,
-                self._rpc.secret,
-                self.txid,
-                self._session_context.end_user,
-                adbc_driver_path=self._adbc_driver_path
-            )
-        except AdbcDriverVastdbNotInstalledException:
-            self._adbc_conn = None
-
         log.debug("opened txid=%016x", self.txid)
         return self
 
@@ -82,7 +69,7 @@ class Transaction:
         txid = self.txid
         self.txid = None
         if self._adbc_conn is not None:
-            self.adbc_conn.close()
+            self._adbc_conn.close()
             self._adbc_conn = None
 
         if (exc_type, exc_value, exc_traceback) == (None, None, None):
@@ -142,6 +129,22 @@ class Transaction:
     @property
     def adbc_conn(self) -> AdbcConnection:
         """ADBC connection in transaction."""
-        if self._adbc_conn is None:
+        if not self.is_active:
+            raise TransactionNotActiveError("Can't get ADBC connection from a non-active transaction.")
+
+        if self._adbc_conn is not None:
+            return self._adbc_conn
+
+        try:
+            self._adbc_conn = AdbcConnection(
+                self._rpc._context.endpoint,
+                self._rpc.access,
+                self._rpc.secret,
+                self.active_txid,
+                self._session_context.end_user,
+                adbc_driver_path=self._adbc_driver_path
+            )
+        except AdbcDriverVastdbNotInstalledException:
             raise NoAdbcConnectionError("Adbc Driver may not have been supplied")
+
         return self._adbc_conn
