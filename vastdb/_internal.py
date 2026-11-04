@@ -958,6 +958,7 @@ class TableStats:
     partitioning_info: Optional[PartitioningInfo] = None
     vector_secondary_index_sorting_score: int = 0
     vector_secondary_index_sorting_done: bool = False
+    clustering_progress: int | None = None
 
     def __getattribute__(self, name: str):
         if name == "vector_index":
@@ -1727,6 +1728,7 @@ class VastdbApi:
             sql_distance_function = vector_index_metadata.SqlFunctionName()
             cluster_quantization = vector_index_metadata.ClusterQuantization()
             search_quantization = vector_index_metadata.SearchQuantization()
+            clustering_progress = vector_index_metadata.ClusteringProgress()
 
             vector_index_values = (column_name, distance_metric, sql_distance_function, cluster_quantization, search_quantization)
             if any(value is None for value in vector_index_values):
@@ -1746,6 +1748,7 @@ class VastdbApi:
                 raise ValueError("Server returned non 0 secondary index sorting score without a vector index")
 
             vector_index = None
+            clustering_progress = None
 
         return TableStats(
           num_rows=num_rows,
@@ -1760,6 +1763,7 @@ class VastdbApi:
           vector_index=vector_index,
           vector_secondary_index_sorting_score=vector_secondary_index_sorting_score,
           vector_secondary_index_sorting_done=vector_secondary_index_sorting_done,
+          clustering_progress=clustering_progress,
           partitioning_info=partitioning_info,
           vips=vips
         )

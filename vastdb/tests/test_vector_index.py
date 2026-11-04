@@ -156,6 +156,9 @@ def test_vector_index_metadata_from_stats(session: Session, clean_bucket_name: s
         assert table._metadata._vector_index.column == "embedding"
         assert table._metadata._vector_index.distance_metric == "l2sq"
 
+        # check clustering progress
+        assert isinstance(table.stats.clustering_progress, int)
+
         log.info("✓ Vector index metadata correctly retrieved from stats")
 
 

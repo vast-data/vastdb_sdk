@@ -59,7 +59,14 @@ class VectorIndexMetadata(object):
             return self._tab.String(o + self._tab.Pos)
         return None
 
-def Start(builder): builder.StartObject(5)
+    # VectorIndexMetadata
+    def ClusteringProgress(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(14))
+        if o != 0:
+            return self._tab.Get(flatbuffers.number_types.Uint8Flags, o + self._tab.Pos)
+        return 0
+
+def Start(builder): builder.StartObject(6)
 def VectorIndexMetadataStart(builder):
     """This method is deprecated. Please switch to Start."""
     return Start(builder)
@@ -83,6 +90,10 @@ def AddSearchQuantization(builder, searchQuantization): builder.PrependUOffsetTR
 def VectorIndexMetadataAddSearchQuantization(builder, searchQuantization):
     """This method is deprecated. Please switch to AddSearchQuantization."""
     return AddSearchQuantization(builder, searchQuantization)
+def AddClusteringProgress(builder, clusteringProgress): builder.PrependUint8Slot(5, clusteringProgress, 0)
+def VectorIndexMetadataAddClusteringProgress(builder, clusteringProgress):
+    """This method is deprecated. Please switch to AddClusteringProgress."""
+    return AddClusteringProgress(builder, clusteringProgress)
 def End(builder): return builder.EndObject()
 def VectorIndexMetadataEnd(builder):
     """This method is deprecated. Please switch to End."""
