@@ -8,6 +8,7 @@ import logging
 import operator
 import os
 import queue
+import random
 import sys
 import typing
 import warnings
@@ -500,8 +501,9 @@ class TableInTransaction(ITable):
             data_endpoints = [Endpoint(url=ep) for ep in config.data_endpoints]
         else:
             self._discover_endpoints()
-            data_endpoints = self._session_context.require_data_endpoints()
+            data_endpoints = self._session_context.require_data_endpoints().copy()
 
+        random.shuffle(data_endpoints)
         endpoints_by_cnode = self._group_endpoints_by_cnodes(data_endpoints)
         num_cnodes = len(endpoints_by_cnode)
         import_concurrency = config.import_concurrency or (num_cnodes * 2)
@@ -638,11 +640,12 @@ class TableInTransaction(ITable):
             limit_rows: Optional[int] = None
     ) -> tuple[SplitWorkerConfig, _internal.QueryDataRequest, tuple[str, ...]]:
         if config.data_endpoints is not None:
-            data_endpoints = config.data_endpoints
+            data_endpoints = config.data_endpoints.copy()
         else:
             self._discover_endpoints()
             data_endpoints = [ep.url for ep in self._session_context.require_data_endpoints()]
 
+        random.shuffle(data_endpoints)
         log.debug("endpoints: %s", data_endpoints)
 
         select_columns: list[str] = query_schema.names if columns is None else columns
