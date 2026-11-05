@@ -16,7 +16,7 @@ import pyarrow as pa
 
 import vastdb
 from vastdb import errors
-from vastdb.table import BlobExpansion, BlobExpansionConfig, ExpansionFormat
+from vastdb.table import BlobExpansionConfig, ExpansionFormat
 
 BUCKET = os.environ.get("VASTDB_BUCKET", "vastdb")
 # The expansion source must be an existing Kafka topic.
@@ -106,13 +106,16 @@ with session.transaction() as tx:
     # Mark selected fields mandatory when the cluster supports it (5.5.3+).
     try:
         session.features.check_blob_expansion_mandatory_fields_error_topic()
-        to_add = BlobExpansion.mark_mandatory_fields(extra_columns, ["active"])
+        mandatory_fields = {"active"}
         print("marked mandatory: active. for mandatory fields use a dot as a separator example : outer.inner.must")
     except errors.NotSupportedVersion:
-        to_add = extra_columns
+        mandatory_fields = set()
         print("mandatory fields not supported; adding without Vast:mandatory metadata")
 
-    blob_expansion.add_columns(columns_to_add=to_add)
+    blob_expansion.add_columns(
+        columns_to_add=extra_columns,
+        mandatory_fields=mandatory_fields,
+    )
     after_add = source.blob_expansion(SOURCE_COLUMN)
     print(f"schema after add: {after_add.schema.names}")
 

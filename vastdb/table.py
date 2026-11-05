@@ -67,7 +67,7 @@ SORTING_SCORE_BITS = 63
 _NUM_ROWS_IN_ROW_GROUP = 2**16
 _ELYSIUM_SPLIT_ESTIMATION_SPLIT_ID = 0xffffffff - 3
 
-BLOB_EXPANSION_MANDATORY_FIELD_METADATA = {b"VAST:mandatory": b"true"}
+BLOB_EXPANSION_MANDATORY_FIELD_METADATA = _internal._BLOB_EXPANSION_MANDATORY_FIELD_METADATA
 MANDATORY_FIELD_METADATA_KEY = b"VAST:mandatory"
 MANDATORY_FIELD_METADATA_VALUE = b"true"
 
@@ -1370,10 +1370,19 @@ class Table(TableInTransaction):
         source_column_name: str = "value",
         config: Optional[BlobExpansionConfig] = None,
         target_table_schema: Optional[str] = None,
+        mandatory_fields: set[str] | None = None,
     ) -> "BlobExpansion":
-        """Create a blob expansion for the given source column."""
+        """Create a blob expansion for the given source column.
+
+        ``mandatory_fields`` may contain top-level names or dotted paths for
+        fields nested in structs, lists, and maps.
+        """
         self._assert_not_imports_table()
         self._tx._rpc.features.check_blob_expansion()
+        expansion_schema = _internal._mark_blob_expansion_mandatory_fields(
+            expansion_schema,
+            mandatory_fields,
+        )
         if _schema_has_mandatory_fields(expansion_schema):
             self._tx._rpc.features.check_blob_expansion_mandatory_fields_error_topic()
 
@@ -1529,68 +1538,23 @@ class BlobExpansion:
         """Transaction used for self."""
         return self._tx
 
-    @staticmethod
-    def mark_mandatory_fields(
-        schema: pa.Schema,
-        mandatory_fields: Sequence[str],
-    ) -> pa.Schema:
-        """Return a copy of ``schema`` with the named fields marked mandatory.
-
-        Names may be top-level (``field``) or dotted paths (``outer.inner.leaf``).
-        Nested struct, list, and map fields are walked the same way as mandatory detection.
-        """
-        mandatory = set(mandatory_fields)
-        found: set[str] = set()
-
-        def mark(field: pa.Field, path: str) -> pa.Field:
-            found.add(field.name)
-            found.add(path)
-
-            t = field.type
-            if pa.types.is_struct(t):
-                field = field.with_type(pa.struct([
-                    mark(child := t.field(i), f"{path}.{child.name}") for i in range(t.num_fields)
-                ]))
-            elif pa.types.is_list(t):
-                v = t.value_field
-                field = field.with_type(pa.list_(mark(v, f"{path}.{v.name}")))
-            elif pa.types.is_large_list(t):
-                v = t.value_field
-                field = field.with_type(pa.large_list(mark(v, f"{path}.{v.name}")))
-            elif pa.types.is_fixed_size_list(t):
-                v = t.value_field
-                field = field.with_type(pa.list_(mark(v, f"{path}.{v.name}"), t.list_size))
-            elif pa.types.is_map(t):
-                k, v = t.key_field, t.item_field
-                field = field.with_type(pa.map_(
-                    mark(k, f"{path}.{k.name}"),
-                    mark(v, f"{path}.{v.name}"),
-                ))
-
-            if field.name in mandatory or path in mandatory:
-                field = field.with_metadata(
-                    (field.metadata or {}) | BLOB_EXPANSION_MANDATORY_FIELD_METADATA
-                )
-            return field
-
-        new_schema = pa.schema(
-            [mark(field, field.name) for field in schema],
-            metadata=schema.metadata,
-        )
-
-        if missing := mandatory - found:
-            raise errors.InvalidArgument(f"mandatory fields not found in schema: {sorted(missing)}")
-
-        return new_schema
-
     def add_columns(
         self,
         columns_to_add: Optional[pa.Schema] = None,
         add_copy_source_column: bool = False,
         add_missing_values_output: bool = False,
         add_excessive_values_output: bool = False,
+        mandatory_fields: set[str] | None = None,
     ) -> None:
-        """Add columns to this blob expansion."""
+        """Add columns to this blob expansion.
+
+        ``mandatory_fields`` may contain top-level names or dotted paths in
+        ``columns_to_add``.
+        """
+        columns_to_add = _internal._mark_blob_expansion_mandatory_fields(
+            columns_to_add,
+            mandatory_fields,
+        )
         if _schema_has_mandatory_fields(columns_to_add):
             self._tx._rpc.features.check_blob_expansion_mandatory_fields_error_topic()
 

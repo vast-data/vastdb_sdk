@@ -993,6 +993,71 @@ class UnsupportedServer(NotImplementedError):
     pass
 
 
+_BLOB_EXPANSION_MANDATORY_FIELD_METADATA = {b"VAST:mandatory": b"true"}
+
+
+def _mark_blob_expansion_mandatory_fields(
+    schema: pa.Schema | None,
+    mandatory_fields: set[str] | None,
+) -> pa.Schema | None:
+    """Return a copy of a blob-expansion schema with selected fields marked mandatory."""
+    mandatory = mandatory_fields or set()
+    if not mandatory:
+        return schema
+    if schema is None:
+        raise errors.InvalidArgument(
+            f"need to pass a schema in order to set mandatory fields: {sorted(mandatory)}"
+        )
+
+    found: set[str] = set()
+
+    def mark(field: pa.Field, path: str) -> pa.Field:
+        found.add(path)
+
+        field_type = field.type
+        if pa.types.is_struct(field_type):
+            field = field.with_type(pa.struct([
+                mark(child := field_type.field(i), f"{path}.{child.name}")
+                for i in range(field_type.num_fields)
+            ]))
+        elif pa.types.is_list(field_type):
+            value = field_type.value_field
+            field = field.with_type(pa.list_(mark(value, f"{path}.{value.name}")))
+        elif pa.types.is_large_list(field_type):
+            value = field_type.value_field
+            field = field.with_type(pa.large_list(mark(value, f"{path}.{value.name}")))
+        elif pa.types.is_fixed_size_list(field_type):
+            value = field_type.value_field
+            field = field.with_type(
+                pa.list_(mark(value, f"{path}.{value.name}"), field_type.list_size)
+            )
+        elif pa.types.is_map(field_type):
+            key, value = field_type.key_field, field_type.item_field
+            field = field.with_type(pa.map_(
+                mark(key, f"{path}.{key.name}"),
+                mark(value, f"{path}.{value.name}"),
+                keys_sorted=field_type.keys_sorted,
+            ))
+
+        if path in mandatory:
+            field = field.with_metadata(
+                (field.metadata or {}) | _BLOB_EXPANSION_MANDATORY_FIELD_METADATA
+            )
+        return field
+
+    marked_schema = pa.schema(
+        [mark(field, field.name) for field in schema],
+        metadata=schema.metadata,
+    )
+
+    if missing := mandatory - found:
+        raise errors.InvalidArgument(
+            f"mandatory fields not found in schema: {sorted(missing)}"
+        )
+
+    return marked_schema
+
+
 def build_create_blob_expansion_request(
     expansion_schema: pa.Schema,
     target_table_name: Optional[str] = None,

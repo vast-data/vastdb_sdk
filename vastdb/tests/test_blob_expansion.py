@@ -1,11 +1,12 @@
 """Tests for blob expansion functionality."""
 
 import logging
+from typing import Iterable
 
 import pyarrow as pa
 import pytest
 
-from vastdb import errors
+from vastdb import _internal, errors
 from vastdb.schema import Schema
 from vastdb.session import Session
 from vastdb.table import (
@@ -94,7 +95,7 @@ def _get_metadata_by_path(schema: pa.Schema) -> dict:
     return by_path
 
 
-def _assert_mandatory_fields_from_schema(schema: pa.Schema, expected_mandatory: list[str]) -> None:
+def _assert_mandatory_fields_from_schema(schema: pa.Schema, expected_mandatory: Iterable[str]) -> None:
     """Assert expected fields and every ancestor of a nested expected field are mandatory.
 
     The FRD requires that marking a nested field also marks its ancestors. Descendants of an
@@ -134,6 +135,7 @@ def _create_expansion(
     *,
     target_schema: pa.Schema | None = None,
     config: BlobExpansionConfig | None = None,
+    mandatory_fields: set[str] | None = None,
 ) -> tuple[Table, BlobExpansion]:
     """Create the source table, the expansion target table and the expansion itself."""
     _, t = _create_tables(tx, bucket_name, target_schema if target_schema is not None else expansion_schema)
@@ -142,6 +144,7 @@ def _create_expansion(
         expansion_schema=expansion_schema,
         target_table_name=TARGET_TABLE,
         config=config if config is not None else BlobExpansionConfig(expansion_format=ExpansionFormat.JSON),
+        mandatory_fields=mandatory_fields,
     )
     return t, be
 
@@ -183,8 +186,8 @@ def _create_topic_expansion(tx, bucket_name: str, expansion_schema: pa.Schema, *
     return s, t, be
 
 
-def test_mark_mandatory_fields_nested_two_layers():
-    """mark_mandatory_fields marks a leaf two struct levels down, not the parents."""
+def test_mark_blob_expansion_mandatory_fields_nested_two_layers():
+    """The internal marker marks a leaf two struct levels down, not the parents."""
     schema = pa.schema([
         pa.field('outer', pa.struct([
             pa.field('inner', pa.struct([
@@ -196,7 +199,10 @@ def test_mark_mandatory_fields_nested_two_layers():
         pa.field('top', pa.int32()),
     ])
 
-    marked = BlobExpansion.mark_mandatory_fields(schema, ['outer.inner.must'])
+    marked = _internal._mark_blob_expansion_mandatory_fields(
+        schema,
+        {'outer.inner.must'},
+    )
 
     outer = marked.field('outer')
     inner = outer.type.field('inner')
@@ -208,6 +214,11 @@ def test_mark_mandatory_fields_nested_two_layers():
     assert not _has_mandatory_metadata(inner.metadata)
     assert not _has_mandatory_metadata(outer.metadata)
     assert not _has_mandatory_metadata(marked.field('top').metadata)
+
+
+def test_mark_blob_expansion_mandatory_fields_requires_schema():
+    with pytest.raises(errors.InvalidArgument, match="need to pass a schema"):
+        _internal._mark_blob_expansion_mandatory_fields(None, {'missing'})
 
 
 MANDATORY_CREATE_CASES = [
@@ -740,13 +751,13 @@ def test_drop_then_add_column_with_mandatory(
     [
         pytest.param(
             pa.schema([('f1', pa.string()), ('f2', pa.int32())]),
-            ['f1'],
+            {'f1'},
             {},
             id='one_mandatory',
         ),
         pytest.param(
             pa.schema([('m1', pa.int32()), ('m2', pa.string()), ('ok', pa.bool_())]),
-            ['m1', 'm2'],
+            {'m1', 'm2'},
             {},
             id='multiple_mandatory',
         ),
@@ -755,13 +766,13 @@ def test_drop_then_add_column_with_mandatory(
                 ('nested', pa.struct([('x', pa.int32())])),
                 ('plain', pa.float64()),
             ]),
-            ['nested'],
+            {'nested'},
             {'add_copy_source_column': True},
             id='complex_plus_copy_source',
         ),
         pytest.param(
             pa.schema([('f1', pa.string()), ('f2', pa.int32())]),
-            ['f1'],
+            {'f1'},
             {
                 'add_missing_values_output': True,
                 'add_excessive_values_output': True,
@@ -770,14 +781,14 @@ def test_drop_then_add_column_with_mandatory(
         ),
     ],
 )
-def test_alter_add_with_mark_mandatory_fields(
+def test_alter_add_with_mandatory_fields(
     session: Session,
     clean_bucket_name: str,
     columns_to_add: pa.Schema,
-    mandatory_fields: list[str],
+    mandatory_fields: set[str],
     config_kwargs: dict,
 ):
-    """Online: add_columns() adds columns marked via mark_mandatory_fields."""
+    """Online: add_columns() marks the requested columns mandatory."""
     _skip_unless_mandatory_fields(session)
 
     initial_schema = pa.schema([('base', pa.string())])
@@ -786,8 +797,11 @@ def test_alter_add_with_mark_mandatory_fields(
             tx, clean_bucket_name, initial_schema,
             target_schema=pa.schema(list(initial_schema) + list(columns_to_add)),
         )
-        marked = BlobExpansion.mark_mandatory_fields(columns_to_add, mandatory_fields)
-        be.add_columns(columns_to_add=marked, **config_kwargs)
+        be.add_columns(
+            columns_to_add=columns_to_add,
+            mandatory_fields=mandatory_fields,
+            **config_kwargs,
+        )
 
         retrieved = t.blob_expansion(SOURCE_COLUMN)
         for field in columns_to_add:
@@ -817,22 +831,20 @@ def test_alter_add_with_mark_mandatory_fields(
         ),
     ],
 )
-def test_alter_remove_with_mark_mandatory_fields(
+def test_alter_remove_columns(
     session: Session,
     clean_bucket_name: str,
     columns_to_drop: pa.Schema,
     config_kwargs: dict,
 ):
-    """Online: drop_columns() drops columns built via mark_mandatory_fields."""
+    """Online: drop_columns() drops the requested columns."""
     _skip_unless_mandatory_fields(session)
 
     keep = pa.field('keep', pa.int32())
     with session.transaction() as tx:
         t, be = _create_expansion(tx, clean_bucket_name, pa.schema([keep, *columns_to_drop]))
 
-        # Marking before remove exercises the same helper path as add; marks are irrelevant after drop.
-        marked = BlobExpansion.mark_mandatory_fields(columns_to_drop, [columns_to_drop.field(0).name])
-        be.drop_columns(columns_to_remove=marked, **config_kwargs)
+        be.drop_columns(columns_to_remove=columns_to_drop, **config_kwargs)
 
         retrieved = t.blob_expansion(SOURCE_COLUMN)
         assert 'keep' in _get_metadata_by_name(retrieved.schema)
@@ -849,8 +861,10 @@ def test_alter_fields_to_mandatory(session: Session, clean_bucket_name: str):
     with session.transaction() as tx:
         t, be = _create_expansion(tx, clean_bucket_name, expansion_schema)
 
-        marked = BlobExpansion.mark_mandatory_fields(expansion_schema, ['field1', 'field2'])
-        be.add_columns(columns_to_add=marked)
+        be.add_columns(
+            columns_to_add=expansion_schema,
+            mandatory_fields={'field1', 'field2'},
+        )
         retrieved = t.blob_expansion(SOURCE_COLUMN)
         _assert_mandatory_fields_from_schema(retrieved.schema, ['field1', 'field2'])
         be.drop()
@@ -860,10 +874,7 @@ def test_create_blob_expansion_mandatory_unsupported(session: Session, clean_buc
     """Create with Vast:mandatory must raise when the cluster lacks mandatory-fields support."""
     _skip_unless_blob_expansion_without_mandatory(session)
 
-    expansion_schema = BlobExpansion.mark_mandatory_fields(
-        pa.schema([('field1', pa.string()), ('field2', pa.int32())]),
-        ['field1'],
-    )
+    expansion_schema = pa.schema([('field1', pa.string()), ('field2', pa.int32())])
     with session.transaction() as tx:
         _, t = _create_tables(tx, clean_bucket_name, expansion_schema)
         with pytest.raises(errors.NotSupportedVersion):
@@ -872,6 +883,7 @@ def test_create_blob_expansion_mandatory_unsupported(session: Session, clean_buc
                 expansion_schema=expansion_schema,
                 target_table_name=TARGET_TABLE,
                 config=BlobExpansionConfig(expansion_format=ExpansionFormat.JSON),
+                mandatory_fields={'field1'},
             )
 
 
@@ -880,14 +892,17 @@ def test_alter_mandatory_unsupported(session: Session, clean_bucket_name: str):
     _skip_unless_blob_expansion_without_mandatory(session)
 
     initial_schema = pa.schema([('base', pa.string())])
-    columns_to_add = BlobExpansion.mark_mandatory_fields(pa.schema([('f1', pa.string())]), ['f1'])
+    columns_to_add = pa.schema([('f1', pa.string())])
     with session.transaction() as tx:
         _, be = _create_expansion(
             tx, clean_bucket_name, initial_schema,
             target_schema=pa.schema(list(initial_schema) + list(columns_to_add)),
         )
         with pytest.raises(errors.NotSupportedVersion):
-            be.add_columns(columns_to_add=columns_to_add)
+            be.add_columns(
+                columns_to_add=columns_to_add,
+                mandatory_fields={'f1'},
+            )
         be.drop()
 
 
@@ -929,15 +944,17 @@ def test_create_mandatory_nested_top_vs_bottom(
     """Server must return Vast:mandatory exactly where it was set: on the parent or on the child."""
     _skip_unless_mandatory_fields(session)
 
-    expansion_schema = BlobExpansion.mark_mandatory_fields(
-        pa.schema([
-            pa.field('parent', pa.struct([('child', pa.int32()), ('sibling', pa.string())])),
-            pa.field('plain', pa.string()),
-        ]),
-        [mandatory_field],
-    )
+    expansion_schema = pa.schema([
+        pa.field('parent', pa.struct([('child', pa.int32()), ('sibling', pa.string())])),
+        pa.field('plain', pa.string()),
+    ])
     with session.transaction() as tx:
-        t, be = _create_expansion(tx, clean_bucket_name, expansion_schema)
+        t, be = _create_expansion(
+            tx,
+            clean_bucket_name,
+            expansion_schema,
+            mandatory_fields={mandatory_field},
+        )
 
         retrieved = t.blob_expansion(SOURCE_COLUMN)
         _assert_mandatory_fields_from_schema(retrieved.schema, [mandatory_field])
