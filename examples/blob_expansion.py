@@ -17,7 +17,7 @@ import pyarrow as pa
 
 import vastdb
 from vastdb import errors
-from vastdb.table import BlobExpansion, BlobExpansionConfig, ExpansionFormat, ParsingSchema
+from vastdb.table import BlobExpansionConfig, ExpansionFormat, ParsingSchema
 
 BUCKET = os.environ.get("VASTDB_BUCKET", "vastdb")
 # The expansion source must be an existing Kafka topic.
@@ -104,7 +104,7 @@ with session.transaction() as tx:
     print(f"retrieved schema names: {retrieved.schema.names}")
 
     print("Add columns".center(80, "="))
-    # Mark selected fields mandatory when the cluster supports it (5.5.3+).
+    # Mark selected fields mandatory when the cluster supports it (5.5.3+) for JSON expansion format only.
     try:
         session.features.check_blob_expansion_mandatory_fields_error_topic()
         mandatory_fields = {"active"}
@@ -128,7 +128,8 @@ with session.transaction() as tx:
     print("Drop blob expansion".center(80, "="))
     blob_expansion.drop()
 
-    # Same create/get/drop for Avro (VAST 5.6+): pass a parsing schema and refetch after add/remove.
+    # blob expansion with parsing schema in this case Avro (VAST 5.6+): create, then add and remove another parsing schema,
+    # refetch to see schema_ids update since it is not updated in place.
     try:
         session.features.check_blob_expansion_with_parsing_schema()
         avro = source.create_blob_expansion(
@@ -141,6 +142,13 @@ with session.transaction() as tx:
             ),
         )
         print(f"avro schema_ids: {avro.schema_ids}")
+
+        avro.add_parsing_schema(ParsingSchema(2, b'{"type":"record","name":"User","fields":[{"name":"name","type":"string"}]}'))
+        print(f"after add: {source.blob_expansion(SOURCE_COLUMN).schema_ids}")
+        print(f"schema 2: {avro.get_parsing_schema(2).schema!r}")
+
+        avro.remove_parsing_schema(2)
+        print(f"after remove: {source.blob_expansion(SOURCE_COLUMN).schema_ids}")
         avro.drop()
     except errors.NotSupportedVersion as exc:
         print(f"Avro blob expansion not available: {exc}")

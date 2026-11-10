@@ -16,6 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 [2.3.0]: https://github.com/vast-data/vastdb_sdk/compare/v2.1.0...v2.3.0
 
 ### Added
+- end-user impersonation for all Tabular RPCs via Session / connect
 - Blob expansion
   - supports mandatory fields and error topics.
 - Vector index
