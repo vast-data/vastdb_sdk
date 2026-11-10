@@ -56,6 +56,7 @@ class Transaction:
     txid: Optional[int] = None
     _adbc_driver_path: Optional[str] = None
     _adbc_conn: Optional[AdbcConnection] = None
+    _vector_search_adbc_conn: AdbcConnection | None = None
 
     def __enter__(self):
         """Create a transaction and store its ID."""
@@ -68,9 +69,14 @@ class Transaction:
         """On success, the transaction is committed. Otherwise, it is rolled back."""
         txid = self.txid
         self.txid = None
+
         if self._adbc_conn is not None:
             self._adbc_conn.close()
             self._adbc_conn = None
+
+        if self._vector_search_adbc_conn is not None:
+            self._vector_search_adbc_conn.close()
+            self._vector_search_adbc_conn = None
 
         if (exc_type, exc_value, exc_traceback) == (None, None, None):
             log.debug("committing txid=%016x", txid)
@@ -126,17 +132,12 @@ class Transaction:
         """Create Table from TableMetadata."""
         return TableInTransaction(deepcopy(metadata), tx=self, session_context=self._session_context)
 
-    @property
-    def adbc_conn(self) -> AdbcConnection:
-        """ADBC connection in transaction."""
+    def _create_adbc_connection(self) -> AdbcConnection:
         if not self.is_active:
             raise TransactionNotActiveError("Can't get ADBC connection from a non-active transaction.")
 
-        if self._adbc_conn is not None:
-            return self._adbc_conn
-
         try:
-            self._adbc_conn = AdbcConnection(
+            return AdbcConnection(
                 self._rpc._context.endpoint,
                 self._rpc.access,
                 self._rpc.secret,
@@ -147,4 +148,17 @@ class Transaction:
         except AdbcDriverVastdbNotInstalledException:
             raise NoAdbcConnectionError("Adbc Driver may not have been supplied")
 
+    @property
+    def adbc_conn(self) -> AdbcConnection:
+        """ADBC connection in transaction."""
+        if self._adbc_conn is None:
+            self._adbc_conn = self._create_adbc_connection()
+
         return self._adbc_conn
+
+    @property
+    def _vector_search_conn(self) -> AdbcConnection:
+        if self._vector_search_adbc_conn is None:
+            self._vector_search_adbc_conn = self._create_adbc_connection()
+
+        return self._vector_search_adbc_conn

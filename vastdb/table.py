@@ -1245,7 +1245,7 @@ class TableInTransaction(ITable):
         """
         assert self.vector_index is not None, "Table is either not vector indexed. (maybe try reloading the TableMetadata)"
 
-        return self._tx.adbc_conn.vector_search(
+        return self._tx._vector_search_conn.vector_search(
             vec,
             self.vector_index,
             self.ref,

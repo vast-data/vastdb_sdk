@@ -65,6 +65,43 @@ def test_adbc_conn_not_opened_until_accessed(session):
         assert tx._adbc_conn is not None
 
 
+def test_vector_search_adbc_conn_is_separate_from_user_adbc_conn():
+    with (
+        patch("vastdb.transaction.AdbcConnection") as MockAdbcConnection,
+        patch("vastdb._internal.VastdbApi") as MockVastdbApi,
+    ):
+        mock_api_instance = MockVastdbApi.return_value
+        mock_api_instance.begin_transaction.return_value.headers = {
+            "tabular-txid": "12345"
+        }
+        mock_api_instance.vast_version = (5, 4, 0, 0)
+
+        user_conn = MagicMock(name="user_adbc_conn")
+        search_conn = MagicMock(name="vector_search_adbc_conn")
+        MockAdbcConnection.side_effect = [user_conn, search_conn]
+
+        session = Session(
+            access="test_access",
+            secret="test_secret",
+            endpoint="http://localhost:9090",
+            adbc_driver_path="/mock/driver/path",
+        )
+
+        with session.transaction() as tx:
+            assert tx._adbc_conn is None
+            assert tx._vector_search_adbc_conn is None
+
+            assert tx.adbc_conn is user_conn
+            assert tx._vector_search_adbc_conn is None
+
+            assert tx._vector_search_conn is search_conn
+            assert tx.adbc_conn is user_conn
+            assert tx._adbc_conn is not tx._vector_search_adbc_conn
+
+        user_conn.close.assert_called_once()
+        search_conn.close.assert_called_once()
+
+
 def test_two_simulatnious_txs_with_adbc(session, clean_bucket_name: str):
     arrow_schema = pa.schema([("n", pa.int32())])
 
