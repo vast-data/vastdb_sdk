@@ -12,7 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - now supports Avro expansion Format.
   - alter supports adding and removing parsing schemas.
 - `Table.vector_search` accepts optional `search_options: dict[str, str]` for per-search ADBC connection options
-  - Options omitted on a later search (that were set on an earlier search on the same connection) are reset to default by sending an empty string
+  - Options omitted on a later search (that were set on an earlier search) are reset to default
 
 ### Changed
 - ADBC connection on `Transaction` is opened lazily on first `adbc_conn` access (instead of at transaction enter)

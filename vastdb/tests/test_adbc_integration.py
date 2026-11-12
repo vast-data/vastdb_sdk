@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 import pyarrow as pa
 import pytest
 
-from vastdb._adbc import END_USER_PROPERTY, AdbcConnection
+from vastdb._adbc import END_USER_PROPERTY, QE_SENTINEL_FOR_DEFAULT_VALUE, AdbcConnection
 from vastdb.session import Session
 from vastdb.table_metadata import TableRef
 from vastdb.transaction import TransactionNotActiveError
@@ -163,7 +163,7 @@ def test_end_user_passed_to_adbc_connect(end_user: Optional[str]):
         assert (end_user is None) ^ (conn_kwargs.get(END_USER_PROPERTY) == end_user)
 
 
-def test_search_options_reset_omitted_keys_to_empty_string():
+def test_search_options_reset_omitted_keys_to_qe_default_sentinel():
     mock_dbapi_conn = MagicMock()
     mock_adbc_connection = MagicMock()
     mock_dbapi_conn.adbc_connection = mock_adbc_connection
@@ -184,12 +184,15 @@ def test_search_options_reset_omitted_keys_to_empty_string():
     conn._apply_search_options({"opt_a": "3"})
     mock_adbc_connection.set_options.assert_called_once()
     applied = mock_adbc_connection.set_options.call_args.kwargs
-    assert applied == {"opt_a": "3", "opt_b": ""}
+    assert applied == {"opt_a": "3", "opt_b": QE_SENTINEL_FOR_DEFAULT_VALUE}
 
     mock_adbc_connection.set_options.reset_mock()
     conn._apply_search_options(None)
     applied = mock_adbc_connection.set_options.call_args.kwargs
-    assert applied == {"opt_a": "", "opt_b": ""}
+    assert applied == {
+        "opt_a": QE_SENTINEL_FOR_DEFAULT_VALUE,
+        "opt_b": QE_SENTINEL_FOR_DEFAULT_VALUE,
+    }
 
 
 def test_search_options_noop_when_nothing_to_apply():

@@ -17,6 +17,7 @@ log = logging.getLogger(__name__)
 TXID_OVERRIDE_PROPERTY: str = "vast.db.external_txid"
 END_USER_PROPERTY: str = "vast.db.end_user"
 VAST_DIST_ALIAS = "vast_pysdk_vector_dist"
+QE_SENTINEL_FOR_DEFAULT_VALUE: str = "$#___USE_VAST_VSETTING_DEFAULT___$#"
 DEFAULT_ADBC_DRIVER_CACHE_DIR: str = "~/.vast/adbc_drivers_cache"
 DEFAULT_ADBC_DRIVER_CACHE_BY_URL_DIR: str = f"{DEFAULT_ADBC_DRIVER_CACHE_DIR}/by_url"
 
@@ -138,7 +139,7 @@ class AdbcConnection:
 
     def _apply_search_options(self, search_options: dict[str, str] | None) -> None:
         search_options = search_options or {}
-        to_apply = {k: "" for k in self._search_options_set_so_far}
+        to_apply = {k: QE_SENTINEL_FOR_DEFAULT_VALUE for k in self._search_options_set_so_far}
         to_apply.update(search_options)
 
         if to_apply:
