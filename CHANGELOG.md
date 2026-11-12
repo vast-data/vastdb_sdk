@@ -4,12 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [2.4.0] (2026-16-11)
-[2.4.0]: https://github.com/vast-data/vastdb_sdk/compare/v2.3.0...v2.4.0
+## [2.5.0] (2026-22-11)
+[2.5.0]: https://github.com/vast-data/vastdb_sdk/compare/v2.4.0...v2.5.0
 
 ### Added
 - Vector Index
   - new metric `clustering_progress` to TableStats
+
+### Changed
+- Relaxed requirements for protobuf package (>= 4.25)
+
+## [2.4.0] (2026-16-11)
+[2.4.0]: https://github.com/vast-data/vastdb_sdk/compare/v2.3.0...v2.4.0
+
+### Added
 - Blob expansion
   - now supports Avro expansion Format.
   - alter supports adding and removing parsing schemas.
