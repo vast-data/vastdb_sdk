@@ -648,7 +648,8 @@ class TableInTransaction(ITable):
         random.shuffle(data_endpoints)
         log.debug("endpoints: %s", data_endpoints)
 
-        select_columns: list[str] = query_schema.names if columns is None else columns
+        # Copy so that appending INTERNAL_ROW_ID below doesn't change the caller's list.
+        select_columns: list[str] = query_schema.names if columns is None else list(columns)
 
         if internal_row_id:
             queried_fields = [self._internal_rowid_field]
@@ -658,7 +659,7 @@ class TableInTransaction(ITable):
 
         if predicate is True:
             predicate = None
-        if predicate is False:
+        if predicate is False or limit_rows == 0:
             raise _EmptyResultException(
                 response_schema=_internal.get_response_schema(schema=query_schema, field_names=select_columns))
 
@@ -689,7 +690,7 @@ class TableInTransaction(ITable):
             num_splits=num_splits,
             num_sub_splits=config.num_sub_splits,
             num_row_groups_per_sub_split=config.num_row_groups_per_sub_split,
-            limit_rows_per_sub_split=limit_rows or config.limit_rows_per_sub_split,
+            limit_rows_per_sub_split=limit_rows if limit_rows is not None else config.limit_rows_per_sub_split,
             use_semi_sorted_projections=config.use_semi_sorted_projections,
             queue_priority=config.queue_priority,
             semi_sorted_projection_name=config.semi_sorted_projection_name)
@@ -842,7 +843,7 @@ class TableInTransaction(ITable):
             if config.query_id:
                 threads_prefix = threads_prefix + "-" + config.query_id
 
-            total_num_rows = limit_rows if limit_rows else sys.maxsize
+            total_num_rows = limit_rows if limit_rows is not None else sys.maxsize
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix=threads_prefix) as tp:
                 futures: set[concurrent.futures.Future] = {tp.submit(single_endpoint_worker, endpoint)
                                                            for endpoint in endpoints[:config.num_splits]}
