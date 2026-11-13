@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased]
+
+### Fixed
+- Buffered inserter: an insert error first seen by the flush timer (`BufferedInsertConfig.timeout`) was raised on the timer thread and lost, so `finish()` reported success. The error is now kept and re-raised from `add_batch()` / `finish()`, and the timer keeps running.
+
 ## [2.5.0] (2026-22-11)
 [2.5.0]: https://github.com/vast-data/vastdb_sdk/compare/v2.4.0...v2.5.0
 
