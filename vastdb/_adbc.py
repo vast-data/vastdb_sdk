@@ -1,5 +1,4 @@
 import logging
-import weakref
 from typing import Optional
 
 import pyarrow as pa
@@ -127,6 +126,7 @@ class AdbcConnection:
         assert isinstance(adbc_driver_path, str)
         self._adbc_conn = _get_adbc_connection(adbc_driver_path, endpoint, access_key, secret_key, txid, end_user)
         self._cursor = self._adbc_conn.cursor()
+        self._open_search_cursors: set[Cursor] = set()
         self._search_options_set_so_far: set[str] = set()
 
     @property
@@ -134,6 +134,10 @@ class AdbcConnection:
         return self._cursor
 
     def close(self):
+        for cursor in self._open_search_cursors:
+            cursor.close()
+
+        self._open_search_cursors.clear()
         self._cursor.close()
         self._adbc_conn.close()
 
@@ -169,14 +173,12 @@ class AdbcConnection:
         )
 
         cursor = self._adbc_conn.cursor()
+        self._open_search_cursors.add(cursor)
 
         try:
             cursor.execute(sql)
-            reader = cursor.fetch_record_batch()
+            return cursor.fetch_record_batch()
         except Exception:
+            self._open_search_cursors.discard(cursor)
             cursor.close()
             raise
-
-        # Keep the cursor alive for as long as the reader is alive
-        weakref.finalize(reader, cursor.close)
-        return reader

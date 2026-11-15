@@ -1224,8 +1224,8 @@ class TableInTransaction(ITable):
 
         Requires an ADBC driver (see ``Session`` / ``connect`` ``adbc_driver_path``).
         The transaction's ADBC connection is opened lazily on first use. Each search
-        runs on its own ADBC statement; the returned ``RecordBatchReader`` keeps that
-        statement alive for as long as the reader is referenced.
+        runs on its own ADBC statement, which stays open until the transaction's
+        vector-search ADBC connection is closed.
 
         Parameters
         ----------
