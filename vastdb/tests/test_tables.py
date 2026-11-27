@@ -327,6 +327,34 @@ def test_select_with_limit(session, clean_bucket_name):
         assert len(actual) == limit_rows
 
 
+def test_select_with_zero_limit(session, clean_bucket_name):
+    columns = pa.schema([
+        ('a', pa.int32())
+    ])
+    expected = pa.table(schema=columns, data=[list(range(100))])
+
+    with prepare_data(session, clean_bucket_name, 's', 't', expected) as t:
+        actual = t.select(limit_rows=0).read_all()
+        assert actual.num_rows == 0
+        assert actual.schema == columns
+
+
+def test_select_internal_row_id_does_not_modify_columns(session, clean_bucket_name):
+    columns = pa.schema([
+        ('a', pa.int32()),
+        ('b', pa.int32()),
+    ])
+    expected = pa.table(schema=columns, data=[list(range(10)), list(range(10))])
+
+    with prepare_data(session, clean_bucket_name, 's', 't', expected) as t:
+        requested = ['a']
+        first = t.select(columns=requested, internal_row_id=True).read_all()
+        assert requested == ['a']
+        second = t.select(columns=requested, internal_row_id=True).read_all()
+        assert requested == ['a']
+        assert first.schema.names == second.schema.names == ['a', INTERNAL_ROW_ID]
+
+
 def test_select_with_priority(session, clean_bucket_name):
     columns = pa.schema([
         ('a', pa.int32())
