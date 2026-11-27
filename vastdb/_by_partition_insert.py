@@ -144,11 +144,14 @@ class ByPartitionBufferedInserter:
             flush_config.capacity_in_bytes, flush_config.target_num_rows_per_partition, table_metadata.partitioning.spec)
         self._metadata = table_metadata
         self._executor = executor
-        self._timer = None if flush_config.timeout is None else util.Timer(self._flush_all, flush_config.timeout)
         self._results: list[Future] = []
         self._is_finished = False
         self._in_flight_condition_variable = threading.Condition()
         self._in_flight_bytes = 0
+        # First error seen by any flush (including the timer thread). It is
+        # re-raised to the caller from add_batch() / finish().
+        self._error: BaseException | None = None
+        self._timer = None if flush_config.timeout is None else util.Timer(self._flush_all_on_timeout, flush_config.timeout)
 
     def _flush_batch(self, table: pa.Table) -> None:
         with self._in_flight_condition_variable:
@@ -166,16 +169,43 @@ class ByPartitionBufferedInserter:
                 table,
             ))
 
+    def _record_error(self, error: BaseException) -> None:
+        with self._in_flight_condition_variable:
+            if self._error is None:
+                self._error = error
+
+    def _raise_if_failed(self) -> None:
+        with self._in_flight_condition_variable:
+            error = self._error
+        if error is not None:
+            raise error
+
     def _removed_completed_jobs_and_check_for_error(self) -> None:
         done, not_done = wait(self._results, timeout=0)
         self._results = list(not_done)
 
+        # Keep the error before raising: the finished futures are already
+        # dropped from self._results, so if this runs on the timer thread the
+        # exception would otherwise be lost and finish() would succeed.
         for future in done:
-            future.result()
+            error = future.exception()
+            if error is not None and self._error is None:
+                self._error = error
+
+        if self._error is not None:
+            raise self._error
 
     def _flush_all(self) -> None:
         for table in self._by_partition_buffer.flush_all():
             self._flush_batch(table)
+
+    def _flush_all_on_timeout(self) -> None:
+        # Runs on the util.Timer thread. An exception here would kill the
+        # timer thread and never reach the caller, so record it instead.
+        try:
+            self._flush_all()
+        except Exception as e:
+            self._record_error(e)
 
     def _assert_not_finished(self) -> None:
         if self._is_finished:
@@ -183,6 +213,7 @@ class ByPartitionBufferedInserter:
 
     def add_batch(self, batch: pa.RecordBatch) -> None:
         self._assert_not_finished()
+        self._raise_if_failed()
 
         for table in self._by_partition_buffer.add(batch):
             if self._timer is not None:
@@ -208,6 +239,8 @@ class ByPartitionBufferedInserter:
 
             for future in results:
                 future.result()
+
+        self._raise_if_failed()
 
     def __enter__(self) -> "ByPartitionBufferedInserter":
         self._assert_not_finished()

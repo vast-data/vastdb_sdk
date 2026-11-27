@@ -3,6 +3,7 @@ from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 
 import pyarrow as pa
 import pytest
@@ -807,3 +808,71 @@ def test_partitioned_insert_explicit_tx(session: Session, clean_bucket_name: str
         _assert_data_is_complete(created_batches, [result])
 
     executor.shutdown(wait=True)
+
+
+class _SimulatedInsertError(Exception):
+    pass
+
+
+def _local_inserter(executor: ThreadPoolExecutor, timeout: timedelta) -> ByPartitionBufferedInserter:
+    """Buffered inserter whose server calls are replaced, so no cluster is needed."""
+    partition_spec = PartitionSpec(partition_keys=[PartitionKey(column="a", transform=IdentityTransform())])
+    table_metadata = SimpleNamespace(partitioning=SimpleNamespace(spec=partition_spec))
+    config = BufferedInsertConfig(target_num_rows_per_partition=1_000_000, timeout=timeout)
+    return ByPartitionBufferedInserter(
+        transaction_creator=lambda: None,  # type: ignore[arg-type,return-value]
+        api=None,  # type: ignore[arg-type]
+        table_metadata=table_metadata,  # type: ignore[arg-type]
+        executor=executor,
+        flush_config=config,
+    )
+
+
+def test_buffered_insert_reports_error_seen_by_timer_flush():
+    """A failed insert must reach the caller even if the timer thread sees it first."""
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        inserter = _local_inserter(executor, timeout=timedelta(milliseconds=50))
+        sent: list[int] = []
+
+        def failing_send(table: pa.Table) -> None:
+            sent.append(table.num_rows)
+            if len(sent) == 1:
+                raise _SimulatedInsertError("insert rejected")
+
+        inserter._send_batch_to_server = failing_send  # type: ignore[method-assign]
+
+        # 1st timer flush submits a batch that fails in the executor.
+        inserter._by_partition_buffer.add(_create_batch(1, 3))
+        deadline = time.monotonic() + 5
+        while not sent and time.monotonic() < deadline:
+            time.sleep(0.01)
+        time.sleep(0.1)
+
+        # 2nd timer flush is the first to look at the failed future.
+        inserter._by_partition_buffer.add(_create_batch(1, 3, first_id=3))
+        deadline = time.monotonic() + 5
+        while len(sent) < 2 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        time.sleep(0.1)
+
+        with pytest.raises(_SimulatedInsertError):
+            inserter.add_batch(_create_batch(1, 3, first_id=6))
+        with pytest.raises(_SimulatedInsertError):
+            inserter.finish()
+
+
+def test_buffered_insert_timer_survives_flush_error():
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        inserter = _local_inserter(executor, timeout=timedelta(milliseconds=50))
+
+        def failing_flush_all():
+            raise _SimulatedInsertError("flush failed")
+
+        inserter._flush_all = failing_flush_all  # type: ignore[method-assign]
+        time.sleep(0.2)
+
+        assert inserter._timer is not None
+        assert inserter._timer._thread.is_alive()
+        with pytest.raises(_SimulatedInsertError):
+            inserter.add_batch(_create_batch(1, 3))
+        inserter._timer.stop()
